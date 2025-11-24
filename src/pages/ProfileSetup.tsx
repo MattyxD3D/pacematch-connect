@@ -36,48 +36,67 @@ const ProfileSetup = () => {
   const genderOptions = ["Male", "Female", "Other", "Prefer not to say"];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-success/5 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10 flex flex-col items-center justify-center p-6">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-md space-y-6"
+        className="w-full max-w-md space-y-8"
       >
         {/* Header */}
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-foreground">Complete Your Profile</h1>
-          <p className="text-sm text-muted-foreground">Step 1 of 1</p>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="text-center space-y-2"
+        >
+          <h1 className="text-4xl font-bold text-foreground">Complete Your Profile</h1>
+          <p className="text-base text-muted-foreground">Let's personalize your experience</p>
+        </motion.div>
 
         {/* Profile Photo */}
         <motion.div
-          initial={{ scale: 0.8 }}
-          animate={{ scale: 1 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
+          initial={{ scale: 0.5, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ 
+            duration: 0.5, 
+            delay: 0.2,
+            type: "spring",
+            stiffness: 200 
+          }}
           className="flex justify-center"
         >
-          <Avatar
-            sx={{ width: 96, height: 96 }}
-            alt="Profile"
-            src="https://via.placeholder.com/96"
-          />
+          <div className="relative">
+            <Avatar
+              sx={{ width: 120, height: 120, border: "4px solid", borderColor: "hsl(var(--primary))" }}
+              alt="Profile"
+              src="https://via.placeholder.com/120"
+            />
+            <motion.div
+              animate={{ scale: [1, 1.2, 1] }}
+              transition={{ duration: 2, repeat: Infinity }}
+              className="absolute -bottom-2 -right-2 w-10 h-10 bg-success rounded-full flex items-center justify-center shadow-elevation-2"
+            >
+              <span className="text-success-foreground text-lg">✓</span>
+            </motion.div>
+          </div>
         </motion.div>
 
         {/* Username Input */}
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.3, delay: 0.2 }}
-          className="space-y-2"
+          transition={{ duration: 0.4, delay: 0.3 }}
+          className="space-y-3"
         >
-          <Label htmlFor="username" className="text-base">Username</Label>
+          <Label htmlFor="username" className="text-lg font-semibold">Username</Label>
           <Input
             id="username"
             type="text"
             placeholder="Enter your username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="h-12 text-base"
+            className="h-14 text-base border-2 focus:border-primary transition-all"
           />
         </motion.div>
 
@@ -85,34 +104,59 @@ const ProfileSetup = () => {
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-          className="space-y-3"
+          transition={{ duration: 0.4, delay: 0.4 }}
+          className="space-y-4"
         >
-          <Label className="text-base">Preferred Activity</Label>
-          <div className="grid grid-cols-3 gap-3">
-            {activities.map((act) => {
+          <Label className="text-lg font-semibold">Preferred Activity</Label>
+          <div className="grid grid-cols-3 gap-4">
+            {activities.map((act, idx) => {
               const Icon = act.icon;
+              const isSelected = activity === act.id;
               return (
-                <button
+                <motion.button
                   key={act.id}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3, delay: 0.5 + idx * 0.1 }}
+                  whileTap={{ scale: 0.95 }}
                   onClick={() => setActivity(act.id as typeof activity)}
                   className={`
-                    flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-300
-                    ${
-                      activity === act.id
-                        ? `border-${act.color} bg-${act.color}/10`
-                        : "border-border bg-card hover:bg-secondary"
+                    flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all duration-300 relative overflow-hidden
+                    ${isSelected 
+                      ? act.color === 'success' 
+                        ? 'border-success bg-success/10 shadow-elevation-2' 
+                        : act.color === 'primary'
+                        ? 'border-primary bg-primary/10 shadow-elevation-2'
+                        : 'border-warning bg-warning/10 shadow-elevation-2'
+                      : "border-border bg-card hover:bg-secondary hover:border-muted"
                     }
                   `}
                 >
+                  {isSelected && (
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="absolute top-2 right-2 w-5 h-5 bg-success rounded-full flex items-center justify-center"
+                    >
+                      <span className="text-success-foreground text-xs">✓</span>
+                    </motion.div>
+                  )}
                   <Icon
-                    className={activity === act.id ? `text-${act.color}` : "text-muted-foreground"}
-                    style={{ fontSize: 32 }}
+                    className={
+                      isSelected 
+                        ? act.color === 'success'
+                          ? 'text-success'
+                          : act.color === 'primary'
+                          ? 'text-primary'
+                          : 'text-warning'
+                        : 'text-muted-foreground'
+                    }
+                    style={{ fontSize: 36 }}
                   />
-                  <span className={`text-xs mt-2 font-medium ${activity === act.id ? `text-${act.color}` : "text-muted-foreground"}`}>
+                  <span className={`text-sm mt-2 font-semibold ${isSelected ? 'text-foreground' : "text-muted-foreground"}`}>
                     {act.label}
                   </span>
-                </button>
+                </motion.button>
               );
             })}
           </div>
@@ -122,26 +166,30 @@ const ProfileSetup = () => {
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.3, delay: 0.4 }}
-          className="space-y-3"
+          transition={{ duration: 0.4, delay: 0.6 }}
+          className="space-y-4"
         >
-          <Label className="text-base">Gender (Optional)</Label>
+          <Label className="text-lg font-semibold">Gender <span className="text-muted-foreground text-sm font-normal">(Optional)</span></Label>
           <div className="grid grid-cols-2 gap-3">
-            {genderOptions.map((option) => (
-              <button
+            {genderOptions.map((option, idx) => (
+              <motion.button
                 key={option}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.3, delay: 0.7 + idx * 0.05 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={() => setGender(option)}
                 className={`
-                  p-3 rounded-lg border-2 text-sm font-medium transition-all duration-300
+                  p-4 rounded-xl border-2 text-sm font-semibold transition-all duration-300
                   ${
                     gender === option
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border bg-card text-foreground hover:bg-secondary"
+                      ? "border-primary bg-primary/10 text-primary shadow-elevation-1"
+                      : "border-border bg-card text-foreground hover:bg-secondary hover:border-muted"
                   }
                 `}
               >
                 {option}
-              </button>
+              </motion.button>
             ))}
           </div>
         </motion.div>
@@ -150,14 +198,21 @@ const ProfileSetup = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.5 }}
+          transition={{ duration: 0.4, delay: 0.8 }}
         >
-          <Button
-            onClick={handleComplete}
-            className="w-full h-14 text-base font-medium bg-primary text-primary-foreground hover:bg-primary/90 shadow-elevation-2 hover:shadow-elevation-3 transition-all duration-300"
+          <motion.div
+            whileTap={{ scale: 0.98 }}
+            animate={username ? { scale: [1, 1.02, 1] } : {}}
+            transition={username ? { duration: 1, repeat: Infinity, repeatDelay: 2 } : {}}
           >
-            Complete Setup
-          </Button>
+            <Button
+              onClick={handleComplete}
+              disabled={!username.trim()}
+              className="w-full h-16 text-lg font-bold bg-gradient-to-r from-primary to-primary/90 text-primary-foreground hover:from-primary/90 hover:to-primary shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Complete Setup
+            </Button>
+          </motion.div>
         </motion.div>
       </motion.div>
     </div>

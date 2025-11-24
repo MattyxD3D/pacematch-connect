@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
@@ -17,8 +18,10 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import UpcomingIcon from "@mui/icons-material/Upcoming";
 import HistoryIcon from "@mui/icons-material/History";
 import ExploreIcon from "@mui/icons-material/Explore";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import { EventDetailModal } from "@/components/EventDetailModal";
 import { toast } from "sonner";
+import { format, isSameDay, parseISO } from "date-fns";
 
 type EventType = "running" | "cycling" | "walking";
 
@@ -49,6 +52,7 @@ const MyEvents = () => {
   const [activeTab, setActiveTab] = useState("upcoming");
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
 
   // Mock joined events data
   const joinedEvents: Event[] = [
@@ -176,6 +180,26 @@ const MyEvents = () => {
     }
   };
 
+  const getActivityColor = (type: EventType) => {
+    switch (type) {
+      case "running":
+        return "bg-success";
+      case "cycling":
+        return "bg-primary";
+      case "walking":
+        return "bg-warning";
+    }
+  };
+
+  const getEventsForDate = (date: Date) => {
+    return upcomingEvents.filter((event) => {
+      const eventDate = parseISO(event.date);
+      return isSameDay(eventDate, date);
+    });
+  };
+
+  const eventsForSelectedDate = selectedDate ? getEventsForDate(selectedDate) : [];
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10">
       {/* Header */}
@@ -214,20 +238,27 @@ const MyEvents = () => {
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 h-auto mb-6">
+          <TabsList className="grid w-full grid-cols-3 h-auto mb-6">
             <TabsTrigger
               value="upcoming"
               className="py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
             >
               <UpcomingIcon className="mr-2" style={{ fontSize: 20 }} />
-              Upcoming ({upcomingEvents.length})
+              <span className="hidden sm:inline">Upcoming</span> ({upcomingEvents.length})
+            </TabsTrigger>
+            <TabsTrigger
+              value="calendar"
+              className="py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+            >
+              <CalendarMonthIcon className="mr-2" style={{ fontSize: 20 }} />
+              <span className="hidden sm:inline">Calendar</span>
             </TabsTrigger>
             <TabsTrigger
               value="past"
               className="py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
             >
               <HistoryIcon className="mr-2" style={{ fontSize: 20 }} />
-              Past ({pastEvents.length})
+              <span className="hidden sm:inline">Past</span> ({pastEvents.length})
             </TabsTrigger>
           </TabsList>
 
@@ -269,6 +300,120 @@ const MyEvents = () => {
                 ))
               )}
             </AnimatePresence>
+          </TabsContent>
+
+          {/* Calendar View */}
+          <TabsContent value="calendar" className="space-y-4">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="grid lg:grid-cols-[1fr_400px] gap-6"
+            >
+              {/* Calendar */}
+              <Card className="p-6 shadow-elevation-2">
+                <div className="mb-6">
+                  <h3 className="text-xl font-bold mb-2">Event Calendar</h3>
+                  <div className="flex gap-4 text-sm">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-success" />
+                      <span className="text-muted-foreground">Running</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-primary" />
+                      <span className="text-muted-foreground">Cycling</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-warning" />
+                      <span className="text-muted-foreground">Walking</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="relative">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={setSelectedDate}
+                    className="rounded-md border pointer-events-auto"
+                    modifiers={{
+                      hasEvents: upcomingEvents.map((event) => parseISO(event.date)),
+                    }}
+                    modifiersClassNames={{
+                      hasEvents: "font-bold relative",
+                    }}
+                  />
+                  <style>{`
+                    .rdp-day_button:has(.event-dots) {
+                      position: relative;
+                    }
+                  `}</style>
+                  {upcomingEvents.map((event) => {
+                    const eventDate = parseISO(event.date);
+                    return (
+                      <div
+                        key={event.id}
+                        className="absolute pointer-events-none"
+                        style={{
+                          display: 'none'
+                        }}
+                        data-event-date={format(eventDate, 'yyyy-MM-dd')}
+                        data-event-type={event.type}
+                      />
+                    );
+                  })}
+                </div>
+              </Card>
+
+              {/* Selected Date Events */}
+              <div className="space-y-4">
+                <Card className="p-4 shadow-elevation-2 sticky top-24">
+                  <h3 className="font-bold text-lg mb-4">
+                    {selectedDate ? format(selectedDate, "MMMM d, yyyy") : "Select a date"}
+                  </h3>
+                  {eventsForSelectedDate.length === 0 ? (
+                    <div className="text-center py-8">
+                      <CalendarMonthIcon
+                        style={{ fontSize: 48 }}
+                        className="text-muted-foreground/30 mx-auto mb-3"
+                      />
+                      <p className="text-muted-foreground text-sm">
+                        No events on this date
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                      {eventsForSelectedDate.map((event) => (
+                        <motion.div
+                          key={event.id}
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          onClick={() => handleEventClick(event)}
+                          className="cursor-pointer"
+                        >
+                          <Card className="p-4 hover:shadow-elevation-2 transition-all duration-200 border-2 border-border/50 hover:border-primary/30">
+                            <div className="flex items-start gap-3">
+                              {getActivityIcon(event.type)}
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-semibold text-sm mb-1 truncate">
+                                  {event.title}
+                                </h4>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                                  <EventIcon style={{ fontSize: 14 }} />
+                                  <span>{event.time}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <LocationOnIcon style={{ fontSize: 14 }} />
+                                  <span className="truncate">{event.location}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </Card>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              </div>
+            </motion.div>
           </TabsContent>
 
           {/* Past Events */}

@@ -6,39 +6,10 @@ import { toast } from "sonner";
 export const NotificationTestButton = () => {
   const { addNotification } = useNotificationContext();
 
-  const mockUsers = [
-    { id: 1, name: "Sarah Johnson", avatar: "https://i.pravatar.cc/150?img=1" },
-    { id: 2, name: "Mike Chen", avatar: "https://i.pravatar.cc/150?img=2" },
-    { id: 3, name: "Emma Davis", avatar: "https://i.pravatar.cc/150?img=3" },
-    { id: 4, name: "James Wilson", avatar: "https://i.pravatar.cc/150?img=4" },
-  ];
-
-  const testMessages = [
-    "Hi! Want to workout together?",
-    "Great to see another runner nearby!",
-    "Would you like to join me for a run?",
-    "That sounds great! What time works?",
-  ];
-
+  // REMOVED: Mock users - notifications will come from real Firebase events
+  // This button can be removed in production or kept for development testing
   const sendTestNotification = () => {
-    const randomUser = mockUsers[Math.floor(Math.random() * mockUsers.length)];
-    const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
-    const types: ("message" | "friend_request" | "friend_accepted")[] = [
-      "message",
-      "friend_request", 
-      "friend_accepted"
-    ];
-    const randomType = types[Math.floor(Math.random() * types.length)];
-
-    addNotification({
-      type: randomType,
-      userId: randomUser.id,
-      userName: randomUser.name,
-      userAvatar: randomUser.avatar,
-      message: randomType === "message" ? randomMessage : undefined,
-    });
-
-    toast.success("Test notification sent!");
+    toast.info("Real notifications will appear automatically from Firebase events");
   };
 
   return (

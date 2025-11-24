@@ -1,4 +1,6 @@
 import { createContext, useContext, ReactNode, useState, useEffect } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { listenToUserWorkouts } from "@/services/workoutService";
 
 export type Activity = "running" | "cycling" | "walking";
 
@@ -22,6 +24,14 @@ export interface WorkoutHistory {
   location?: string; // Location where workout happened
 }
 
+export type FitnessLevel = "beginner" | "intermediate" | "pro";
+export type RadiusPreference = "nearby" | "normal" | "wide";
+
+export interface VisibilitySettings {
+  visibleToAllLevels: boolean;
+  allowedLevels: FitnessLevel[];
+}
+
 interface UserProfile {
   username: string;
   activities: Activity[];
@@ -33,6 +43,11 @@ interface UserProfile {
   friends?: number[]; // Array of friend user IDs
   friendRequests?: { from: number; date: Date }[]; // Pending incoming requests
   sentRequests?: number[]; // Pending outgoing requests
+  // Matching preferences
+  fitnessLevel?: FitnessLevel;
+  pace?: number; // min/km for running/walking, km/h for cycling
+  visibility?: VisibilitySettings;
+  radiusPreference?: RadiusPreference;
 }
 
 interface UserContextType {
@@ -49,6 +64,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [userProfile, setUserProfileState] = useState<UserProfile | null>(null);
+  const { user } = useAuth();
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -69,6 +85,33 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       }
     }
   }, []);
+
+  // Load workouts from Firebase when user is authenticated
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    console.log("📥 Loading workouts from Firebase for user:", user.uid);
+    
+    const unsubscribe = listenToUserWorkouts(user.uid, (workouts) => {
+      console.log("✅ Loaded workouts from Firebase:", workouts.length);
+      
+      // Update user profile with workouts from Firebase
+      setUserProfileState((prev) => {
+        if (!prev) return prev;
+        
+        // Merge Firebase workouts with existing profile
+        // Firebase workouts take precedence
+        return {
+          ...prev,
+          workoutHistory: workouts,
+        };
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user?.uid]);
 
   const setUserProfile = (profile: UserProfile) => {
     setUserProfileState(profile);

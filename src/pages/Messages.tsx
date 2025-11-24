@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { useNotificationContext } from "@/contexts/NotificationContext";
 import { useUser } from "@/contexts/UserContext";
+import { useAuth } from "@/hooks/useAuth";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import SearchIcon from "@mui/icons-material/Search";
 import CheckIcon from "@mui/icons-material/Check";
@@ -13,7 +13,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import BottomNavigation from "@/components/BottomNavigation";
-import { mockConversations, MockConversation } from "@/lib/mockData";
+import { getUserConversations } from "@/services/messageService";
+import { get, ref } from "firebase/database";
+import { database } from "@/services/firebase";
 import { 
   acceptMessageRequest, 
   declineMessageRequest, 
@@ -21,44 +23,99 @@ import {
   isUserBlocked,
 } from "@/lib/messageStorage";
 import { toast } from "sonner";
+import { useNotificationContext } from "@/contexts/NotificationContext";
+
+interface Conversation {
+  conversationId: string;
+  otherUserId: string;
+  lastMessage: string;
+  lastMessageTime: number;
+  unreadCount: number;
+  userName?: string;
+  avatar?: string;
+}
 
 const Messages = () => {
   const navigate = useNavigate();
   const { unreadMessageCount } = useNotificationContext();
   const { userProfile } = useUser();
+  const { user: currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<"chats" | "requests">("chats");
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Fetch conversations from Firebase
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setLoading(false);
+      return;
+    }
+
+    const loadConversations = async () => {
+      try {
+        const firebaseConversations = await getUserConversations(currentUser.uid);
+        
+        // Fetch user data for each conversation
+        const conversationsWithUserData = await Promise.all(
+          firebaseConversations.map(async (conv) => {
+            try {
+              const userRef = ref(database, `users/${conv.otherUserId}`);
+              const userSnapshot = await get(userRef);
+              const userData = userSnapshot.exists() ? userSnapshot.val() : null;
+              
+              return {
+                ...conv,
+                userName: userData?.name || "Unknown User",
+                avatar: userData?.photoURL || "",
+              };
+            } catch (error) {
+              console.error(`Error fetching user ${conv.otherUserId}:`, error);
+              return {
+                ...conv,
+                userName: "Unknown User",
+                avatar: "",
+              };
+            }
+          })
+        );
+        
+        setConversations(conversationsWithUserData);
+      } catch (error) {
+        console.error("Error loading conversations:", error);
+        toast.error("Failed to load conversations");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadConversations();
+  }, [currentUser?.uid]);
   
   // Filter conversations based on friend status and blocked users
   const friends = userProfile?.friends || [];
-  const blockedUsers = mockConversations
-    .filter(conv => isUserBlocked(conv.userId))
-    .map(conv => conv.userId);
+  const blockedUsers = conversations
+    .filter(conv => isUserBlocked(parseInt(conv.otherUserId)))
+    .map(conv => conv.otherUserId);
   
   // Split conversations into chats and requests
-  const allConversations = mockConversations
-    .filter(conv => !blockedUsers.includes(conv.userId)); // Hide blocked users
+  // For now, all conversations go to chats (we can add request logic later)
+  const allConversations = conversations
+    .filter(conv => !blockedUsers.includes(conv.otherUserId)); // Hide blocked users
   
-  const chatConversations = allConversations.filter(conv => {
-    // Show in Chats if: friends OR message was accepted
-    return friends.includes(conv.userId) || conv.isRequest === false;
-  });
-  
-  const requestConversations = allConversations.filter(conv => {
-    // Show in Requests if: not friends AND marked as request
-    return !friends.includes(conv.userId) && conv.isRequest === true;
-  });
+  const chatConversations = allConversations;
+  const requestConversations: Conversation[] = []; // TODO: Implement message requests
 
-  const handleAcceptRequest = (conversation: MockConversation, e: React.MouseEvent) => {
+  const handleAcceptRequest = (conversation: Conversation, e: React.MouseEvent) => {
     e.stopPropagation();
-    acceptMessageRequest(conversation.userId);
+    acceptMessageRequest(parseInt(conversation.otherUserId));
     toast.success(`Accepted message from ${conversation.userName}`);
     // In real app, this would trigger a re-render
   };
 
-  const handleDeclineRequest = (conversation: MockConversation, e: React.MouseEvent) => {
+  const handleDeclineRequest = (conversation: Conversation, e: React.MouseEvent) => {
     e.stopPropagation();
-    declineMessageRequest(conversation.userId);
-    deleteMessageRequest(conversation.userId);
+    declineMessageRequest(parseInt(conversation.otherUserId));
+    deleteMessageRequest(parseInt(conversation.otherUserId));
     toast.success(`Declined message from ${conversation.userName}`);
     // In real app, this would trigger a re-render
   };
@@ -85,13 +142,13 @@ const Messages = () => {
     return message.substring(0, maxLength) + "...";
   };
 
-  const handleConversationClick = (conversation: MockConversation) => {
+  const handleConversationClick = (conversation: Conversation) => {
     navigate("/chat", {
       state: {
         user: {
-          id: conversation.userId,
-          name: conversation.userName,
-          avatar: conversation.avatar,
+          id: conversation.otherUserId,
+          name: conversation.userName || "Unknown User",
+          avatar: conversation.avatar || "",
         },
       },
     });
@@ -100,7 +157,7 @@ const Messages = () => {
   const totalUnread = chatConversations.reduce((sum, conv) => sum + conv.unreadCount, 0);
   const requestsCount = requestConversations.length;
 
-  const renderConversationList = (conversations: MockConversation[], showActions = false) => {
+  const renderConversationList = (conversations: Conversation[], showActions = false) => {
     if (conversations.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center h-full px-6 py-12 text-center">
@@ -145,7 +202,7 @@ const Messages = () => {
                 <div className="relative flex-shrink-0">
                   <Avatar
                     src={conversation.avatar}
-                    alt={conversation.userName}
+                    alt={conversation.userName || "User"}
                     sx={{ width: 56, height: 56 }}
                   />
                   {conversation.unreadCount > 0 && (
@@ -161,10 +218,10 @@ const Messages = () => {
                     <h3 className={`font-semibold text-base truncate ${
                       conversation.unreadCount > 0 ? "text-foreground" : "text-foreground"
                     }`}>
-                      {conversation.userName}
+                      {conversation.userName || "Unknown User"}
                     </h3>
                     <span className="text-xs text-muted-foreground flex-shrink-0">
-                      {getRelativeTime(conversation.timestamp)}
+                      {getRelativeTime(conversation.lastMessageTime)}
                     </span>
                   </div>
                   <p className={`text-sm truncate ${
@@ -254,14 +311,20 @@ const Messages = () => {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <Tabs value={activeTab} className="w-full h-full">
-          <TabsContent value="chats" className="mt-0 h-full">
-            {renderConversationList(chatConversations, false)}
-          </TabsContent>
-          <TabsContent value="requests" className="mt-0 h-full">
-            {renderConversationList(requestConversations, true)}
-          </TabsContent>
-        </Tabs>
+        {loading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </div>
+        ) : (
+          <Tabs value={activeTab} className="w-full h-full">
+            <TabsContent value="chats" className="mt-0 h-full">
+              {renderConversationList(chatConversations, false)}
+            </TabsContent>
+            <TabsContent value="requests" className="mt-0 h-full">
+              {renderConversationList(requestConversations, true)}
+            </TabsContent>
+          </Tabs>
+        )}
       </div>
       
       <BottomNavigation />

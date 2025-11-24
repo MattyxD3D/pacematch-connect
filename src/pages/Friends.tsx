@@ -323,7 +323,9 @@ const Friends = () => {
                 id: user.id,
                 name: user.username,
                 distance: "2.5 km",
-                activity: user.activities[0].charAt(0).toUpperCase() + user.activities[0].slice(1),
+                activity: user.activities && user.activities.length > 0 
+                  ? user.activities[0].charAt(0).toUpperCase() + user.activities[0].slice(1)
+                  : "Running",
                 avatar: user.avatar,
                 photos: user.photos,
                 bio: user.bio,

@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { listenToEvents, Event as FirebaseEvent, joinEvent } from "@/services/eventService";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ExploreIcon from "@mui/icons-material/Explore";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
@@ -29,7 +31,7 @@ type EventType = "running" | "cycling" | "walking";
 type EventCategory = "all" | "user" | "sponsored";
 
 interface Event {
-  id: number;
+  id: string;
   title: string;
   description: string;
   type: EventType;
@@ -39,8 +41,9 @@ interface Event {
   location: string;
   distance: string;
   distanceValue: number;
-  participants: number;
+  participants: string[]; // Array of user IDs
   maxParticipants?: number;
+  hostId?: string;
   hostName?: string;
   hostAvatar?: string;
   sponsorLogo?: string;
@@ -51,108 +54,30 @@ interface Event {
 
 const Events = () => {
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [activityFilter, setActivityFilter] = useState<EventType | "all">("all");
   const [categoryFilter, setCategoryFilter] = useState<EventCategory>("all");
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock events data
-  const events: Event[] = [
-    {
-      id: 1,
-      title: "Morning Run in Central Park",
-      description: "Join us for a refreshing morning run! All levels welcome.",
-      type: "running",
-      category: "user",
-      date: "2024-03-25",
-      time: "07:00 AM",
-      location: "Central Park, NY",
-      distance: "0.5 km",
-      distanceValue: 0.5,
-      participants: 12,
-      maxParticipants: 20,
-      hostName: "Sarah Johnson",
-      hostAvatar: "https://i.pravatar.cc/150?img=1",
-      lat: 40.7829,
-      lng: -73.9654,
-      isJoined: false,
-    },
-    {
-      id: 2,
-      title: "Nike City Marathon 2024",
-      description: "Annual city marathon sponsored by Nike. Register now!",
-      type: "running",
-      category: "sponsored",
-      date: "2024-04-15",
-      time: "06:00 AM",
-      location: "City Center",
-      distance: "1.2 km",
-      distanceValue: 1.2,
-      participants: 450,
-      maxParticipants: 500,
-      sponsorLogo: "https://via.placeholder.com/100x100?text=Nike",
-      lat: 40.7580,
-      lng: -73.9855,
-      isJoined: true,
-    },
-    {
-      id: 3,
-      title: "Weekend Cycling Tour",
-      description: "Explore the city on two wheels with fellow cyclists!",
-      type: "cycling",
-      category: "user",
-      date: "2024-03-23",
-      time: "09:00 AM",
-      location: "Brooklyn Bridge",
-      distance: "2.3 km",
-      distanceValue: 2.3,
-      participants: 8,
-      maxParticipants: 15,
-      hostName: "Mike Chen",
-      hostAvatar: "https://i.pravatar.cc/150?img=2",
-      lat: 40.7061,
-      lng: -73.9969,
-      isJoined: false,
-    },
-    {
-      id: 4,
-      title: "Wellness Walking Group",
-      description: "A relaxing walk through scenic paths. Bring your friends!",
-      type: "walking",
-      category: "user",
-      date: "2024-03-22",
-      time: "05:00 PM",
-      location: "Riverside Park",
-      distance: "0.8 km",
-      distanceValue: 0.8,
-      participants: 15,
-      hostName: "Emma Davis",
-      hostAvatar: "https://i.pravatar.cc/150?img=3",
-      lat: 40.8018,
-      lng: -73.9713,
-      isJoined: false,
-    },
-    {
-      id: 5,
-      title: "Adidas Urban Challenge",
-      description: "Test your limits in this urban fitness challenge!",
-      type: "running",
-      category: "sponsored",
-      date: "2024-04-01",
-      time: "08:00 AM",
-      location: "Times Square",
-      distance: "1.5 km",
-      distanceValue: 1.5,
-      participants: 280,
-      maxParticipants: 300,
-      sponsorLogo: "https://via.placeholder.com/100x100?text=Adidas",
-      lat: 40.7580,
-      lng: -73.9855,
-      isJoined: false,
-    },
-  ];
+  // Listen to events from Firebase
+  useEffect(() => {
+    const unsubscribe = listenToEvents((firebaseEvents: FirebaseEvent[]) => {
+      // Transform Firebase events to match local Event interface
+      const transformedEvents: Event[] = firebaseEvents.map((event) => ({
+        ...event,
+        isJoined: currentUser?.uid ? event.participants.includes(currentUser.uid) : false,
+      }));
+      setEvents(transformedEvents);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.uid]);
 
   // Filter events
   const filteredEvents = events.filter((event) => {
@@ -164,11 +89,19 @@ const Events = () => {
   // Sort by distance
   const sortedEvents = [...filteredEvents].sort((a, b) => a.distanceValue - b.distanceValue);
 
-  const handleJoinEvent = (eventId: number) => {
-    const event = events.find((e) => e.id === eventId);
-    if (event) {
-      event.isJoined = !event.isJoined;
-      toast.success(event.isJoined ? `You've joined "${event.title}"!` : `You've left "${event.title}"`);
+  const handleJoinEvent = async (eventId: string) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to join events");
+      return;
+    }
+
+    try {
+      await joinEvent(eventId, currentUser.uid);
+      toast.success("You've joined the event!");
+      // The real-time listener will update the events automatically
+    } catch (error: any) {
+      console.error("Error joining event:", error);
+      toast.error(error.message || "Failed to join event");
     }
   };
 
@@ -183,7 +116,7 @@ const Events = () => {
     
     // Create a new event object
     const newEvent: Event = {
-      id: events.length + 1,
+      id: String(events.length + 1),
       title: eventData.title,
       description: eventData.description,
       type: eventData.activityType,
@@ -197,7 +130,7 @@ const Events = () => {
       location: eventData.location,
       distance: "0.0 km",
       distanceValue: 0,
-      participants: 1,
+      participants: currentUser?.uid ? [currentUser.uid] : [],
       maxParticipants: eventData.maxParticipants,
       hostName: "You",
       hostAvatar: "https://i.pravatar.cc/150?img=10",
@@ -562,7 +495,7 @@ const EventCard = ({ event, index, onJoin, onClick, getActivityIcon, getActivity
             <div className="flex items-center gap-2 text-muted-foreground">
               <PeopleIcon style={{ fontSize: 18 }} />
               <span>
-                {event.participants} {event.maxParticipants ? `/ ${event.maxParticipants}` : ""} participants
+                {event.participants.length} {event.maxParticipants ? `/ ${event.maxParticipants}` : ""} participants
               </span>
             </div>
           </div>

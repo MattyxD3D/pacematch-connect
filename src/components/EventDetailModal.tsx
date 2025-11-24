@@ -69,44 +69,11 @@ interface EventDetailModalProps {
 export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalProps) => {
   const [activeTab, setActiveTab] = useState("details");
   const [commentText, setCommentText] = useState("");
-  const [comments, setComments] = useState<Comment[]>([
-    {
-      id: 1,
-      userId: 1,
-      userName: "Sarah Johnson",
-      userAvatar: "https://i.pravatar.cc/150?img=1",
-      text: "Super excited for this event! Can't wait to meet everyone!",
-      timestamp: "2 hours ago",
-    },
-    {
-      id: 2,
-      userId: 2,
-      userName: "Mike Chen",
-      userAvatar: "https://i.pravatar.cc/150?img=2",
-      text: "Is there a recommended pace for this run?",
-      timestamp: "1 hour ago",
-    },
-    {
-      id: 3,
-      userId: 3,
-      userName: "Emma Davis",
-      userAvatar: "https://i.pravatar.cc/150?img=3",
-      text: "Looking forward to it! See you all there 🎉",
-      timestamp: "30 minutes ago",
-    },
-  ]);
+  const [comments, setComments] = useState<Comment[]>([]);
 
-  // Mock participants data
-  const participants: Participant[] = [
-    { id: 1, name: "Sarah Johnson", avatar: "https://i.pravatar.cc/150?img=1", joinedAt: "3 days ago" },
-    { id: 2, name: "Mike Chen", avatar: "https://i.pravatar.cc/150?img=2", joinedAt: "2 days ago" },
-    { id: 3, name: "Emma Davis", avatar: "https://i.pravatar.cc/150?img=3", joinedAt: "2 days ago" },
-    { id: 4, name: "James Wilson", avatar: "https://i.pravatar.cc/150?img=4", joinedAt: "1 day ago" },
-    { id: 5, name: "Lisa Anderson", avatar: "https://i.pravatar.cc/150?img=5", joinedAt: "1 day ago" },
-    { id: 6, name: "Tom Martinez", avatar: "https://i.pravatar.cc/150?img=6", joinedAt: "12 hours ago" },
-    { id: 7, name: "Rachel Green", avatar: "https://i.pravatar.cc/150?img=7", joinedAt: "8 hours ago" },
-    { id: 8, name: "David Kim", avatar: "https://i.pravatar.cc/150?img=8", joinedAt: "5 hours ago" },
-  ];
+  // Participants will be fetched from Firebase event data
+  // Use event.participants array to fetch user data
+  const participants: Participant[] = [];
 
   if (!event) return null;
 

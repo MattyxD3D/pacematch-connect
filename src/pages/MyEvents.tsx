@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { getUserEvents, Event as FirebaseEvent, leaveEvent } from "@/services/eventService";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +28,7 @@ import { format, isSameDay, parseISO } from "date-fns";
 type EventType = "running" | "cycling" | "walking";
 
 interface Event {
-  id: number;
+  id: string;
   title: string;
   description: string;
   type: EventType;
@@ -36,8 +38,9 @@ interface Event {
   location: string;
   distance: string;
   distanceValue: number;
-  participants: number;
+  participants: string[]; // Array of user IDs
   maxParticipants?: number;
+  hostId?: string;
   hostName?: string;
   hostAvatar?: string;
   sponsorLogo?: string;
@@ -49,111 +52,49 @@ interface Event {
 
 const MyEvents = () => {
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState("upcoming");
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [joinedEvents, setJoinedEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock joined events data
-  const joinedEvents: Event[] = [
-    {
-      id: 2,
-      title: "Nike City Marathon 2024",
-      description: "Annual city marathon sponsored by Nike. Register now!",
-      type: "running",
-      category: "sponsored",
-      date: "2024-04-15",
-      time: "06:00 AM",
-      location: "City Center",
-      distance: "1.2 km",
-      distanceValue: 1.2,
-      participants: 450,
-      maxParticipants: 500,
-      sponsorLogo: "https://via.placeholder.com/100x100?text=Nike",
-      lat: 40.7580,
-      lng: -73.9855,
-      isJoined: true,
-      isPast: false,
-    },
-    {
-      id: 1,
-      title: "Morning Run in Central Park",
-      description: "Join us for a refreshing morning run! All levels welcome.",
-      type: "running",
-      category: "user",
-      date: "2024-03-25",
-      time: "07:00 AM",
-      location: "Central Park, NY",
-      distance: "0.5 km",
-      distanceValue: 0.5,
-      participants: 12,
-      maxParticipants: 20,
-      hostName: "Sarah Johnson",
-      hostAvatar: "https://i.pravatar.cc/150?img=1",
-      lat: 40.7829,
-      lng: -73.9654,
-      isJoined: true,
-      isPast: false,
-    },
-    {
-      id: 7,
-      title: "Weekend Cycling Tour",
-      description: "Explore the city on two wheels with fellow cyclists!",
-      type: "cycling",
-      category: "user",
-      date: "2024-03-16",
-      time: "09:00 AM",
-      location: "Brooklyn Bridge",
-      distance: "2.3 km",
-      distanceValue: 2.3,
-      participants: 15,
-      maxParticipants: 15,
-      hostName: "Mike Chen",
-      hostAvatar: "https://i.pravatar.cc/150?img=2",
-      lat: 40.7061,
-      lng: -73.9969,
-      isJoined: true,
-      isPast: true,
-    },
-    {
-      id: 8,
-      title: "Sunrise Walking Group",
-      description: "Start your day with a peaceful walk and great company.",
-      type: "walking",
-      category: "user",
-      date: "2024-03-10",
-      time: "06:00 AM",
-      location: "Riverside Park",
-      distance: "0.8 km",
-      distanceValue: 0.8,
-      participants: 10,
-      hostName: "Emma Davis",
-      hostAvatar: "https://i.pravatar.cc/150?img=3",
-      lat: 40.8018,
-      lng: -73.9713,
-      isJoined: true,
-      isPast: true,
-    },
-    {
-      id: 9,
-      title: "Adidas Winter Challenge 2024",
-      description: "Complete winter fitness challenge with amazing prizes!",
-      type: "running",
-      category: "sponsored",
-      date: "2024-03-05",
-      time: "08:00 AM",
-      location: "Times Square",
-      distance: "1.5 km",
-      distanceValue: 1.5,
-      participants: 300,
-      maxParticipants: 300,
-      sponsorLogo: "https://via.placeholder.com/100x100?text=Adidas",
-      lat: 40.7580,
-      lng: -73.9855,
-      isJoined: true,
-      isPast: true,
-    },
-  ];
+  // Fetch user events from Firebase
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setLoading(false);
+      return;
+    }
+
+    const loadUserEvents = async () => {
+      try {
+        const firebaseEvents = await getUserEvents(currentUser.uid);
+        
+        // Transform and determine if events are past
+        const transformedEvents: Event[] = firebaseEvents.map((event) => {
+          const eventDate = new Date(event.date);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          eventDate.setHours(0, 0, 0, 0);
+          
+          return {
+            ...event,
+            isJoined: true, // All events from getUserEvents are joined
+            isPast: eventDate < today,
+          };
+        });
+        
+        setJoinedEvents(transformedEvents);
+      } catch (error) {
+        console.error("Error loading user events:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUserEvents();
+  }, [currentUser?.uid]);
 
   // Filter events by status
   const upcomingEvents = joinedEvents.filter((event) => !event.isPast);
@@ -164,9 +105,21 @@ const MyEvents = () => {
     setShowEventDetail(true);
   };
 
-  const handleLeaveEvent = (eventId: number) => {
-    toast.success("You've left the event");
-    // In real app, update backend and refresh data
+  const handleLeaveEvent = async (eventId: string) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to leave events");
+      return;
+    }
+
+    try {
+      await leaveEvent(eventId, currentUser.uid);
+      toast.success("You've left the event");
+      // Remove from local state
+      setJoinedEvents(prev => prev.filter(e => e.id !== eventId));
+    } catch (error: any) {
+      console.error("Error leaving event:", error);
+      toast.error(error.message || "Failed to leave event");
+    }
   };
 
   const getActivityIcon = (type: EventType) => {
@@ -545,7 +498,7 @@ const EventCard = ({
             <div className="flex items-center gap-2 text-muted-foreground">
               <PeopleIcon style={{ fontSize: 18 }} />
               <span>
-                {event.participants}
+                {event.participants.length}
                 {event.maxParticipants ? ` / ${event.maxParticipants}` : ""} joined
               </span>
             </div>

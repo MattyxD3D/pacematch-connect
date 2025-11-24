@@ -1,0 +1,283 @@
+// Matching service for PACE-MATCH v1 algorithm
+import { filterUsersByDistance } from "@/utils/distance";
+import { calculateDistance } from "@/utils/distance";
+
+export type Activity = "running" | "cycling" | "walking";
+export type FitnessLevel = "beginner" | "intermediate" | "pro";
+export type RadiusPreference = "nearby" | "normal" | "wide";
+
+export interface VisibilitySettings {
+  visibleToAllLevels: boolean;
+  allowedLevels: FitnessLevel[];
+}
+
+export interface MatchingUser {
+  uid: string;
+  location: { lat: number; lng: number };
+  activity: Activity;
+  fitnessLevel: FitnessLevel;
+  pace: number; // min/km for running/walking, km/h for cycling
+  visibility: VisibilitySettings;
+  radiusPreference?: RadiusPreference;
+  [key: string]: any; // Allow other user properties
+}
+
+export interface MatchResult {
+  user: MatchingUser;
+  score: number;
+  distance: number; // in meters
+}
+
+// Base radius in meters
+const BASE_RADIUS: Record<Activity, number> = {
+  walk: 400,
+  running: 1000,
+  cycling: 5000,
+  walking: 400
+};
+
+const MIN_RADIUS: Record<Activity, number> = {
+  walk: 200,
+  running: 500,
+  cycling: 3000,
+  walking: 200
+};
+
+const MAX_RADIUS: Record<Activity, number> = {
+  walk: 800,
+  running: 2000,
+  cycling: 10000,
+  walking: 800
+};
+
+/**
+ * Compute dynamic radius based on activity, density, and user preference
+ */
+export function computeRadius(
+  user: MatchingUser,
+  nearbyCount: number
+): number {
+  // Normalize activity name (walking -> walk)
+  const activityKey = user.activity === "walking" ? "walk" : user.activity;
+  let base = BASE_RADIUS[activityKey] || BASE_RADIUS.running;
+
+  // Density factor
+  let densityFactor =
+    nearbyCount > 20 ? 0.5 :
+    nearbyCount === 0 ? 2 : 1;
+
+  // User preference factor
+  let prefFactor =
+    user.radiusPreference === "nearby" ? 0.5 :
+    user.radiusPreference === "wide" ? 2 : 1;
+
+  let rawRadius = base * densityFactor * prefFactor;
+
+  // Clamp to min/max
+  const min = MIN_RADIUS[activityKey] || MIN_RADIUS.running;
+  const max = MAX_RADIUS[activityKey] || MAX_RADIUS.running;
+  
+  return Math.max(min, Math.min(max, rawRadius));
+}
+
+/**
+ * Check if fitness levels are compatible based on visibility settings
+ */
+export function fitnessAllowed(
+  myLevel: FitnessLevel,
+  candidateLevel: FitnessLevel,
+  visibility: VisibilitySettings
+): boolean {
+  if (visibility.visibleToAllLevels) return true;
+  return visibility.allowedLevels.includes(candidateLevel);
+}
+
+/**
+ * Check if paces are compatible (30% difference tolerance)
+ */
+export function paceCompatible(myPace: number, candidatePace: number): boolean {
+  // Allow if pace not set (null, undefined, 0, or NaN)
+  if (!myPace || !candidatePace || isNaN(myPace) || isNaN(candidatePace)) return true;
+  
+  // Prevent division by zero or very small numbers
+  if (myPace <= 0.001) return true;
+  
+  let diff = Math.abs(myPace - candidatePace);
+  let percent = diff / myPace;
+  return percent <= 0.30; // Allow 30% pace difference
+}
+
+/**
+ * Calculate distance between two points in meters
+ */
+function distanceInMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const distKm = calculateDistance(lat1, lng1, lat2, lng2);
+  return distKm ? distKm * 1000 : Infinity;
+}
+
+/**
+ * Score a candidate match
+ * Distance: 50%, Pace: 30%, Level: 20%
+ */
+export function scoreCandidate(
+  user: MatchingUser,
+  candidate: MatchingUser,
+  radius: number
+): number {
+  const dist = distanceInMeters(
+    user.location.lat,
+    user.location.lng,
+    candidate.location.lat,
+    candidate.location.lng
+  );
+
+  // Distance score (closer is better, normalized to 0-1)
+  const distanceScore = Math.max(0, 1 - (dist / radius));
+
+  // Pace score (closer pace is better)
+  let paceScore = 1;
+  if (user.pace && candidate.pace && user.pace > 0.001 && candidate.pace > 0.001) {
+    const paceDiff = Math.abs(user.pace - candidate.pace);
+    const pacePercent = paceDiff / user.pace;
+    paceScore = Math.max(0, 1 - pacePercent); // Normalize to 0-1
+  }
+
+  // Level score (same level = 1, different = 0.5)
+  const levelScore = user.fitnessLevel === candidate.fitnessLevel ? 1 : 0.5;
+
+  // Weighted combination
+  return (distanceScore * 0.5) + (paceScore * 0.3) + (levelScore * 0.2);
+}
+
+/**
+ * Main matching function
+ * Returns top 5 matches ranked by score
+ */
+export function matchUsers(
+  user: MatchingUser,
+  allUsers: Record<string, any>,
+  nearbyCount?: number
+): MatchResult[] {
+  // Compute radius
+  const count = nearbyCount ?? Object.keys(allUsers).length;
+  const radius = computeRadius(user, count);
+  const radiusKm = radius / 1000; // Convert to km for filterUsersByDistance
+
+  // Get nearby users within radius
+  const candidates = filterUsersByDistance(
+    allUsers,
+    user.location.lat,
+    user.location.lng,
+    radiusKm,
+    user.uid
+  );
+
+  // Filter by fitness level and pace compatibility
+  const filtered = candidates
+    .map(candidate => {
+      // Ensure candidate has required fields
+      const candidateFitnessLevel = candidate.fitnessLevel || "intermediate";
+      const candidatePace = candidate.pace || null;
+      const candidateActivity = candidate.activity || user.activity;
+
+      // Only match users with same activity
+      if (candidateActivity !== user.activity) {
+        return null;
+      }
+
+      // Check fitness level compatibility
+      if (!fitnessAllowed(user.fitnessLevel, candidateFitnessLevel, user.visibility)) {
+        return null;
+      }
+
+      // Check pace compatibility
+      if (user.pace && candidatePace && !paceCompatible(user.pace, candidatePace)) {
+        return null;
+      }
+
+      return {
+        ...candidate,
+        fitnessLevel: candidateFitnessLevel,
+        pace: candidatePace,
+        activity: candidateActivity
+      };
+    })
+    .filter((c): c is MatchingUser & { id: string; distance: number } => c !== null);
+
+  // Score and rank candidates
+  const ranked = filtered
+    .map(candidate => {
+      const matchUser: MatchingUser = {
+        uid: candidate.id,
+        location: { lat: candidate.lat, lng: candidate.lng },
+        activity: candidate.activity,
+        fitnessLevel: candidate.fitnessLevel,
+        pace: candidate.pace || 0,
+        visibility: candidate.visibility || {
+          visibleToAllLevels: true,
+          allowedLevels: ["beginner", "intermediate", "pro"]
+        },
+        radiusPreference: candidate.radiusPreference,
+        ...candidate
+      };
+
+      return {
+        user: matchUser,
+        score: scoreCandidate(user, matchUser, radius),
+        distance: candidate.distance * 1000 // Convert km to meters
+      };
+    })
+    .sort((a, b) => b.score - a.score); // Sort by score descending
+
+  // Return top 5 matches
+  return ranked.slice(0, 5);
+}
+
+/**
+ * Calculate average pace from workout history
+ * @param workouts - Array of workout history items
+ * @param activity - Activity type to filter by
+ * @returns Average pace (min/km for running/walking, km/h for cycling)
+ */
+export function calculatePaceFromWorkouts(
+  workouts: Array<{ activity: Activity; duration: number; distance: number; avgSpeed?: number }>,
+  activity: Activity
+): number | null {
+  // Filter workouts by activity and get most recent 5-10
+  const relevantWorkouts = workouts
+    .filter(w => w.activity === activity)
+    .slice(-10) // Last 10 workouts
+    .filter(w => w.distance > 0 && w.duration > 0);
+
+  if (relevantWorkouts.length === 0) {
+    return null;
+  }
+
+  if (activity === "cycling") {
+    // For cycling, use average speed (km/h)
+    const speeds = relevantWorkouts
+      .map(w => w.avgSpeed || (w.distance / (w.duration / 3600)))
+      .filter(s => s > 0);
+    
+    if (speeds.length === 0) return null;
+    return speeds.reduce((a, b) => a + b, 0) / speeds.length;
+  } else {
+    // For running/walking, calculate min/km
+    const paces = relevantWorkouts
+      .map(w => {
+        const distanceKm = w.distance;
+        const durationMinutes = w.duration / 60;
+        return durationMinutes / distanceKm;
+      })
+      .filter(p => p > 0 && p < 30); // Reasonable pace range (0-30 min/km)
+    
+    if (paces.length === 0) return null;
+    return paces.reduce((a, b) => a + b, 0) / paces.length;
+  }
+}
+

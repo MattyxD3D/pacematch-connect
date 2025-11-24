@@ -43,6 +43,9 @@ const MapScreen = () => {
   const [showFriendRequestModal, setShowFriendRequestModal] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Activity filter for People Drawer
+  const [activityFilter, setActivityFilter] = useState<"all" | "running" | "cycling" | "walking">("all");
+  
   // Simulate receiving notifications (for demo purposes)
   useEffect(() => {
     // Simulate a message notification after 3 seconds
@@ -99,10 +102,21 @@ const MapScreen = () => {
 
   // Mock data for nearby users
   const nearbyUsers = [
-    { id: 1, name: "Sarah Johnson", distance: "0.3 km", activity: "Running", avatar: "https://i.pravatar.cc/150?img=1" },
-    { id: 2, name: "Mike Chen", distance: "0.5 km", activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=2" },
-    { id: 3, name: "Emma Davis", distance: "0.8 km", activity: "Walking", avatar: "https://i.pravatar.cc/150?img=3" },
+    { id: 1, name: "Sarah Johnson", distance: "0.3 km", distanceValue: 0.3, activity: "Running", avatar: "https://i.pravatar.cc/150?img=1", lat: 40.7484, lng: -73.9857 },
+    { id: 2, name: "Mike Chen", distance: "0.5 km", distanceValue: 0.5, activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=2", lat: 40.7489, lng: -73.9860 },
+    { id: 3, name: "Emma Davis", distance: "0.8 km", distanceValue: 0.8, activity: "Walking", avatar: "https://i.pravatar.cc/150?img=3", lat: 40.7495, lng: -73.9870 },
+    { id: 4, name: "James Wilson", distance: "1.2 km", distanceValue: 1.2, activity: "Running", avatar: "https://i.pravatar.cc/150?img=4", lat: 40.7500, lng: -73.9880 },
+    { id: 5, name: "Lisa Anderson", distance: "1.5 km", distanceValue: 1.5, activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=5", lat: 40.7510, lng: -73.9890 },
+    { id: 6, name: "Tom Martinez", distance: "2.0 km", distanceValue: 2.0, activity: "Walking", avatar: "https://i.pravatar.cc/150?img=6", lat: 40.7520, lng: -73.9900 },
   ];
+
+  // Filter users by activity
+  const filteredUsers = activityFilter === "all" 
+    ? nearbyUsers 
+    : nearbyUsers.filter(user => user.activity.toLowerCase() === activityFilter);
+
+  // Sort by distance
+  const sortedUsers = [...filteredUsers].sort((a, b) => a.distanceValue - b.distanceValue);
 
   // Manage tracking interval
   useEffect(() => {
@@ -313,7 +327,7 @@ const MapScreen = () => {
         >
           <PeopleIcon style={{ fontSize: 28 }} />
           <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
-            {nearbyUsers.length}
+            {sortedUsers.length}
           </span>
         </motion.button>
 
@@ -625,40 +639,210 @@ const MapScreen = () => {
           style: {
             borderTopLeftRadius: 24,
             borderTopRightRadius: 24,
-            maxHeight: "70vh",
+            maxHeight: "80vh",
           },
         }}
       >
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-5">
+          {/* Header */}
           <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold">Nearby People</h2>
+            <div>
+              <h2 className="text-2xl font-bold">Nearby People</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                {sortedUsers.length} {sortedUsers.length === 1 ? "person" : "people"} nearby
+              </p>
+            </div>
             <button
               onClick={() => setShowPeopleDrawer(false)}
-              className="text-muted-foreground hover:text-foreground"
+              className="p-2 hover:bg-accent rounded-full transition-colors touch-target"
             >
-              ✕
+              <CloseIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
             </button>
           </div>
 
-          <div className="space-y-3">
-            {nearbyUsers.map((user) => (
-              <motion.div
-                key={user.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-4 p-4 bg-card rounded-xl shadow-elevation-1 hover:shadow-elevation-2 transition-all duration-300"
-              >
-                <Avatar src={user.avatar} alt={user.name} sx={{ width: 56, height: 56 }} />
-                <div className="flex-1">
-                  <h3 className="font-semibold text-lg">{user.name}</h3>
-                  <p className="text-sm text-muted-foreground">{user.distance} away • {user.activity}</p>
-                </div>
-                <Button variant="outline" size="sm">
-                  <MyLocationIcon style={{ fontSize: 20 }} className="mr-1" />
-                  Center
-                </Button>
-              </motion.div>
-            ))}
+          {/* Activity Filter Chips */}
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActivityFilter("all")}
+              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 ${
+                activityFilter === "all"
+                  ? "bg-primary text-primary-foreground shadow-elevation-2"
+                  : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              All Activities ({nearbyUsers.length})
+            </motion.button>
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActivityFilter("running")}
+              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 flex items-center gap-1.5 ${
+                activityFilter === "running"
+                  ? "bg-success text-success-foreground shadow-elevation-2"
+                  : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              <DirectionsRunIcon style={{ fontSize: 18 }} />
+              Running ({nearbyUsers.filter(u => u.activity === "Running").length})
+            </motion.button>
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActivityFilter("cycling")}
+              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 flex items-center gap-1.5 ${
+                activityFilter === "cycling"
+                  ? "bg-primary text-primary-foreground shadow-elevation-2"
+                  : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              <DirectionsBikeIcon style={{ fontSize: 18 }} />
+              Cycling ({nearbyUsers.filter(u => u.activity === "Cycling").length})
+            </motion.button>
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActivityFilter("walking")}
+              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 flex items-center gap-1.5 ${
+                activityFilter === "walking"
+                  ? "bg-warning text-warning-foreground shadow-elevation-2"
+                  : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              <DirectionsWalkIcon style={{ fontSize: 18 }} />
+              Walking ({nearbyUsers.filter(u => u.activity === "Walking").length})
+            </motion.button>
+          </div>
+
+          {/* Users List */}
+          <div className="space-y-3 max-h-[50vh] overflow-y-auto">
+            {sortedUsers.length === 0 ? (
+              <div className="text-center py-12">
+                <PeopleIcon style={{ fontSize: 64 }} className="text-muted-foreground/30 mx-auto mb-3" />
+                <p className="text-muted-foreground">No users found</p>
+                <p className="text-xs text-muted-foreground mt-1">Try changing the activity filter</p>
+              </div>
+            ) : (
+              sortedUsers.map((user, index) => {
+                const userFriendStatus = getFriendStatus(user.id);
+                
+                return (
+                  <motion.div
+                    key={user.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                    className="bg-card rounded-2xl shadow-elevation-2 border border-border/50 overflow-hidden"
+                  >
+                    <div className="p-4">
+                      {/* User Info */}
+                      <div className="flex items-start gap-3 mb-3">
+                        <div className="relative flex-shrink-0">
+                          <Avatar 
+                            src={user.avatar} 
+                            alt={user.name} 
+                            sx={{ width: 56, height: 56 }}
+                          />
+                          {/* Activity Badge */}
+                          <div className={`absolute -bottom-1 -right-1 p-1.5 rounded-full ${
+                            user.activity === "Running"
+                              ? "bg-success"
+                              : user.activity === "Cycling"
+                              ? "bg-primary"
+                              : "bg-warning"
+                          }`}>
+                            {user.activity === "Running" && (
+                              <DirectionsRunIcon style={{ fontSize: 14 }} className="text-white" />
+                            )}
+                            {user.activity === "Cycling" && (
+                              <DirectionsBikeIcon style={{ fontSize: 14 }} className="text-white" />
+                            )}
+                            {user.activity === "Walking" && (
+                              <DirectionsWalkIcon style={{ fontSize: 14 }} className="text-white" />
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-base truncate">{user.name}</h3>
+                            {userFriendStatus === "friends" && (
+                              <div className="flex-shrink-0 px-2 py-0.5 bg-success/10 border border-success rounded-full">
+                                <span className="text-xs text-success font-medium">✓ Friend</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-sm text-muted-foreground flex items-center gap-1">
+                              📍 {user.distance} away
+                            </span>
+                            <span className="text-muted-foreground">•</span>
+                            <span className="text-sm text-muted-foreground capitalize">
+                              {user.activity}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-2">
+                        {/* Send Message Button */}
+                        <Button
+                          onClick={() => {
+                            setSelectedUser(user);
+                            setShowMessageModal(true);
+                            setShowPeopleDrawer(false);
+                          }}
+                          size="sm"
+                          className="flex-1 h-10 bg-primary text-primary-foreground hover:bg-primary/90"
+                        >
+                          <SendIcon style={{ fontSize: 18 }} className="mr-1.5" />
+                          Message
+                        </Button>
+
+                        {/* Add Friend / Status Button */}
+                        {userFriendStatus === "not_friends" && (
+                          <Button
+                            onClick={() => {
+                              handleAddFriend(user.id);
+                            }}
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 h-10 border-2"
+                          >
+                            <PersonAddIcon style={{ fontSize: 18 }} className="mr-1.5" />
+                            Add Friend
+                          </Button>
+                        )}
+
+                        {userFriendStatus === "request_pending" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled
+                            className="flex-1 h-10 border-2 cursor-not-allowed opacity-60"
+                          >
+                            <HourglassEmptyIcon style={{ fontSize: 18 }} className="mr-1.5" />
+                            Pending
+                          </Button>
+                        )}
+
+                        {/* Center on Map Button */}
+                        <Button
+                          onClick={() => {
+                            // Center map on user
+                            setShowPeopleDrawer(false);
+                            toast.success(`Centered on ${user.name}`);
+                          }}
+                          size="sm"
+                          variant="outline"
+                          className="h-10 px-3"
+                        >
+                          <MyLocationIcon style={{ fontSize: 18 }} />
+                        </Button>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })
+            )}
           </div>
         </div>
       </Drawer>

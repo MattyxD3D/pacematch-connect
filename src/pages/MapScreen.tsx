@@ -10,6 +10,8 @@ import PeopleIcon from "@mui/icons-material/People";
 import MyLocationIcon from "@mui/icons-material/MyLocation";
 import SettingsIcon from "@mui/icons-material/Settings";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
+import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
+import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import { Drawer } from "@mui/material";
 import Avatar from "@mui/material/Avatar";
 import { toast } from "sonner";
@@ -23,7 +25,14 @@ const MapScreen = () => {
   const [pointsTracked, setPointsTracked] = useState(0);
   const [distance, setDistance] = useState(0);
   const [showNotification, setShowNotification] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState<"running" | "cycling" | "walking">("running");
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const activities = [
+    { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
+    { id: "cycling", label: "Cycling", icon: DirectionsBikeIcon, color: "primary" },
+    { id: "walking", label: "Walking", icon: DirectionsWalkIcon, color: "warning" },
+  ] as const;
 
   // Mock data for nearby users
   const nearbyUsers = [
@@ -177,12 +186,22 @@ const MapScreen = () => {
             transition={{ type: "spring", stiffness: 200, damping: 20 }}
             className="absolute top-4 left-4 z-10"
           >
-            <div className="bg-gradient-to-r from-success to-success/90 text-success-foreground px-5 py-4 rounded-2xl shadow-elevation-4 flex items-center gap-3 border-2 border-success-foreground/20">
+            <div className={`
+              bg-gradient-to-r px-5 py-4 rounded-2xl shadow-elevation-4 flex items-center gap-3 border-2
+              ${selectedActivity === 'running' 
+                ? 'from-success to-success/90 text-success-foreground border-success-foreground/20'
+                : selectedActivity === 'cycling'
+                ? 'from-primary to-primary/90 text-primary-foreground border-primary-foreground/20'
+                : 'from-warning to-warning/90 text-warning-foreground border-warning-foreground/20'
+              }
+            `}>
               <motion.div
                 animate={{ scale: [1, 1.15, 1] }}
                 transition={{ duration: 1.5, repeat: Infinity }}
               >
-                <DirectionsRunIcon style={{ fontSize: 28 }} />
+                {selectedActivity === 'running' && <DirectionsRunIcon style={{ fontSize: 28 }} />}
+                {selectedActivity === 'cycling' && <DirectionsBikeIcon style={{ fontSize: 28 }} />}
+                {selectedActivity === 'walking' && <DirectionsWalkIcon style={{ fontSize: 28 }} />}
               </motion.div>
               <div className="flex flex-col">
                 <span className="text-sm font-bold">Activity Active</span>
@@ -195,6 +214,60 @@ const MapScreen = () => {
 
       {/* Bottom Controls */}
       <div className="absolute bottom-0 left-0 right-0 p-6 z-10">
+        {/* Activity Selector (when not active) */}
+        <AnimatePresence>
+          {!isActive && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mb-4 bg-card/95 backdrop-blur-md rounded-2xl p-5 shadow-elevation-4 border border-border/50"
+            >
+              <p className="text-sm font-bold mb-3 text-center">Select Activity Type</p>
+              <div className="grid grid-cols-3 gap-3">
+                {activities.map((act) => {
+                  const Icon = act.icon;
+                  const isSelected = selectedActivity === act.id;
+                  return (
+                    <motion.button
+                      key={act.id}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setSelectedActivity(act.id as typeof selectedActivity)}
+                      className={`
+                        flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all duration-300
+                        ${isSelected 
+                          ? act.color === 'success'
+                            ? 'border-success bg-success/15 shadow-elevation-2'
+                            : act.color === 'primary'
+                            ? 'border-primary bg-primary/15 shadow-elevation-2'
+                            : 'border-warning bg-warning/15 shadow-elevation-2'
+                          : 'border-border bg-card/50 hover:bg-secondary'
+                        }
+                      `}
+                    >
+                      <Icon
+                        className={
+                          isSelected
+                            ? act.color === 'success'
+                              ? 'text-success'
+                              : act.color === 'primary'
+                              ? 'text-primary'
+                              : 'text-warning'
+                            : 'text-muted-foreground'
+                        }
+                        style={{ fontSize: 32 }}
+                      />
+                      <span className={`text-xs mt-2 font-semibold ${isSelected ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        {act.label}
+                      </span>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* 3D Controls (3D mode only) */}
         <AnimatePresence>
           {is3DMode && (
@@ -227,7 +300,11 @@ const MapScreen = () => {
               ${
                 isActive
                   ? "bg-gradient-to-r from-destructive to-destructive/90 text-destructive-foreground hover:from-destructive/90 hover:to-destructive"
-                  : "bg-gradient-to-r from-success to-success/90 text-success-foreground hover:from-success/90 hover:to-success"
+                  : selectedActivity === 'running'
+                  ? "bg-gradient-to-r from-success to-success/90 text-success-foreground hover:from-success/90 hover:to-success"
+                  : selectedActivity === 'cycling'
+                  ? "bg-gradient-to-r from-primary to-primary/90 text-primary-foreground hover:from-primary/90 hover:to-primary"
+                  : "bg-gradient-to-r from-warning to-warning/90 text-warning-foreground hover:from-warning/90 hover:to-warning"
               }
             `}
           >
@@ -239,7 +316,7 @@ const MapScreen = () => {
             ) : (
               <>
                 <PlayArrowIcon className="mr-3" style={{ fontSize: 32 }} />
-                Start Activity
+                Start {activities.find(a => a.id === selectedActivity)?.label}
               </>
             )}
           </Button>

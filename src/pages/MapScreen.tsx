@@ -13,6 +13,7 @@ import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import { Drawer } from "@mui/material";
 import Avatar from "@mui/material/Avatar";
 import { toast } from "sonner";
+import { NotificationBanner } from "@/components/NotificationBanner";
 
 const MapScreen = () => {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ const MapScreen = () => {
   const [is3DMode, setIs3DMode] = useState(false);
   const [showPeopleDrawer, setShowPeopleDrawer] = useState(false);
   const [pointsTracked, setPointsTracked] = useState(0);
+  const [distance, setDistance] = useState(0);
 
   // Mock data for nearby users
   const nearbyUsers = [
@@ -28,15 +30,30 @@ const MapScreen = () => {
     { id: 3, name: "Emma Davis", distance: "0.8 km", activity: "Walking", avatar: "https://i.pravatar.cc/150?img=3" },
   ];
 
+  const [showNotification, setShowNotification] = useState(false);
+
   const handleStartStop = () => {
     if (!isActive) {
       toast.success("Activity started! GPS tracking enabled.");
       setIsActive(true);
+      setShowNotification(false);
+      // Simulate tracking
+      const interval = setInterval(() => {
+        setDistance(prev => prev + 0.1);
+        setPointsTracked(prev => prev + 1);
+      }, 2000);
+      return () => clearInterval(interval);
     } else {
-      toast.success("Activity stopped. Great workout!");
+      toast.success(`Activity stopped. Great workout! ${distance.toFixed(1)} km tracked.`);
       setIsActive(false);
       setPointsTracked(0);
+      setDistance(0);
     }
+  };
+
+  const handleNotificationTap = () => {
+    setShowNotification(false);
+    handleStartStop();
   };
 
   const handleToggle3D = () => {
@@ -47,17 +64,29 @@ const MapScreen = () => {
   return (
     <div className="relative h-screen w-full overflow-hidden bg-muted">
       {/* Map Placeholder */}
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-success/10 to-warning/20">
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-success/5 to-warning/10">
         <div className="flex items-center justify-center h-full">
-          <div className="text-center space-y-4 p-8 bg-card/90 backdrop-blur-sm rounded-2xl shadow-elevation-3">
-            <ExploreIcon className="text-primary mx-auto" style={{ fontSize: 64 }} />
+          <div className="text-center space-y-4 p-8 bg-card/80 backdrop-blur-md rounded-3xl shadow-elevation-3 border border-border/50">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+            >
+              <ExploreIcon className="text-primary mx-auto" style={{ fontSize: 72 }} />
+            </motion.div>
             <h2 className="text-2xl font-bold">Map View</h2>
-            <p className="text-muted-foreground max-w-xs">
+            <p className="text-muted-foreground max-w-xs text-sm leading-relaxed">
               Google Maps integration will display here. This shows your location, nearby users, and activity trails.
             </p>
           </div>
         </div>
       </div>
+
+      {/* Notification Banner */}
+      <NotificationBanner
+        show={showNotification}
+        onDismiss={() => setShowNotification(false)}
+        onTap={handleNotificationTap}
+      />
 
       {/* Top Bar - Right Side Controls */}
       <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
@@ -127,15 +156,23 @@ const MapScreen = () => {
       <AnimatePresence>
         {isActive && (
           <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="absolute top-4 left-4 bg-success text-success-foreground px-4 py-3 rounded-full shadow-elevation-3 flex items-center gap-2 z-10"
+            initial={{ opacity: 0, x: -50, scale: 0.8 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: -50, scale: 0.8 }}
+            transition={{ type: "spring", stiffness: 200, damping: 20 }}
+            className="absolute top-4 left-4 z-10"
           >
-            <DirectionsRunIcon className="animate-pulse-slow" style={{ fontSize: 24 }} />
-            <div className="flex flex-col">
-              <span className="text-xs font-bold">Activity Active</span>
-              <span className="text-xs opacity-90">{pointsTracked} points tracked</span>
+            <div className="bg-gradient-to-r from-success to-success/90 text-success-foreground px-5 py-4 rounded-2xl shadow-elevation-4 flex items-center gap-3 border-2 border-success-foreground/20">
+              <motion.div
+                animate={{ scale: [1, 1.15, 1] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              >
+                <DirectionsRunIcon style={{ fontSize: 28 }} />
+              </motion.div>
+              <div className="flex flex-col">
+                <span className="text-sm font-bold">Activity Active</span>
+                <span className="text-xs opacity-90 font-medium">{distance.toFixed(1)} km • {pointsTracked} points</span>
+              </div>
             </div>
           </motion.div>
         )}
@@ -163,26 +200,30 @@ const MapScreen = () => {
         </AnimatePresence>
 
         {/* Start/Stop Activity Button */}
-        <motion.div whileTap={{ scale: 0.98 }}>
+        <motion.div 
+          whileTap={{ scale: 0.97 }}
+          animate={!isActive ? { scale: [1, 1.01, 1] } : {}}
+          transition={!isActive ? { duration: 2, repeat: Infinity, repeatDelay: 3 } : {}}
+        >
           <Button
             onClick={handleStartStop}
             className={`
-              w-full h-16 text-lg font-bold shadow-elevation-4 transition-all duration-300
+              w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl
               ${
                 isActive
-                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  : "bg-success text-success-foreground hover:bg-success/90"
+                  ? "bg-gradient-to-r from-destructive to-destructive/90 text-destructive-foreground hover:from-destructive/90 hover:to-destructive"
+                  : "bg-gradient-to-r from-success to-success/90 text-success-foreground hover:from-success/90 hover:to-success"
               }
             `}
           >
             {isActive ? (
               <>
-                <StopIcon className="mr-2" style={{ fontSize: 28 }} />
+                <StopIcon className="mr-3" style={{ fontSize: 32 }} />
                 Stop Activity
               </>
             ) : (
               <>
-                <PlayArrowIcon className="mr-2" style={{ fontSize: 28 }} />
+                <PlayArrowIcon className="mr-3" style={{ fontSize: 32 }} />
                 Start Activity
               </>
             )}

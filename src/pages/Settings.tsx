@@ -36,46 +36,55 @@ const Settings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-success/5">
+    <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10">
       {/* Header */}
-      <div className="bg-card shadow-elevation-1 sticky top-0 z-10">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-4">
-          <button
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-10 border-b border-border/50"
+      >
+        <div className="max-w-2xl mx-auto px-6 py-5 flex items-center gap-4">
+          <motion.button
+            whileTap={{ scale: 0.95 }}
             onClick={() => navigate("/map")}
-            className="touch-target p-2 hover:bg-secondary rounded-full transition-colors"
+            className="touch-target p-2 hover:bg-secondary rounded-xl transition-all duration-200"
           >
-            <ArrowBackIcon style={{ fontSize: 24 }} />
-          </button>
-          <h1 className="text-2xl font-bold">Settings</h1>
+            <ArrowBackIcon style={{ fontSize: 28 }} />
+          </motion.button>
+          <h1 className="text-3xl font-bold">Settings</h1>
         </div>
-      </div>
+      </motion.div>
 
       {/* Content */}
-      <div className="max-w-2xl mx-auto p-4 space-y-6 pb-8">
+      <div className="max-w-2xl mx-auto p-6 space-y-6 pb-10">
         {/* Visibility Toggle - Prominent */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
+          transition={{ duration: 0.4 }}
         >
-          <Card className="p-6 shadow-elevation-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className={`p-3 rounded-full ${isVisible ? "bg-success/10" : "bg-muted"}`}>
+          <Card className="p-6 shadow-elevation-3 border-2 border-border/50 bg-card/50 backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4 flex-1">
+                <motion.div 
+                  animate={isVisible ? { scale: [1, 1.1, 1] } : {}}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className={`p-4 rounded-2xl transition-all duration-300 ${isVisible ? "bg-success/15 shadow-elevation-1" : "bg-muted"}`}
+                >
                   {isVisible ? (
-                    <VisibilityIcon className="text-success" style={{ fontSize: 28 }} />
+                    <VisibilityIcon className="text-success" style={{ fontSize: 32 }} />
                   ) : (
-                    <VisibilityOffIcon className="text-muted-foreground" style={{ fontSize: 28 }} />
+                    <VisibilityOffIcon className="text-muted-foreground" style={{ fontSize: 32 }} />
                   )}
-                </div>
+                </motion.div>
                 <div>
-                  <h3 className="text-lg font-semibold">Show my location on map</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {isVisible ? "Other users can see you" : "You're invisible to others"}
+                  <h3 className="text-lg font-bold">Show on map</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {isVisible ? "Visible to others" : "Hidden from others"}
                   </p>
                 </div>
               </div>
-              <Switch checked={isVisible} onCheckedChange={handleVisibilityToggle} />
+              <Switch checked={isVisible} onCheckedChange={handleVisibilityToggle} className="scale-110" />
             </div>
           </Card>
         </motion.div>
@@ -84,10 +93,10 @@ const Settings = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
         >
-          <Card className="p-6 space-y-6">
-            <h2 className="text-xl font-bold">Profile</h2>
+          <Card className="p-6 space-y-6 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
+            <h2 className="text-2xl font-bold">Profile</h2>
 
             {/* Profile Photo */}
             <div className="flex items-center gap-4">
@@ -119,9 +128,11 @@ const Settings = () => {
               </div>
             </div>
 
-            <Button onClick={handleSaveProfile} className="w-full h-12">
-              Save Changes
-            </Button>
+            <motion.div whileTap={{ scale: 0.98 }}>
+              <Button onClick={handleSaveProfile} className="w-full h-14 text-base font-semibold shadow-elevation-2">
+                Save Changes
+              </Button>
+            </motion.div>
           </Card>
         </motion.div>
 
@@ -129,10 +140,10 @@ const Settings = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.2 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
         >
-          <Card className="p-6 space-y-4">
-            <h2 className="text-xl font-bold">Activity</h2>
+          <Card className="p-6 space-y-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
+            <h2 className="text-2xl font-bold">Activity</h2>
 
             <div className="flex items-center justify-between p-4 bg-success/10 rounded-lg">
               <div className="flex items-center gap-3">
@@ -151,10 +162,10 @@ const Settings = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
         >
-          <Card className="p-6 space-y-4">
-            <h2 className="text-xl font-bold">Privacy & Data</h2>
+          <Card className="p-6 space-y-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
+            <h2 className="text-2xl font-bold">Privacy & Data</h2>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between p-3 hover:bg-secondary rounded-lg transition-colors cursor-pointer">
@@ -177,19 +188,21 @@ const Settings = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.4 }}
+          transition={{ duration: 0.4, delay: 0.4 }}
         >
-          <Card className="p-6 space-y-4">
-            <h2 className="text-xl font-bold">Account</h2>
+          <Card className="p-6 space-y-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
+            <h2 className="text-2xl font-bold">Account</h2>
 
-            <Button
-              onClick={handleSignOut}
-              variant="destructive"
-              className="w-full h-12"
-            >
-              <LogoutIcon className="mr-2" style={{ fontSize: 20 }} />
-              Sign Out
-            </Button>
+            <motion.div whileTap={{ scale: 0.98 }}>
+              <Button
+                onClick={handleSignOut}
+                variant="destructive"
+                className="w-full h-14 text-base font-semibold shadow-elevation-2"
+              >
+                <LogoutIcon className="mr-2" style={{ fontSize: 24 }} />
+                Sign Out
+              </Button>
+            </motion.div>
           </Card>
         </motion.div>
       </div>

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -25,6 +26,9 @@ const Settings = () => {
   const [isVisible, setIsVisible] = useState(true);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [username, setUsername] = useState(userProfile?.username || "");
+  const [selectedActivities, setSelectedActivities] = useState<("running" | "cycling" | "walking")[]>(
+    userProfile?.activities || ["running"]
+  );
   const [email] = useState("john.doe@example.com");
 
   // Privacy controls - users who can/cannot see your location
@@ -81,10 +85,15 @@ const Settings = () => {
       return;
     }
 
-    // Update user profile (keeping activities and gender unchanged)
+    if (selectedActivities.length === 0) {
+      toast.error("Please select at least one activity");
+      return;
+    }
+
+    // Update user profile
     setUserProfile({
       username: username.trim(),
-      activities: userProfile?.activities || ["running"],
+      activities: selectedActivities,
       gender: userProfile?.gender,
     });
 
@@ -95,7 +104,23 @@ const Settings = () => {
   const handleCancelEdit = () => {
     // Reset to original values
     setUsername(userProfile?.username || "");
+    setSelectedActivities(userProfile?.activities || ["running"]);
     setIsEditingProfile(false);
+  };
+
+  const handleActivityToggle = (activityId: "running" | "cycling" | "walking") => {
+    setSelectedActivities(prev => {
+      if (prev.includes(activityId)) {
+        // Don't allow removing the last activity
+        if (prev.length === 1) {
+          toast.error("You must have at least one activity selected");
+          return prev;
+        }
+        return prev.filter(a => a !== activityId);
+      } else {
+        return [...prev, activityId];
+      }
+    });
   };
 
   return (
@@ -226,13 +251,6 @@ const Settings = () => {
                   </div>
                 </div>
 
-                {/* Gender */}
-                {userProfile?.gender && (
-                  <div className="space-y-2">
-                    <Label className="text-sm text-muted-foreground">Gender</Label>
-                    <p className="text-base">{userProfile.gender}</p>
-                  </div>
-                )}
               </div>
             ) : (
               // Edit Mode
@@ -258,42 +276,55 @@ const Settings = () => {
                   />
                 </div>
 
-                {/* Activities - Read Only */}
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Activities</Label>
-                  <div className="flex gap-2 flex-wrap">
-                    {userProfile?.activities.map((activity) => {
-                      const activityData = activities.find(a => a.id === activity);
-                      if (!activityData) return null;
-                      const Icon = activityData.icon;
+                {/* Activities - Editable */}
+                <div className="space-y-3">
+                  <Label>Activities</Label>
+                  <div className="space-y-2">
+                    {activities.map((activity) => {
+                      const Icon = activity.icon;
+                      const isSelected = selectedActivities.includes(activity.id as "running" | "cycling" | "walking");
+                      
                       return (
-                        <div
-                          key={activity}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
-                            activityData.color === 'success'
-                              ? 'bg-success/10 text-success'
-                              : activityData.color === 'primary'
-                              ? 'bg-primary/10 text-primary'
-                              : 'bg-warning/10 text-warning'
-                          }`}
+                        <motion.div
+                          key={activity.id}
+                          whileTap={{ scale: 0.98 }}
+                          className={`
+                            flex items-center justify-between p-3 rounded-xl border-2 transition-all duration-300 cursor-pointer
+                            ${isSelected 
+                              ? activity.color === 'success'
+                                ? 'border-success/30 bg-success/10'
+                                : activity.color === 'primary'
+                                ? 'border-primary/30 bg-primary/10'
+                                : 'border-warning/30 bg-warning/10'
+                              : 'border-border bg-muted/30'
+                            }
+                          `}
+                          onClick={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
                         >
-                          <Icon style={{ fontSize: 18 }} />
-                          <span className="text-sm font-medium">{activityData.label}</span>
-                        </div>
+                          <div className="flex items-center gap-3">
+                            <Icon 
+                              className={
+                                isSelected
+                                  ? activity.color === 'success'
+                                    ? 'text-success'
+                                    : activity.color === 'primary'
+                                    ? 'text-primary'
+                                    : 'text-warning'
+                                  : 'text-muted-foreground'
+                              }
+                              style={{ fontSize: 24 }} 
+                            />
+                            <span className="font-medium">{activity.label}</span>
+                          </div>
+                          <Checkbox 
+                            checked={isSelected}
+                            onCheckedChange={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
+                          />
+                        </motion.div>
                       );
                     })}
                   </div>
-                  <p className="text-xs text-muted-foreground">Activities can only be changed during initial setup</p>
                 </div>
-
-                {/* Gender - Read Only */}
-                {userProfile?.gender && (
-                  <div className="space-y-2">
-                    <Label className="text-sm text-muted-foreground">Gender</Label>
-                    <p className="text-base">{userProfile.gender}</p>
-                    <p className="text-xs text-muted-foreground">Gender can only be set during initial setup</p>
-                  </div>
-                )}
 
                 {/* Action Buttons */}
                 <div className="flex gap-3 pt-2">

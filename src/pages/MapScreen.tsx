@@ -264,6 +264,18 @@ const MapScreen = () => {
   };
   
   const handleSaveWorkout = () => {
+    // Filter nearby users who were active during the workout
+    const activeNearbyUsers = nearbyUsers
+      .filter(user => user.distanceValue <= 2.0) // Within 2km radius
+      .slice(0, 5) // Limit to 5 users
+      .map(user => ({
+        id: user.id,
+        name: user.name,
+        avatar: user.avatar,
+        activity: user.activity,
+        distance: user.distance,
+      }));
+
     addWorkout({
       activity: selectedActivity,
       date: startTime || new Date(),
@@ -271,6 +283,8 @@ const MapScreen = () => {
       distance,
       avgSpeed,
       calories,
+      nearbyUsers: activeNearbyUsers,
+      location: "Central Park, New York", // This would come from GPS in real app
     });
     toast.success(`Workout saved! ${distance.toFixed(2)} km tracked.`);
     setShowSummary(false);

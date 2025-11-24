@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { WorkoutDetailModal } from "@/components/WorkoutDetailModal";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
@@ -22,6 +23,7 @@ import SpeedIcon from "@mui/icons-material/Speed";
 import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
+import PeopleIcon from "@mui/icons-material/People";
 import { format } from "date-fns";
 
 const WorkoutHistoryPage = () => {
@@ -30,6 +32,7 @@ const WorkoutHistoryPage = () => {
   const [activityFilter, setActivityFilter] = useState<"all" | "running" | "cycling" | "walking">("all");
   const [sortBy, setSortBy] = useState<"date" | "distance" | "duration" | "calories">("date");
   const [timeRange, setTimeRange] = useState<"7days" | "30days" | "90days" | "all">("30days");
+  const [selectedWorkout, setSelectedWorkout] = useState<WorkoutHistory | null>(null);
 
   // Filter workouts by activity
   const filteredWorkouts = useMemo(() => {
@@ -374,7 +377,7 @@ const WorkoutHistoryPage = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {sortedWorkouts.map((workout, index) => {
+                  {sortedWorkouts.map((workout, index) => {
                   const config = getActivityConfig(workout.activity);
                   const Icon = config.icon;
 
@@ -385,7 +388,10 @@ const WorkoutHistoryPage = () => {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
                     >
-                      <Card className="hover:shadow-elevation-2 transition-shadow">
+                      <Card 
+                        className="hover:shadow-elevation-2 transition-shadow cursor-pointer"
+                        onClick={() => setSelectedWorkout(workout)}
+                      >
                         <CardContent className="p-4">
                           <div className="flex items-start gap-4">
                             {/* Activity Icon */}
@@ -403,7 +409,7 @@ const WorkoutHistoryPage = () => {
                               </div>
 
                               {/* Stats Grid */}
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
                                 <div>
                                   <div className="text-xs text-muted-foreground">Distance</div>
                                   <div className="font-semibold">
@@ -427,6 +433,16 @@ const WorkoutHistoryPage = () => {
                                   <div className="font-semibold">{workout.calories}</div>
                                 </div>
                               </div>
+
+                              {/* Nearby Users Indicator */}
+                              {workout.nearbyUsers && workout.nearbyUsers.length > 0 && (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <PeopleIcon style={{ fontSize: 16 }} />
+                                  <span>
+                                    {workout.nearbyUsers.length} {workout.nearbyUsers.length === 1 ? "person" : "people"} nearby
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </CardContent>
@@ -470,6 +486,16 @@ const WorkoutHistoryPage = () => {
           </Card>
         )}
       </div>
+
+      {/* Workout Detail Modal */}
+      {selectedWorkout && (
+        <WorkoutDetailModal
+          isOpen={!!selectedWorkout}
+          onClose={() => setSelectedWorkout(null)}
+          workout={selectedWorkout}
+          useMetric={useMetric}
+        />
+      )}
     </div>
   );
 };

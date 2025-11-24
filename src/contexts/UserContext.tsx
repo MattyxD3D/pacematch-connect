@@ -2,6 +2,14 @@ import { createContext, useContext, ReactNode, useState, useEffect } from "react
 
 export type Activity = "running" | "cycling" | "walking";
 
+export interface NearbyUser {
+  id: number;
+  name: string;
+  avatar: string;
+  activity: string;
+  distance: string;
+}
+
 export interface WorkoutHistory {
   id: string;
   activity: Activity;
@@ -10,6 +18,8 @@ export interface WorkoutHistory {
   distance: number; // km
   avgSpeed: number; // km/h
   calories: number;
+  nearbyUsers?: NearbyUser[]; // Users who were nearby during workout
+  location?: string; // Location where workout happened
 }
 
 interface UserProfile {

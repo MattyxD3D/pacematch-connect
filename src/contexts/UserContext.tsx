@@ -6,6 +6,7 @@ interface UserProfile {
   username: string;
   activities: Activity[];
   gender?: string;
+  photos?: string[]; // URLs or base64 encoded images
 }
 
 interface UserContextType {

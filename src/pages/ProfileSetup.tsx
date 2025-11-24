@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,14 +9,48 @@ import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import Avatar from "@mui/material/Avatar";
+import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
+import CloseIcon from "@mui/icons-material/Close";
 import { toast } from "sonner";
 
 const ProfileSetup = () => {
   const navigate = useNavigate();
   const { setUserProfile } = useUser();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [username, setUsername] = useState("");
   const [activities, setActivities] = useState<("running" | "cycling" | "walking")[]>(["running"]);
   const [gender, setGender] = useState("");
+  const [photos, setPhotos] = useState<string[]>([]);
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    // Limit to 3 photos
+    if (photos.length >= 3) {
+      toast.error("You can only upload up to 3 photos");
+      return;
+    }
+
+    const newFiles = Array.from(files).slice(0, 3 - photos.length);
+    
+    newFiles.forEach((file) => {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("Photo size must be less than 5MB");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhotos((prev) => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleComplete = () => {
     if (!username.trim()) {
@@ -34,6 +68,7 @@ const ProfileSetup = () => {
       username: username.trim(),
       activities,
       gender: gender || undefined,
+      photos: photos.length > 0 ? photos : undefined,
     });
 
     toast.success("Profile created successfully!");
@@ -77,7 +112,7 @@ const ProfileSetup = () => {
           <p className="text-base text-muted-foreground">Let's personalize your experience</p>
         </motion.div>
 
-        {/* Profile Photo */}
+        {/* Photo Upload */}
         <motion.div
           initial={{ scale: 0.5, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -87,22 +122,61 @@ const ProfileSetup = () => {
             type: "spring",
             stiffness: 200 
           }}
-          className="flex justify-center"
+          className="space-y-4"
         >
-          <div className="relative">
-            <Avatar
-              sx={{ width: 120, height: 120, border: "4px solid", borderColor: "hsl(var(--primary))" }}
-              alt="Profile"
-              src="https://via.placeholder.com/120"
-            />
-            <motion.div
-              animate={{ scale: [1, 1.2, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className="absolute -bottom-2 -right-2 w-10 h-10 bg-success rounded-full flex items-center justify-center shadow-elevation-2"
-            >
-              <span className="text-success-foreground text-lg">✓</span>
-            </motion.div>
+          <div className="text-center">
+            <Label className="text-lg font-semibold">Profile Photos</Label>
+            <p className="text-sm text-muted-foreground mt-1">Add 2-3 photos to your profile</p>
           </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            {/* Existing photos */}
+            {photos.map((photo, index) => (
+              <motion.div
+                key={index}
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ duration: 0.3, delay: index * 0.1 }}
+                className="relative aspect-square rounded-2xl overflow-hidden border-2 border-primary shadow-elevation-2"
+              >
+                <img
+                  src={photo}
+                  alt={`Photo ${index + 1}`}
+                  className="w-full h-full object-cover"
+                />
+                <button
+                  onClick={() => handleRemovePhoto(index)}
+                  className="absolute top-1 right-1 p-1 bg-destructive rounded-full hover:bg-destructive/90 transition-colors"
+                >
+                  <CloseIcon style={{ fontSize: 16 }} className="text-destructive-foreground" />
+                </button>
+              </motion.div>
+            ))}
+
+            {/* Add photo button */}
+            {photos.length < 3 && (
+              <motion.button
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ duration: 0.3, delay: photos.length * 0.1 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => fileInputRef.current?.click()}
+                className="aspect-square rounded-2xl border-2 border-dashed border-border bg-muted hover:bg-secondary hover:border-primary transition-all duration-300 flex flex-col items-center justify-center gap-2"
+              >
+                <AddPhotoAlternateIcon style={{ fontSize: 32 }} className="text-muted-foreground" />
+                <span className="text-xs text-muted-foreground font-medium">Add Photo</span>
+              </motion.button>
+            )}
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handlePhotoUpload}
+            className="hidden"
+          />
         </motion.div>
 
         {/* Username Input */}

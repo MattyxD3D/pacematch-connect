@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { NotificationBanner } from "@/components/NotificationBanner";
 import { MessageModal } from "@/components/MessageModal";
 import { FriendRequestModal } from "@/components/FriendRequestModal";
+import { ProfileView } from "@/pages/ProfileView";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 import { BadgeCounter } from "@/components/NotificationSystem";
 import { NotificationTestButton } from "@/components/NotificationTestButton";
@@ -49,6 +50,7 @@ const MapScreen = () => {
   const [selectedUser, setSelectedUser] = useState<typeof nearbyUsers[0] | null>(null);
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [showFriendRequestModal, setShowFriendRequestModal] = useState(false);
+  const [showProfileView, setShowProfileView] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Activity filter for People Drawer
@@ -115,11 +117,11 @@ const MapScreen = () => {
 
   // Mock data for nearby users
   const nearbyUsers = [
-    { id: 1, name: "Sarah Johnson", distance: "0.3 km", distanceValue: 0.3, activity: "Running", avatar: "https://i.pravatar.cc/150?img=1", lat: 40.7484, lng: -73.9857 },
-    { id: 2, name: "Mike Chen", distance: "0.5 km", distanceValue: 0.5, activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=2", lat: 40.7489, lng: -73.9860 },
-    { id: 3, name: "Emma Davis", distance: "0.8 km", distanceValue: 0.8, activity: "Walking", avatar: "https://i.pravatar.cc/150?img=3", lat: 40.7495, lng: -73.9870 },
-    { id: 4, name: "James Wilson", distance: "1.2 km", distanceValue: 1.2, activity: "Running", avatar: "https://i.pravatar.cc/150?img=4", lat: 40.7500, lng: -73.9880 },
-    { id: 5, name: "Lisa Anderson", distance: "1.5 km", distanceValue: 1.5, activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=5", lat: 40.7510, lng: -73.9890 },
+    { id: 1, name: "Sarah Johnson", distance: "0.3 km", distanceValue: 0.3, activity: "Running", avatar: "https://i.pravatar.cc/150?img=1", lat: 40.7484, lng: -73.9857, photos: ["https://i.pravatar.cc/400?img=1", "https://i.pravatar.cc/400?img=11", "https://i.pravatar.cc/400?img=21"], bio: "Love running in Central Park! Looking for workout buddies 🏃‍♀️" },
+    { id: 2, name: "Mike Chen", distance: "0.5 km", distanceValue: 0.5, activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=2", lat: 40.7489, lng: -73.9860, photos: ["https://i.pravatar.cc/400?img=2", "https://i.pravatar.cc/400?img=12"], bio: "Cycling enthusiast and coffee lover ☕🚴" },
+    { id: 3, name: "Emma Davis", distance: "0.8 km", distanceValue: 0.8, activity: "Walking", avatar: "https://i.pravatar.cc/150?img=3", lat: 40.7495, lng: -73.9870, photos: ["https://i.pravatar.cc/400?img=3", "https://i.pravatar.cc/400?img=13", "https://i.pravatar.cc/400?img=23"], bio: "Walking is my meditation 🧘‍♀️" },
+    { id: 4, name: "James Wilson", distance: "1.2 km", distanceValue: 1.2, activity: "Running", avatar: "https://i.pravatar.cc/150?img=4", lat: 40.7500, lng: -73.9880, photos: ["https://i.pravatar.cc/400?img=4"] },
+    { id: 5, name: "Lisa Anderson", distance: "1.5 km", distanceValue: 1.5, activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=5", lat: 40.7510, lng: -73.9890, photos: ["https://i.pravatar.cc/400?img=5", "https://i.pravatar.cc/400?img=15"] },
     { id: 6, name: "Tom Martinez", distance: "2.0 km", distanceValue: 2.0, activity: "Walking", avatar: "https://i.pravatar.cc/150?img=6", lat: 40.7520, lng: -73.9900 },
   ];
 
@@ -172,6 +174,7 @@ const MapScreen = () => {
 
   const handleUserMarkerClick = (user: typeof nearbyUsers[0]) => {
     setSelectedUser(user);
+    setShowProfileView(true);
   };
 
   const handleCenterOnUser = () => {
@@ -379,122 +382,25 @@ const MapScreen = () => {
         </motion.button>
       </div>
 
-      {/* User Info Window */}
+      {/* Profile View Modal */}
       <AnimatePresence>
-        {selectedUser && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 w-[90vw] max-w-[340px]"
-          >
-            <div className="bg-card/95 backdrop-blur-xl rounded-3xl shadow-elevation-4 p-6 border-2 border-border/50">
-              {/* Close button */}
-              <button
-                onClick={() => setSelectedUser(null)}
-                className="absolute top-3 right-3 p-2 hover:bg-secondary rounded-full transition-colors touch-target"
-              >
-                <CloseIcon fontSize="small" />
-              </button>
-
-              {/* User Info */}
-              <div className="flex flex-col items-center space-y-4">
-                <Avatar
-                  src={selectedUser.avatar}
-                  alt={selectedUser.name}
-                  sx={{ width: 96, height: 96, border: "4px solid hsl(var(--primary))" }}
-                />
-                <div className="text-center">
-                  <h3 className="text-xl font-bold">{selectedUser.name}</h3>
-                  <div className="flex items-center justify-center gap-2 mt-2">
-                    {selectedUser.activity === "Running" && (
-                      <DirectionsRunIcon className="text-success" style={{ fontSize: 20 }} />
-                    )}
-                    {selectedUser.activity === "Cycling" && (
-                      <DirectionsBikeIcon className="text-primary" style={{ fontSize: 20 }} />
-                    )}
-                    {selectedUser.activity === "Walking" && (
-                      <DirectionsWalkIcon className="text-warning" style={{ fontSize: 20 }} />
-                    )}
-                    <span className="text-sm text-muted-foreground">{selectedUser.activity}</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    📍 {selectedUser.distance} away
-                  </p>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex flex-col gap-3 w-full pt-2">
-                  {/* Friend Badge (if friends) */}
-                  {getFriendStatus(selectedUser.id) === "friends" && (
-                    <div className="flex items-center justify-center gap-2 px-4 py-2 bg-[hsl(142,76%,36%)]/10 border-2 border-[hsl(142,76%,36%)] rounded-xl">
-                      <CheckCircleIcon style={{ fontSize: 20, color: "hsl(142, 76%, 36%)" }} />
-                      <span className="text-[hsl(142,76%,36%)] font-bold text-base">Friend</span>
-                    </div>
-                  )}
-
-                  {/* Primary: Send Message */}
-                  <Button
-                    onClick={handleSendMessage}
-                    className="w-full h-12 bg-primary text-primary-foreground hover:bg-primary/90 text-base font-semibold"
-                  >
-                    <SendIcon className="mr-2" fontSize="small" />
-                    {getFriendStatus(selectedUser.id) === "friends" ? "Message" : "Send Message"}
-                  </Button>
-
-                  {/* Add Friend Button - Different states */}
-                  {getFriendStatus(selectedUser.id) === "not_friends" && (
-                    <Button
-                      onClick={() => handleAddFriend(selectedUser.id)}
-                      variant="outline"
-                      className="w-full h-12 border-2 text-base font-semibold"
-                    >
-                      <PersonAddIcon className="mr-2" fontSize="small" />
-                      Add Friend
-                    </Button>
-                  )}
-
-                  {getFriendStatus(selectedUser.id) === "request_pending" && (
-                    <Button
-                      disabled
-                      variant="outline"
-                      className="w-full h-12 border-2 text-base font-semibold cursor-not-allowed opacity-60"
-                    >
-                      <HourglassEmptyIcon className="mr-2" fontSize="small" />
-                      Request Pending
-                    </Button>
-                  )}
-
-                  {getFriendStatus(selectedUser.id) === "denied" && (
-                    <div className="space-y-1">
-                      <Button
-                        disabled
-                        variant="outline"
-                        className="w-full h-12 border-2 text-base font-semibold cursor-not-allowed opacity-60"
-                      >
-                        <PersonAddIcon className="mr-2" fontSize="small" />
-                        Add Friend
-                      </Button>
-                      <p className="text-xs text-muted-foreground text-center">
-                        Try again in {getCooldownDays(selectedUser.id)} days
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Tertiary: Center on Location */}
-                  <Button
-                    onClick={handleCenterOnUser}
-                    variant="outline"
-                    className="w-full h-12 text-base font-medium"
-                  >
-                    <MyLocationIcon className="mr-2" fontSize="small" />
-                    Center on Location
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
+        {showProfileView && selectedUser && (
+          <ProfileView
+            user={selectedUser}
+            friendStatus={getFriendStatus(selectedUser.id)}
+            cooldownDays={getCooldownDays(selectedUser.id)}
+            onClose={() => {
+              setShowProfileView(false);
+              setSelectedUser(null);
+            }}
+            onSendMessage={() => {
+              setShowProfileView(false);
+              handleSendMessage();
+            }}
+            onAddFriend={() => handleAddFriend(selectedUser.id)}
+            onAcceptFriend={() => handleAcceptFriend(selectedUser.id)}
+            onDeclineFriend={() => handleDeclineFriend(selectedUser.id)}
+          />
         )}
       </AnimatePresence>
 
@@ -746,7 +652,12 @@ const MapScreen = () => {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.05 }}
-                    className="bg-card rounded-2xl shadow-elevation-2 border border-border/50 overflow-hidden"
+                    className="bg-card rounded-2xl shadow-elevation-2 border border-border/50 overflow-hidden cursor-pointer hover:shadow-elevation-3 transition-all"
+                    onClick={() => {
+                      setSelectedUser(user);
+                      setShowProfileView(true);
+                      setShowPeopleDrawer(false);
+                    }}
                   >
                     <div className="p-4">
                       {/* User Info */}
@@ -799,7 +710,21 @@ const MapScreen = () => {
                       </div>
 
                       {/* Action Buttons */}
-                      <div className="flex gap-2">
+                      <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                        {/* View Profile Button */}
+                        <Button
+                          onClick={() => {
+                            setSelectedUser(user);
+                            setShowProfileView(true);
+                            setShowPeopleDrawer(false);
+                          }}
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 h-10 border-2"
+                        >
+                          View Profile
+                        </Button>
+
                         {/* Send Message Button */}
                         <Button
                           onClick={() => {
@@ -812,47 +737,6 @@ const MapScreen = () => {
                         >
                           <SendIcon style={{ fontSize: 18 }} className="mr-1.5" />
                           Message
-                        </Button>
-
-                        {/* Add Friend / Status Button */}
-                        {userFriendStatus === "not_friends" && (
-                          <Button
-                            onClick={() => {
-                              handleAddFriend(user.id);
-                            }}
-                            size="sm"
-                            variant="outline"
-                            className="flex-1 h-10 border-2"
-                          >
-                            <PersonAddIcon style={{ fontSize: 18 }} className="mr-1.5" />
-                            Add Friend
-                          </Button>
-                        )}
-
-                        {userFriendStatus === "request_pending" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled
-                            className="flex-1 h-10 border-2 cursor-not-allowed opacity-60"
-                          >
-                            <HourglassEmptyIcon style={{ fontSize: 18 }} className="mr-1.5" />
-                            Pending
-                          </Button>
-                        )}
-
-                        {/* Center on Map Button */}
-                        <Button
-                          onClick={() => {
-                            // Center map on user
-                            setShowPeopleDrawer(false);
-                            toast.success(`Centered on ${user.name}`);
-                          }}
-                          size="sm"
-                          variant="outline"
-                          className="h-10 px-3"
-                        >
-                          <MyLocationIcon style={{ fontSize: 18 }} />
                         </Button>
                       </div>
                     </div>

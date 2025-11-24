@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
@@ -22,6 +22,8 @@ const MapScreen = () => {
   const [showPeopleDrawer, setShowPeopleDrawer] = useState(false);
   const [pointsTracked, setPointsTracked] = useState(0);
   const [distance, setDistance] = useState(0);
+  const [showNotification, setShowNotification] = useState(false);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Mock data for nearby users
   const nearbyUsers = [
@@ -30,19 +32,32 @@ const MapScreen = () => {
     { id: 3, name: "Emma Davis", distance: "0.8 km", activity: "Walking", avatar: "https://i.pravatar.cc/150?img=3" },
   ];
 
-  const [showNotification, setShowNotification] = useState(false);
+  // Manage tracking interval
+  useEffect(() => {
+    if (isActive) {
+      intervalRef.current = setInterval(() => {
+        setDistance(prev => prev + 0.1);
+        setPointsTracked(prev => prev + 1);
+      }, 2000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [isActive]);
 
   const handleStartStop = () => {
     if (!isActive) {
       toast.success("Activity started! GPS tracking enabled.");
       setIsActive(true);
       setShowNotification(false);
-      // Simulate tracking
-      const interval = setInterval(() => {
-        setDistance(prev => prev + 0.1);
-        setPointsTracked(prev => prev + 1);
-      }, 2000);
-      return () => clearInterval(interval);
     } else {
       toast.success(`Activity stopped. Great workout! ${distance.toFixed(1)} km tracked.`);
       setIsActive(false);

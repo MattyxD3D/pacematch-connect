@@ -8,6 +8,14 @@ import Avatar from "@mui/material/Avatar";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { ProfileView } from "./ProfileView";
+import { useUser } from "@/contexts/UserContext";
+import { 
+  getPendingRequests, 
+  sendFriendRequest, 
+  acceptFriendRequest, 
+  declineFriendRequest 
+} from "@/lib/socialStorage";
 
 interface Message {
   id: number;
@@ -29,6 +37,7 @@ const Chat = () => {
   const location = useLocation();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const { userProfile, setUserProfile } = useUser();
   
   // Get user from navigation state or use default
   const chatUser: ChatUser = location.state?.user || {
@@ -40,6 +49,18 @@ const Chat = () => {
   const [messageInput, setMessageInput] = useState("");
   const [hideLocation, setHideLocation] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+
+  // Determine friend status
+  const getFriendStatus = () => {
+    const friends = userProfile?.friends || [];
+    const { incoming, outgoing } = getPendingRequests();
+    
+    if (friends.includes(chatUser.id)) return "friends";
+    if (incoming.includes(chatUser.id)) return "request_received";
+    if (outgoing.includes(chatUser.id)) return "request_pending";
+    return "not_friends";
+  };
   
   // Mock messages
   const [messages, setMessages] = useState<Message[]>([
@@ -141,6 +162,30 @@ const Chat = () => {
     );
   };
 
+  // Profile view handlers
+  const handleAddFriend = () => {
+    sendFriendRequest(chatUser.id);
+    toast.success(`Friend request sent to ${chatUser.name}`);
+    setShowProfile(false);
+  };
+
+  const handleAcceptFriend = () => {
+    acceptFriendRequest(chatUser.id);
+    toast.success(`You are now friends with ${chatUser.name}`);
+    setShowProfile(false);
+  };
+
+  const handleDeclineFriend = () => {
+    declineFriendRequest(chatUser.id);
+    toast.success("Friend request declined");
+    setShowProfile(false);
+  };
+
+  const handleSendMessageFromProfile = () => {
+    setShowProfile(false);
+    // Already in chat, just close the profile
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -154,17 +199,23 @@ const Chat = () => {
             >
               <ArrowBackIcon style={{ fontSize: 24 }} />
             </motion.button>
-            <Avatar
-              src={chatUser.avatar}
-              alt={chatUser.name}
-              sx={{ width: 40, height: 40 }}
-              className="flex-shrink-0"
-            />
-            <div className="flex-1 min-w-0">
-              <h1 className="text-lg font-bold text-foreground truncate">
-                {chatUser.name}
-              </h1>
-            </div>
+            <motion.button
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setShowProfile(true)}
+              className="flex items-center gap-3 flex-1 min-w-0 rounded-lg hover:bg-accent/50 transition-colors p-2 -ml-2 cursor-pointer"
+            >
+              <Avatar
+                src={chatUser.avatar}
+                alt={chatUser.name}
+                sx={{ width: 40, height: 40 }}
+                className="flex-shrink-0"
+              />
+              <div className="flex-1 min-w-0 text-left">
+                <h1 className="text-lg font-bold text-foreground truncate">
+                  {chatUser.name}
+                </h1>
+              </div>
+            </motion.button>
           </div>
           <motion.button
             whileTap={{ scale: 0.95 }}
@@ -315,6 +366,26 @@ const Chat = () => {
           </Button>
         </div>
       </div>
+
+      {/* Profile View Modal */}
+      {showProfile && (
+        <ProfileView
+          user={{
+            id: chatUser.id,
+            name: chatUser.name,
+            avatar: chatUser.avatar,
+            distance: "In your chat",
+            activity: "Active",
+            photos: [chatUser.avatar],
+          }}
+          friendStatus={getFriendStatus()}
+          onClose={() => setShowProfile(false)}
+          onSendMessage={handleSendMessageFromProfile}
+          onAddFriend={handleAddFriend}
+          onAcceptFriend={handleAcceptFriend}
+          onDeclineFriend={handleDeclineFriend}
+        />
+      )}
     </div>
   );
 };

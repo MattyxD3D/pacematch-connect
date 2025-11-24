@@ -29,6 +29,10 @@ interface UserProfile {
   photos?: string[]; // URLs or base64 encoded images
   useMetric?: boolean; // true for km/km/h, false for mi/mph
   workoutHistory?: WorkoutHistory[];
+  bio?: string; // User biography
+  friends?: number[]; // Array of friend user IDs
+  friendRequests?: { from: number; date: Date }[]; // Pending incoming requests
+  sentRequests?: number[]; // Pending outgoing requests
 }
 
 interface UserContextType {

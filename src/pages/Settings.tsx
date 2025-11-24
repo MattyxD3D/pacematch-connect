@@ -185,7 +185,22 @@ const Settings = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
         >
-          <Card className="p-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
+          <Card className="p-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm space-y-2">
+            <button
+              onClick={() => navigate("/edit-profile")}
+              className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-accent transition-all duration-200"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-primary/10">
+                  <DirectionsRunIcon className="text-primary" style={{ fontSize: 24 }} />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-bold">Edit Profile</h3>
+                  <p className="text-xs text-muted-foreground">Update your profile information</p>
+                </div>
+              </div>
+              <ChevronRightIcon className="text-muted-foreground" />
+            </button>
             <button
               onClick={() => navigate("/workout-history")}
               className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-accent transition-all duration-200"

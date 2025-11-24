@@ -16,6 +16,9 @@ import WorkoutHistory from "./pages/WorkoutHistory";
 import Messages from "./pages/Messages";
 import Chat from "./pages/Chat";
 import Settings from "./pages/Settings";
+import Friends from "./pages/Friends";
+import EditProfile from "./pages/EditProfile";
+import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,14 +34,17 @@ const AppContent = () => {
         onTap={handleNotificationTap}
       />
       <Routes>
-        <Route path="/" element={<LoginScreen />} />
+        <Route path="/login" element={<LoginScreen />} />
         <Route path="/profile-setup" element={<ProfileSetup />} />
+        <Route path="/" element={<Index />} />
         <Route path="/map" element={<MapScreen />} />
         <Route path="/events" element={<Events />} />
         <Route path="/my-events" element={<MyEvents />} />
         <Route path="/workout-history" element={<WorkoutHistory />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/chat" element={<Chat />} />
+        <Route path="/friends" element={<Friends />} />
+        <Route path="/edit-profile" element={<EditProfile />} />
         <Route path="/settings" element={<Settings />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
         <Route path="*" element={<NotFound />} />

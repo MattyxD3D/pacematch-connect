@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -9,11 +11,14 @@ import SpeedIcon from "@mui/icons-material/Speed";
 import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import ShareIcon from "@mui/icons-material/Share";
 import CloseIcon from "@mui/icons-material/Close";
+import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
+import DeleteIcon from "@mui/icons-material/Delete";
+import { toast } from "sonner";
 
 interface WorkoutSummaryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: () => void;
+  onSave: (photos?: string[], caption?: string) => void;
   onDiscard: () => void;
   activity: "running" | "cycling" | "walking";
   duration: number; // in seconds
@@ -35,7 +40,38 @@ export const WorkoutSummaryModal = ({
   calories,
   useMetric,
 }: WorkoutSummaryModalProps) => {
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [caption, setCaption] = useState("");
+
   if (!isOpen) return null;
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    if (photos.length >= 3) {
+      toast.error("Maximum 3 photos allowed");
+      return;
+    }
+
+    Array.from(files).forEach(file => {
+      if (photos.length >= 3) return;
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhotos(prev => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setPhotos(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSave = () => {
+    onSave(photos.length > 0 ? photos : undefined, caption.trim() || undefined);
+  };
 
   const formatTime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
@@ -180,20 +216,54 @@ export const WorkoutSummaryModal = ({
             </div>
           </motion.div>
 
-          {/* Map Preview Placeholder */}
+          {/* Photo Upload Section */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.7 }}
-            className="bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 rounded-lg h-32 flex items-center justify-center border border-border"
+            className="space-y-3"
           >
-            <p className="text-sm text-muted-foreground">Route map preview</p>
+            <h3 className="font-semibold text-sm">Add Photos (Optional)</h3>
+            <div className="grid grid-cols-3 gap-3">
+              {photos.map((photo, index) => (
+                <div key={index} className="relative aspect-square rounded-lg overflow-hidden border-2 border-border">
+                  <img src={photo} alt={`Workout ${index + 1}`} className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => handleRemovePhoto(index)}
+                    className="absolute top-1 right-1 p-1 bg-destructive text-destructive-foreground rounded-full hover:bg-destructive/90"
+                  >
+                    <DeleteIcon style={{ fontSize: 14 }} />
+                  </button>
+                </div>
+              ))}
+              {photos.length < 3 && (
+                <label className="aspect-square border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-accent transition-colors">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handlePhotoUpload}
+                  />
+                  <AddPhotoAlternateIcon className="text-muted-foreground" style={{ fontSize: 24 }} />
+                  <span className="text-xs text-muted-foreground mt-1">Add</span>
+                </label>
+              )}
+            </div>
+            <Textarea
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              placeholder="Add a caption..."
+              maxLength={280}
+              rows={3}
+            />
+            <p className="text-xs text-muted-foreground text-right">{caption.length}/280</p>
           </motion.div>
 
           {/* Action Buttons */}
           <div className="flex flex-col gap-3">
             <Button
-              onClick={onSave}
+              onClick={handleSave}
               className="w-full h-12 text-base font-bold bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary"
             >
               Save Workout

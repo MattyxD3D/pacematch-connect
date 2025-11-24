@@ -49,7 +49,7 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-success/5 pb-24">
+    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-success/5 pb-20">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}

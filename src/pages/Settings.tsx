@@ -134,14 +134,7 @@ const Settings = () => {
         animate={{ opacity: 1, y: 0 }}
         className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-10 border-b border-border/50"
       >
-        <div className="max-w-2xl mx-auto px-6 py-5 flex items-center gap-4">
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={() => navigate("/map")}
-            className="touch-target p-2 hover:bg-secondary rounded-xl transition-all duration-200"
-          >
-            <ArrowBackIcon style={{ fontSize: 28 }} />
-          </motion.button>
+        <div className="max-w-2xl mx-auto px-6 py-5">
           <h1 className="text-3xl font-bold">Settings</h1>
         </div>
       </motion.div>

@@ -12,6 +12,7 @@ import ProfileSetup from "./pages/ProfileSetup";
 import MapScreen from "./pages/MapScreen";
 import Events from "./pages/Events";
 import MyEvents from "./pages/MyEvents";
+import WorkoutHistory from "./pages/WorkoutHistory";
 import Messages from "./pages/Messages";
 import Chat from "./pages/Chat";
 import Settings from "./pages/Settings";
@@ -35,6 +36,7 @@ const AppContent = () => {
         <Route path="/map" element={<MapScreen />} />
         <Route path="/events" element={<Events />} />
         <Route path="/my-events" element={<MyEvents />} />
+        <Route path="/workout-history" element={<WorkoutHistory />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="/settings" element={<Settings />} />

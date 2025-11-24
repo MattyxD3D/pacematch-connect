@@ -17,6 +17,8 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
+import HistoryIcon from "@mui/icons-material/History";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 
@@ -177,11 +179,36 @@ const Settings = () => {
           </Card>
         </motion.div>
 
-        {/* Profile Section */}
+        {/* Quick Links */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
+        >
+          <Card className="p-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
+            <button
+              onClick={() => navigate("/workout-history")}
+              className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-accent transition-all duration-200"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-success/10">
+                  <HistoryIcon className="text-success" style={{ fontSize: 24 }} />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-bold">Workout History</h3>
+                  <p className="text-xs text-muted-foreground">View all your past workouts</p>
+                </div>
+              </div>
+              <ChevronRightIcon className="text-muted-foreground" />
+            </button>
+          </Card>
+        </motion.div>
+
+        {/* Profile Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
         >
           <Card className="p-6 space-y-6 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
             <div className="flex items-center justify-between">
@@ -351,7 +378,7 @@ const Settings = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.2 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
         >
           <Card className="p-6 space-y-5 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
             <div className="flex items-center gap-3">

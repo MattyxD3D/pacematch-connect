@@ -13,6 +13,9 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import LockIcon from "@mui/icons-material/Lock";
 import EmailIcon from "@mui/icons-material/Email";
 import LogoutIcon from "@mui/icons-material/Logout";
+import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
+import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
+import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 
@@ -41,6 +44,12 @@ const Settings = () => {
     { id: 4, name: "James Wilson", avatar: "https://i.pravatar.cc/150?img=4", activity: "Running" },
     { id: 5, name: "Lisa Anderson", avatar: "https://i.pravatar.cc/150?img=5", activity: "Walking" },
   ];
+
+  const activities = [
+    { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
+    { id: "cycling", label: "Cycling", icon: DirectionsBikeIcon, color: "primary" },
+    { id: "walking", label: "Walking", icon: DirectionsWalkIcon, color: "warning" },
+  ] as const;
 
   const handleVisibilityToggle = () => {
     const newVisibility = !isVisible;
@@ -189,6 +198,41 @@ const Settings = () => {
                     <span className="text-base">{email}</span>
                   </div>
                 </div>
+
+                {/* Activities */}
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Activities</Label>
+                  <div className="flex gap-2 flex-wrap">
+                    {userProfile?.activities.map((activity) => {
+                      const activityData = activities.find(a => a.id === activity);
+                      if (!activityData) return null;
+                      const Icon = activityData.icon;
+                      return (
+                        <div
+                          key={activity}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
+                            activityData.color === 'success'
+                              ? 'bg-success/10 text-success'
+                              : activityData.color === 'primary'
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-warning/10 text-warning'
+                          }`}
+                        >
+                          <Icon style={{ fontSize: 18 }} />
+                          <span className="text-sm font-medium">{activityData.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Gender */}
+                {userProfile?.gender && (
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground">Gender</Label>
+                    <p className="text-base">{userProfile.gender}</p>
+                  </div>
+                )}
               </div>
             ) : (
               // Edit Mode
@@ -213,6 +257,43 @@ const Settings = () => {
                     className="h-12"
                   />
                 </div>
+
+                {/* Activities - Read Only */}
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Activities</Label>
+                  <div className="flex gap-2 flex-wrap">
+                    {userProfile?.activities.map((activity) => {
+                      const activityData = activities.find(a => a.id === activity);
+                      if (!activityData) return null;
+                      const Icon = activityData.icon;
+                      return (
+                        <div
+                          key={activity}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
+                            activityData.color === 'success'
+                              ? 'bg-success/10 text-success'
+                              : activityData.color === 'primary'
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-warning/10 text-warning'
+                          }`}
+                        >
+                          <Icon style={{ fontSize: 18 }} />
+                          <span className="text-sm font-medium">{activityData.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Activities can only be changed during initial setup</p>
+                </div>
+
+                {/* Gender - Read Only */}
+                {userProfile?.gender && (
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground">Gender</Label>
+                    <p className="text-base">{userProfile.gender}</p>
+                    <p className="text-xs text-muted-foreground">Gender can only be set during initial setup</p>
+                  </div>
+                )}
 
                 {/* Action Buttons */}
                 <div className="flex gap-3 pt-2">

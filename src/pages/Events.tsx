@@ -20,6 +20,7 @@ import Avatar from "@mui/material/Avatar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { EventDetailModal } from "@/components/EventDetailModal";
 
 type EventType = "running" | "cycling" | "walking";
 type EventCategory = "all" | "user" | "sponsored";
@@ -51,6 +52,7 @@ const Events = () => {
   const [activityFilter, setActivityFilter] = useState<EventType | "all">("all");
   const [categoryFilter, setCategoryFilter] = useState<EventCategory>("all");
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [showEventDetail, setShowEventDetail] = useState(false);
 
   // Mock events data
   const events: Event[] = [
@@ -161,8 +163,14 @@ const Events = () => {
   const handleJoinEvent = (eventId: number) => {
     const event = events.find((e) => e.id === eventId);
     if (event) {
-      toast.success(`You've joined "${event.title}"!`);
+      event.isJoined = !event.isJoined;
+      toast.success(event.isJoined ? `You've joined "${event.title}"!` : `You've left "${event.title}"`);
     }
+  };
+
+  const handleEventClick = (event: Event) => {
+    setSelectedEvent(event);
+    setShowEventDetail(true);
   };
 
   const getActivityIcon = (type: EventType) => {
@@ -380,7 +388,7 @@ const Events = () => {
                     event={event}
                     index={index}
                     onJoin={handleJoinEvent}
-                    onClick={() => setSelectedEvent(event)}
+                    onClick={() => handleEventClick(event)}
                     getActivityIcon={getActivityIcon}
                     getActivityColor={getActivityColor}
                   />
@@ -411,7 +419,7 @@ const Events = () => {
                     event={event}
                     index={index}
                     onJoin={handleJoinEvent}
-                    onClick={() => setSelectedEvent(event)}
+                    onClick={() => handleEventClick(event)}
                     getActivityIcon={getActivityIcon}
                     getActivityColor={getActivityColor}
                     listView
@@ -434,6 +442,18 @@ const Events = () => {
       >
         <AddIcon style={{ fontSize: 32 }} />
       </motion.button>
+
+      {/* Event Detail Modal */}
+      {showEventDetail && (
+        <EventDetailModal
+          event={selectedEvent}
+          onClose={() => {
+            setShowEventDetail(false);
+            setSelectedEvent(null);
+          }}
+          onJoin={handleJoinEvent}
+        />
+      )}
     </div>
   );
 };

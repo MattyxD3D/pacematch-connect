@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Avatar } from "@mui/material";
 import { WorkoutPost as WorkoutPostType, getMockUserById } from "@/lib/mockData";
 import { toggleKudos, getKudosForPost } from "@/lib/socialStorage";
+import { ProfileView } from "@/pages/ProfileView";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -24,6 +25,7 @@ interface WorkoutPostProps {
 export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: WorkoutPostProps) => {
   const user = getMockUserById(post.userId);
   const [kudos, setKudos] = useState<number[]>(getKudosForPost(post.id));
+  const [showProfile, setShowProfile] = useState(false);
   const hasKudos = kudos.includes(currentUserId);
 
   const activityConfig = {
@@ -67,12 +69,24 @@ export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: 
   if (!user) return null;
 
   return (
-    <Card className="p-4 space-y-4 hover:shadow-elevation-2 transition-shadow">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Avatar src={user.avatar} alt={user.username} sx={{ width: 48, height: 48 }} />
-        <div className="flex-1">
-          <h3 className="font-bold">{user.username}</h3>
+    <>
+      <Card className="p-4 space-y-4 hover:shadow-elevation-2 transition-shadow">
+        {/* Header */}
+        <div className="flex items-center gap-3">
+          <Avatar 
+            src={user.avatar} 
+            alt={user.username} 
+            sx={{ width: 48, height: 48 }}
+            className="cursor-pointer"
+            onClick={() => setShowProfile(true)}
+          />
+          <div className="flex-1">
+            <h3 
+              className="font-bold cursor-pointer hover:text-primary transition-colors"
+              onClick={() => setShowProfile(true)}
+            >
+              {user.username}
+            </h3>
           <p className="text-xs text-muted-foreground">
             {formatDistanceToNow(post.timestamp, { addSuffix: true })}
           </p>
@@ -171,12 +185,41 @@ export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: 
         </motion.button>
       </div>
 
-      {/* Kudos summary */}
-      {kudos.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {kudos.length === 1 ? "1 kudos" : `${kudos.length} kudos`}
-        </p>
-      )}
-    </Card>
+        {/* Kudos summary */}
+        {kudos.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {kudos.length === 1 ? "1 kudos" : `${kudos.length} kudos`}
+          </p>
+        )}
+      </Card>
+
+      {/* Profile View Modal */}
+      <AnimatePresence>
+        {showProfile && (
+          <ProfileView
+            user={{
+              id: user.id,
+              name: user.username,
+              distance: "2.5 km",
+              activity: post.workout.activity.charAt(0).toUpperCase() + post.workout.activity.slice(1),
+              avatar: user.avatar,
+              photos: user.photos,
+              bio: user.bio,
+            }}
+            friendStatus="not_friends"
+            onClose={() => setShowProfile(false)}
+            onSendMessage={() => {
+              setShowProfile(false);
+              toast.success(`Opening chat with ${user.username}`);
+            }}
+            onAddFriend={() => {
+              toast.success(`Friend request sent to ${user.username}`);
+            }}
+            onAcceptFriend={() => {}}
+            onDeclineFriend={() => {}}
+          />
+        )}
+      </AnimatePresence>
+    </>
   );
 };

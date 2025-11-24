@@ -19,6 +19,7 @@ import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import HistoryIcon from "@mui/icons-material/History";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import PeopleIcon from "@mui/icons-material/People";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import BottomNavigation from "@/components/BottomNavigation";
@@ -206,6 +207,21 @@ const Settings = () => {
                 <div className="text-left">
                   <h3 className="font-bold">Workout History</h3>
                   <p className="text-xs text-muted-foreground">View all your past workouts</p>
+                </div>
+              </div>
+              <ChevronRightIcon className="text-muted-foreground" />
+            </button>
+            <button
+              onClick={() => navigate("/friends")}
+              className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-accent transition-all duration-200"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-warning/10">
+                  <PeopleIcon className="text-warning" style={{ fontSize: 24 }} />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-bold">Friends</h3>
+                  <p className="text-xs text-muted-foreground">Manage your connections</p>
                 </div>
               </div>
               <ChevronRightIcon className="text-muted-foreground" />

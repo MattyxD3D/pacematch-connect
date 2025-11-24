@@ -127,6 +127,13 @@ export const WorkoutDetailModal = ({
               </div>
             </DialogHeader>
 
+            {/* Caption */}
+            {(workout as any).caption && (
+              <div className="p-4 bg-muted/30 rounded-lg border border-border">
+                <p className="text-sm leading-relaxed">{(workout as any).caption}</p>
+              </div>
+            )}
+
             {/* Location */}
             {workout.location && (
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -173,6 +180,25 @@ export const WorkoutDetailModal = ({
                 </CardContent>
               </Card>
             </div>
+
+            {/* Photos */}
+            {(workout as any).photos && (workout as any).photos.length > 0 && (
+              <div className={`grid gap-3 ${(workout as any).photos.length === 1 ? 'grid-cols-1' : (workout as any).photos.length === 2 ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                {(workout as any).photos.map((photo: string, idx: number) => (
+                  <div
+                    key={idx}
+                    className={`relative rounded-xl overflow-hidden ${(workout as any).photos.length === 3 && idx === 0 ? 'col-span-2' : ''}`}
+                    style={{ paddingTop: (workout as any).photos.length === 1 ? '56.25%' : '100%' }}
+                  >
+                    <img
+                      src={photo}
+                      alt={`Workout photo ${idx + 1}`}
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Route Map Placeholder */}
             <Card>

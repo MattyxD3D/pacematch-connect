@@ -395,10 +395,20 @@ const WorkoutHistoryPage = () => {
                       >
                         <CardContent className="p-4">
                           <div className="flex items-start gap-4">
-                            {/* Activity Icon */}
-                            <div className={`p-3 rounded-xl ${config.bgClass}`}>
-                              <Icon className={config.textClass} style={{ fontSize: 28 }} />
-                            </div>
+                            {/* Activity Icon or Photo Thumbnail */}
+                            {(workout as any).photos && (workout as any).photos.length > 0 ? (
+                              <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
+                                <img 
+                                  src={(workout as any).photos[0]} 
+                                  alt="Workout" 
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            ) : (
+                              <div className={`p-3 rounded-xl ${config.bgClass} flex-shrink-0`}>
+                                <Icon className={config.textClass} style={{ fontSize: 28 }} />
+                              </div>
+                            )}
 
                             {/* Workout Details */}
                             <div className="flex-1 min-w-0">
@@ -443,6 +453,13 @@ const WorkoutHistoryPage = () => {
                                     {workout.nearbyUsers.length} {workout.nearbyUsers.length === 1 ? "person" : "people"} nearby
                                   </span>
                                 </div>
+                              )}
+
+                              {/* Caption */}
+                              {(workout as any).caption && (
+                                <p className="text-sm text-muted-foreground italic mt-2">
+                                  "{(workout as any).caption}"
+                                </p>
                               )}
                             </div>
                           </div>

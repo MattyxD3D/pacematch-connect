@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar } from "@mui/material";
 import { mockUsers, getMockUserById } from "@/lib/mockData";
+import { ProfileView } from "@/pages/ProfileView";
 import {
   getPendingRequests,
   sendFriendRequest,
@@ -28,6 +29,7 @@ const Friends = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState(getPendingRequests());
   const [friends] = useState<number[]>([1, 2, 4, 5, 6, 8]); // Mock friend list
+  const [selectedUser, setSelectedUser] = useState<number | null>(null);
 
   const handleSendRequest = (userId: number, username: string) => {
     sendFriendRequest(userId);
@@ -132,7 +134,10 @@ const Friends = () => {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.05 }}
                   >
-                    <Card className="p-4">
+                    <Card 
+                      className="p-4 cursor-pointer hover:shadow-elevation-2 transition-shadow"
+                      onClick={() => setSelectedUser(friendId)}
+                    >
                       <div className="flex items-center gap-3">
                         <Avatar src={friend.avatar} alt={friend.username} sx={{ width: 56, height: 56 }} />
                         <div className="flex-1">
@@ -152,7 +157,10 @@ const Friends = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => navigate("/messages")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate("/messages");
+                          }}
                         >
                           <ChatIcon style={{ fontSize: 18 }} className="mr-1" />
                           Message
@@ -302,6 +310,37 @@ const Friends = () => {
       </div>
       
       <BottomNavigation />
+
+      {/* Profile View Modal */}
+      <AnimatePresence>
+        {selectedUser && (() => {
+          const user = getMockUserById(selectedUser);
+          if (!user) return null;
+          
+          return (
+            <ProfileView
+              user={{
+                id: user.id,
+                name: user.username,
+                distance: "2.5 km",
+                activity: user.activities[0].charAt(0).toUpperCase() + user.activities[0].slice(1),
+                avatar: user.avatar,
+                photos: user.photos,
+                bio: user.bio,
+              }}
+              friendStatus="friends"
+              onClose={() => setSelectedUser(null)}
+              onSendMessage={() => {
+                setSelectedUser(null);
+                navigate("/messages");
+              }}
+              onAddFriend={() => {}}
+              onAcceptFriend={() => {}}
+              onDeclineFriend={() => {}}
+            />
+          );
+        })()}
+      </AnimatePresence>
     </div>
   );
 };

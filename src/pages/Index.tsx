@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
-import { mockWorkoutPosts, WorkoutPost as WorkoutPostType } from "@/lib/mockData";
+import { mockWorkoutPosts, mergeUserWorkoutsIntoFeed, WorkoutPost as WorkoutPostType } from "@/lib/mockData";
 import { WorkoutPost } from "@/components/WorkoutPost";
 import { CommentDrawer } from "@/components/CommentDrawer";
 import { Button } from "@/components/ui/button";
@@ -28,10 +28,13 @@ const Index = () => {
   // Mock current user ID
   const currentUserId = 999;
 
+  // Merge user workouts with feed
+  const allPosts = mergeUserWorkoutsIntoFeed(workoutHistory, currentUserId);
+
   // Filter posts based on selected activity
   const filteredPosts = selectedTab === "all"
-    ? mockWorkoutPosts
-    : mockWorkoutPosts.filter(post => post.workout.activity === selectedTab);
+    ? allPosts
+    : allPosts.filter(post => post.workout.activity === selectedTab);
 
   // Calculate quick stats
   const thisWeekWorkouts = workoutHistory.filter(w => {

@@ -103,6 +103,26 @@ export const mockUsers: MockUser[] = [
   },
 ];
 
+// Function to merge user workouts into feed
+export const mergeUserWorkoutsIntoFeed = (userWorkouts: WorkoutHistory[], currentUserId: number): WorkoutPost[] => {
+  const feedPosts = [...mockWorkoutPosts];
+  
+  // Convert user workouts to posts
+  const userPosts: WorkoutPost[] = userWorkouts.map((workout, idx) => ({
+    id: `user-post-${workout.id}`,
+    userId: currentUserId,
+    workout,
+    caption: undefined, // User workouts don't have captions by default
+    kudos: [],
+    comments: [],
+    timestamp: new Date(workout.date),
+  }));
+
+  // Merge and sort by date
+  const allPosts = [...feedPosts, ...userPosts];
+  return allPosts.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+};
+
 // Generate mock workout posts
 const generateMockPosts = (): WorkoutPost[] => {
   const posts: WorkoutPost[] = [];

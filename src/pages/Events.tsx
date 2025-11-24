@@ -21,6 +21,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { EventDetailModal } from "@/components/EventDetailModal";
+import { CreateEventModal } from "@/components/CreateEventModal";
 
 type EventType = "running" | "cycling" | "walking";
 type EventCategory = "all" | "user" | "sponsored";
@@ -53,6 +54,7 @@ const Events = () => {
   const [categoryFilter, setCategoryFilter] = useState<EventCategory>("all");
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
+  const [showCreateEvent, setShowCreateEvent] = useState(false);
 
   // Mock events data
   const events: Event[] = [
@@ -171,6 +173,40 @@ const Events = () => {
   const handleEventClick = (event: Event) => {
     setSelectedEvent(event);
     setShowEventDetail(true);
+  };
+
+  const handleCreateEvent = (eventData: any) => {
+    // In real implementation, this would save to backend
+    console.log("Creating event:", eventData);
+    
+    // Create a new event object
+    const newEvent: Event = {
+      id: events.length + 1,
+      title: eventData.title,
+      description: eventData.description,
+      type: eventData.activityType,
+      category: "user",
+      date: new Date(eventData.date).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit' 
+      }),
+      time: eventData.time,
+      location: eventData.location,
+      distance: "0.0 km",
+      distanceValue: 0,
+      participants: 1,
+      maxParticipants: eventData.maxParticipants,
+      hostName: "You",
+      hostAvatar: "https://i.pravatar.cc/150?img=10",
+      lat: 40.7829,
+      lng: -73.9654,
+      isJoined: true,
+    };
+
+    // Add to events (in real app, would update state from backend response)
+    events.unshift(newEvent);
+    toast.success("Event created successfully!");
   };
 
   const getActivityIcon = (type: EventType) => {
@@ -437,7 +473,7 @@ const Events = () => {
         animate={{ scale: 1 }}
         transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
         whileTap={{ scale: 0.9 }}
-        onClick={() => toast.success("Create event feature coming soon!")}
+        onClick={() => setShowCreateEvent(true)}
         className="fixed bottom-6 right-6 w-16 h-16 bg-primary text-primary-foreground rounded-full shadow-elevation-4 hover:shadow-elevation-5 transition-all duration-300 flex items-center justify-center z-30"
       >
         <AddIcon style={{ fontSize: 32 }} />
@@ -452,6 +488,14 @@ const Events = () => {
             setSelectedEvent(null);
           }}
           onJoin={handleJoinEvent}
+        />
+      )}
+
+      {/* Create Event Modal */}
+      {showCreateEvent && (
+        <CreateEventModal
+          onClose={() => setShowCreateEvent(false)}
+          onCreateEvent={handleCreateEvent}
         />
       )}
     </div>

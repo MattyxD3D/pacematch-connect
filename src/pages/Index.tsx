@@ -16,6 +16,7 @@ import PersonIcon from "@mui/icons-material/Person";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
+import BottomNavigation from "@/components/BottomNavigation";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -150,49 +151,6 @@ const Index = () => {
         </motion.div>
       </div>
 
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-md border-t border-border shadow-elevation-3 z-20">
-        <div className="max-w-4xl mx-auto px-6 py-3">
-          <div className="flex items-center justify-around">
-            <button
-              onClick={() => navigate("/")}
-              className="flex flex-col items-center gap-1 p-2 text-primary"
-            >
-              <HomeIcon style={{ fontSize: 28 }} />
-              <span className="text-xs font-medium">Feed</span>
-            </button>
-            <button
-              onClick={() => navigate("/map")}
-              className="flex flex-col items-center gap-1 p-2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <MapIcon style={{ fontSize: 28 }} />
-              <span className="text-xs">Map</span>
-            </button>
-            <button
-              onClick={() => navigate("/events")}
-              className="flex flex-col items-center gap-1 p-2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <EventIcon style={{ fontSize: 28 }} />
-              <span className="text-xs">Events</span>
-            </button>
-            <button
-              onClick={() => navigate("/messages")}
-              className="flex flex-col items-center gap-1 p-2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ChatIcon style={{ fontSize: 28 }} />
-              <span className="text-xs">Messages</span>
-            </button>
-            <button
-              onClick={() => navigate("/settings")}
-              className="flex flex-col items-center gap-1 p-2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <PersonIcon style={{ fontSize: 28 }} />
-              <span className="text-xs">Profile</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Comment Drawer */}
       <CommentDrawer
         isOpen={isCommentDrawerOpen}
@@ -202,6 +160,8 @@ const Index = () => {
         currentUsername={userProfile?.username || "You"}
         currentAvatar="https://i.pravatar.cc/150?img=5"
       />
+      
+      <BottomNavigation />
     </div>
   );
 };

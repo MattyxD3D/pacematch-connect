@@ -21,6 +21,7 @@ import HistoryIcon from "@mui/icons-material/History";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
+import BottomNavigation from "@/components/BottomNavigation";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -126,7 +127,7 @@ const Settings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10">
+    <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10 pb-20">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -514,6 +515,8 @@ const Settings = () => {
           </Button>
         </motion.div>
       </div>
+      
+      <BottomNavigation />
     </div>
   );
 };

@@ -8,6 +8,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import Avatar from "@mui/material/Avatar";
 import { Badge } from "@/components/ui/badge";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
+import BottomNavigation from "@/components/BottomNavigation";
 
 interface Conversation {
   id: number;
@@ -109,18 +110,11 @@ const Messages = () => {
   const totalUnread = conversations.reduce((sum, conv) => sum + conv.unreadCount, 0);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col pb-20">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-background border-b border-border">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => navigate("/map")}
-              className="touch-target p-2 -ml-2 rounded-full hover:bg-accent transition-colors"
-            >
-              <ArrowBackIcon style={{ fontSize: 24 }} />
-            </motion.button>
             <div>
               <h1 className="text-2xl font-bold text-foreground">Messages</h1>
               {totalUnread > 0 && (
@@ -213,6 +207,8 @@ const Messages = () => {
           </div>
         )}
       </div>
+      
+      <BottomNavigation />
     </div>
   );
 };

@@ -21,6 +21,7 @@ import ChatIcon from "@mui/icons-material/Chat";
 import CheckIcon from "@mui/icons-material/Check";
 import CloseIcon from "@mui/icons-material/Close";
 import { toast } from "sonner";
+import BottomNavigation from "@/components/BottomNavigation";
 
 const Friends = () => {
   const navigate = useNavigate();
@@ -62,7 +63,7 @@ const Friends = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-success/5">
+    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-success/5 pb-20">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -308,6 +309,8 @@ const Friends = () => {
           </TabsContent>
         </Tabs>
       </div>
+      
+      <BottomNavigation />
     </div>
   );
 };

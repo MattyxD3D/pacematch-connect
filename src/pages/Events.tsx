@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { EventDetailModal } from "@/components/EventDetailModal";
 import { CreateEventModal } from "@/components/CreateEventModal";
+import BottomNavigation from "@/components/BottomNavigation";
 
 type EventType = "running" | "cycling" | "walking";
 type EventCategory = "all" | "user" | "sponsored";
@@ -233,7 +234,7 @@ const Events = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10">
+    <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10 pb-20">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -243,13 +244,6 @@ const Events = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={() => navigate("/events")}
-                className="touch-target p-2 hover:bg-secondary rounded-xl transition-all duration-200"
-              >
-                <ArrowBackIcon style={{ fontSize: 28 }} />
-              </motion.button>
               <div>
                 <h1 className="text-2xl sm:text-3xl font-bold">Events</h1>
                 <p className="text-sm text-muted-foreground">
@@ -510,6 +504,8 @@ const Events = () => {
           onCreateEvent={handleCreateEvent}
         />
       )}
+      
+      <BottomNavigation />
     </div>
   );
 };

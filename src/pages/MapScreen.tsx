@@ -33,6 +33,7 @@ import { WorkoutSummaryModal } from "@/components/WorkoutSummaryModal";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
+import BottomNavigation from "@/components/BottomNavigation";
 
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 import SendIcon from "@mui/icons-material/Send";
@@ -399,7 +400,7 @@ const MapScreen = () => {
   };
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-muted">
+    <div className="relative h-screen w-full overflow-hidden bg-muted pb-20">
       {/* Map Placeholder */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-success/5 to-warning/10">
         {/* Map simulation with demo user markers */}
@@ -1074,6 +1075,8 @@ const MapScreen = () => {
 
       {/* Test Notification Button (Demo Only) */}
       <NotificationTestButton />
+      
+      <BottomNavigation />
     </div>
   );
 };

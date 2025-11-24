@@ -25,6 +25,7 @@ import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import PeopleIcon from "@mui/icons-material/People";
 import { format } from "date-fns";
+import BottomNavigation from "@/components/BottomNavigation";
 
 const WorkoutHistoryPage = () => {
   const navigate = useNavigate();
@@ -496,6 +497,8 @@ const WorkoutHistoryPage = () => {
           useMetric={useMetric}
         />
       )}
+      
+      <BottomNavigation />
     </div>
   );
 };

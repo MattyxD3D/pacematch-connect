@@ -11,6 +11,7 @@ import SettingsIcon from "@mui/icons-material/Settings";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
+import MailIcon from "@mui/icons-material/Mail";
 import { Drawer } from "@mui/material";
 import Avatar from "@mui/material/Avatar";
 import { toast } from "sonner";
@@ -37,6 +38,9 @@ const MapScreen = () => {
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [showFriendRequestModal, setShowFriendRequestModal] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Mock unread messages count
+  const unreadMessagesCount = 3;
   
   // Friend status tracking (mock data - replace with backend later)
   const [friendStatuses, setFriendStatuses] = useState<Record<number, { status: FriendStatus; cooldownUntil?: number }>>({
@@ -281,6 +285,21 @@ const MapScreen = () => {
           <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
             {nearbyUsers.length}
           </span>
+        </motion.button>
+
+        {/* Messages */}
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={() => navigate("/messages")}
+          className="relative touch-target bg-card text-foreground rounded-full shadow-elevation-3 border border-border"
+          style={{ width: 56, height: 56 }}
+        >
+          <MailIcon style={{ fontSize: 28 }} />
+          {unreadMessagesCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
+              {unreadMessagesCount}
+            </span>
+          )}
         </motion.button>
 
         {/* My Location */}

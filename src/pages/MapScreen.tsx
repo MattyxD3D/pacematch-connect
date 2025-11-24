@@ -15,6 +15,9 @@ import { Drawer } from "@mui/material";
 import Avatar from "@mui/material/Avatar";
 import { toast } from "sonner";
 import { NotificationBanner } from "@/components/NotificationBanner";
+import { MessageModal } from "@/components/MessageModal";
+import SendIcon from "@mui/icons-material/Send";
+import CloseIcon from "@mui/icons-material/Close";
 
 const MapScreen = () => {
   const navigate = useNavigate();
@@ -25,6 +28,7 @@ const MapScreen = () => {
   const [showNotification, setShowNotification] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<"running" | "cycling" | "walking">("running");
   const [selectedUser, setSelectedUser] = useState<typeof nearbyUsers[0] | null>(null);
+  const [showMessageModal, setShowMessageModal] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const activities = [
@@ -93,8 +97,22 @@ const MapScreen = () => {
   const handleAddFriend = () => {
     if (selectedUser) {
       toast.success(`Friend request sent to ${selectedUser.name}`);
-      setSelectedUser(null);
+      // In real implementation, this would send to backend
     }
+  };
+
+  const handleSendMessage = () => {
+    setShowMessageModal(true);
+  };
+
+  const handleMessageSent = (message: string, isTemplate: boolean) => {
+    if (selectedUser) {
+      toast.success(`Message sent to ${selectedUser.name}!`);
+      console.log("Message sent:", { message, isTemplate, to: selectedUser.name });
+      // In real implementation, this would save to backend/Firebase
+    }
+    setShowMessageModal(false);
+    setSelectedUser(null);
   };
 
   return (
@@ -240,27 +258,27 @@ const MapScreen = () => {
       <AnimatePresence>
         {selectedUser && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 20 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30"
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 w-[90vw] max-w-[340px]"
           >
-            <div className="bg-card/95 backdrop-blur-xl rounded-3xl shadow-elevation-4 p-6 border-2 border-border/50 min-w-[300px]">
+            <div className="bg-card/95 backdrop-blur-xl rounded-3xl shadow-elevation-4 p-6 border-2 border-border/50">
               {/* Close button */}
               <button
                 onClick={() => setSelectedUser(null)}
-                className="absolute top-3 right-3 p-2 hover:bg-secondary rounded-full transition-colors"
+                className="absolute top-3 right-3 p-2 hover:bg-secondary rounded-full transition-colors touch-target"
               >
-                <span className="text-lg">✕</span>
+                <CloseIcon fontSize="small" />
               </button>
 
               {/* User Info */}
-              <div className="flex flex-col items-center space-y-4 mt-2">
+              <div className="flex flex-col items-center space-y-4">
                 <Avatar
                   src={selectedUser.avatar}
                   alt={selectedUser.name}
-                  sx={{ width: 80, height: 80, border: "3px solid hsl(var(--primary))" }}
+                  sx={{ width: 96, height: 96, border: "4px solid hsl(var(--primary))" }}
                 />
                 <div className="text-center">
                   <h3 className="text-xl font-bold">{selectedUser.name}</h3>
@@ -282,21 +300,34 @@ const MapScreen = () => {
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex gap-3 w-full pt-2">
+                <div className="flex flex-col gap-3 w-full pt-2">
+                  {/* Primary: Send Message */}
+                  <Button
+                    onClick={handleSendMessage}
+                    className="w-full h-12 bg-primary text-primary-foreground hover:bg-primary/90 text-base font-semibold"
+                  >
+                    <SendIcon className="mr-2" fontSize="small" />
+                    Send Message
+                  </Button>
+
+                  {/* Secondary: Add Friend */}
+                  <Button
+                    onClick={handleAddFriend}
+                    variant="outline"
+                    className="w-full h-12 border-2 text-base font-semibold"
+                  >
+                    <PeopleIcon className="mr-2" fontSize="small" />
+                    Add Friend
+                  </Button>
+
+                  {/* Tertiary: Center on Location */}
                   <Button
                     onClick={handleCenterOnUser}
                     variant="outline"
-                    className="flex-1"
+                    className="w-full h-12 text-base font-medium"
                   >
-                    <MyLocationIcon style={{ fontSize: 20 }} className="mr-2" />
-                    Center
-                  </Button>
-                  <Button
-                    onClick={handleAddFriend}
-                    className="flex-1 bg-gradient-to-r from-primary to-primary/90"
-                  >
-                    <PeopleIcon style={{ fontSize: 20 }} className="mr-2" />
-                    Add Friend
+                    <MyLocationIcon className="mr-2" fontSize="small" />
+                    Center on Location
                   </Button>
                 </div>
               </div>
@@ -304,6 +335,14 @@ const MapScreen = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Message Modal */}
+      <MessageModal
+        show={showMessageModal}
+        userName={selectedUser?.name || ""}
+        onClose={() => setShowMessageModal(false)}
+        onSend={handleMessageSent}
+      />
       <AnimatePresence>
         {isActive && (
           <motion.div

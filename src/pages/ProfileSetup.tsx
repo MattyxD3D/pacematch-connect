@@ -13,7 +13,7 @@ import { toast } from "sonner";
 const ProfileSetup = () => {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
-  const [activity, setActivity] = useState<"running" | "cycling" | "walking">("running");
+  const [activities, setActivities] = useState<("running" | "cycling" | "walking")[]>(["running"]);
   const [gender, setGender] = useState("");
 
   const handleComplete = () => {
@@ -22,16 +22,31 @@ const ProfileSetup = () => {
       return;
     }
 
+    if (activities.length === 0) {
+      toast.error("Please select at least one activity");
+      return;
+    }
+
     // TODO: Save profile data
     toast.success("Profile created successfully!");
     navigate("/map");
   };
 
-  const activities = [
+  const activityOptions = [
     { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
     { id: "cycling", label: "Cycling", icon: DirectionsBikeIcon, color: "primary" },
     { id: "walking", label: "Walking", icon: DirectionsWalkIcon, color: "warning" },
   ];
+
+  const handleActivityToggle = (activityId: "running" | "cycling" | "walking") => {
+    setActivities(prev => {
+      if (prev.includes(activityId)) {
+        return prev.filter(a => a !== activityId);
+      } else {
+        return [...prev, activityId];
+      }
+    });
+  };
 
   const genderOptions = ["Male", "Female", "Other", "Prefer not to say"];
 
@@ -107,11 +122,14 @@ const ProfileSetup = () => {
           transition={{ duration: 0.4, delay: 0.4 }}
           className="space-y-4"
         >
-          <Label className="text-lg font-semibold">Preferred Activity</Label>
+          <div>
+            <Label className="text-lg font-semibold">Select Activities</Label>
+            <p className="text-sm text-muted-foreground mt-1">Choose one or more activities</p>
+          </div>
           <div className="grid grid-cols-3 gap-4">
-            {activities.map((act, idx) => {
+            {activityOptions.map((act, idx) => {
               const Icon = act.icon;
-              const isSelected = activity === act.id;
+              const isSelected = activities.includes(act.id as "running" | "cycling" | "walking");
               return (
                 <motion.button
                   key={act.id}
@@ -119,7 +137,7 @@ const ProfileSetup = () => {
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ duration: 0.3, delay: 0.5 + idx * 0.1 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => setActivity(act.id as typeof activity)}
+                  onClick={() => handleActivityToggle(act.id as "running" | "cycling" | "walking")}
                   className={`
                     flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all duration-300 relative overflow-hidden
                     ${isSelected 

@@ -751,7 +751,7 @@ const MapScreen = () => {
       </AnimatePresence>
 
       {/* Bottom Controls */}
-      <div className="absolute bottom-0 left-0 right-0 p-6 z-10">
+      <div className="absolute bottom-20 left-0 right-0 p-6 z-10">
         {/* Activity Selector (when not active) */}
         <AnimatePresence>
           {!isActive && (

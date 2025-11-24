@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
+import { FitnessLevel, RadiusPreference, VisibilitySettings } from "@/contexts/UserContext";
 import { useUser } from "@/contexts/UserContext";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Avatar from "@mui/material/Avatar";
@@ -23,17 +25,25 @@ import PeopleIcon from "@mui/icons-material/People";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import BottomNavigation from "@/components/BottomNavigation";
+import { useAuth } from "@/hooks/useAuth";
+import { updateUserVisibility, updateUserLocation } from "@/services/locationService";
+import { updateUserProfile, signOut, getUserData } from "@/services/authService";
 
 const Settings = () => {
   const navigate = useNavigate();
-  const { userProfile, setUserProfile } = useUser();
+  const { user, loading: authLoading } = useAuth();
   const [isVisible, setIsVisible] = useState(true);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [username, setUsername] = useState(userProfile?.username || "");
-  const [selectedActivities, setSelectedActivities] = useState<("running" | "cycling" | "walking")[]>(
-    userProfile?.activities || ["running"]
-  );
-  const [email] = useState("john.doe@example.com");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [activity, setActivity] = useState<string | null>(null);
+  const [fitnessLevel, setFitnessLevel] = useState<FitnessLevel>("intermediate");
+  const [pace, setPace] = useState("");
+  const [visibleToAllLevels, setVisibleToAllLevels] = useState(true);
+  const [allowedLevels, setAllowedLevels] = useState<FitnessLevel[]>(["beginner", "intermediate", "pro"]);
+  const [radiusPreference, setRadiusPreference] = useState<RadiusPreference>("normal");
+  const [saving, setSaving] = useState(false);
+  const [isEditingMatching, setIsEditingMatching] = useState(false);
 
   // Privacy controls - users who can/cannot see your location
   const [userPrivacySettings, setUserPrivacySettings] = useState<Record<number, boolean>>({
@@ -59,10 +69,50 @@ const Settings = () => {
     { id: "walking", label: "Walking", icon: DirectionsWalkIcon, color: "warning" },
   ] as const;
 
-  const handleVisibilityToggle = () => {
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate("/");
+    }
+  }, [user, authLoading, navigate]);
+
+  // Load user data
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (user) {
+        const userData = await getUserData(user.uid);
+        if (userData) {
+          setUsername(userData.name || "");
+          setEmail(userData.email || "");
+          setActivity(userData.activity || null);
+          setIsVisible(userData.visible !== false); // Default to true if not set
+          setFitnessLevel(userData.fitnessLevel || "intermediate");
+          setPace(userData.pace ? userData.pace.toString() : "");
+          if (userData.visibility) {
+            setVisibleToAllLevels(userData.visibility.visibleToAllLevels ?? true);
+            setAllowedLevels(userData.visibility.allowedLevels || ["beginner", "intermediate", "pro"]);
+          }
+          setRadiusPreference(userData.radiusPreference || "normal");
+        }
+      }
+    };
+    loadUserData();
+  }, [user]);
+
+  const handleVisibilityToggle = async () => {
+    if (!user) return;
+    
     const newVisibility = !isVisible;
     setIsVisible(newVisibility);
-    toast.success(newVisibility ? "You're now visible on the map" : "You're now invisible on the map");
+    
+    try {
+      await updateUserVisibility(user.uid, newVisibility);
+      toast.success(newVisibility ? "You're now visible on the map" : "You're now invisible on the map");
+    } catch (error: any) {
+      console.error("Error updating visibility:", error);
+      toast.error("Failed to update visibility. Please try again.");
+      setIsVisible(!newVisibility); // Revert on error
+    }
   };
 
   const handleUserPrivacyToggle = (userId: number, userName: string) => {
@@ -78,53 +128,102 @@ const Settings = () => {
     );
   };
 
-  const handleSignOut = () => {
-    toast.success("Signed out successfully");
-    navigate("/");
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      toast.success("Signed out successfully");
+      navigate("/");
+    } catch (error: any) {
+      console.error("Error signing out:", error);
+      toast.error("Failed to sign out. Please try again.");
+    }
   };
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
+    if (!user) return;
+
     if (!username.trim()) {
-      toast.error("Username cannot be empty");
+      toast.error("Please enter a username");
       return;
     }
 
-    if (selectedActivities.length === 0) {
-      toast.error("Please select at least one activity");
-      return;
+    setSaving(true);
+    try {
+      await updateUserProfile(user.uid, {
+        name: username.trim()
+      });
+      setIsEditingProfile(false);
+      toast.success("Profile updated successfully!");
+    } catch (error: any) {
+      console.error("Error saving profile:", error);
+      toast.error("Failed to save profile. Please try again.");
+    } finally {
+      setSaving(false);
     }
-
-    // Update user profile
-    setUserProfile({
-      username: username.trim(),
-      activities: selectedActivities,
-      gender: userProfile?.gender,
-    });
-
-    setIsEditingProfile(false);
-    toast.success("Profile updated successfully!");
   };
 
   const handleCancelEdit = () => {
-    // Reset to original values
-    setUsername(userProfile?.username || "");
-    setSelectedActivities(userProfile?.activities || ["running"]);
+    // Reset to original values from user data
+    if (user) {
+      getUserData(user.uid).then(userData => {
+        if (userData) {
+          setUsername(userData.name || "");
+        }
+      });
+    }
     setIsEditingProfile(false);
   };
 
-  const handleActivityToggle = (activityId: "running" | "cycling" | "walking") => {
-    setSelectedActivities(prev => {
-      if (prev.includes(activityId)) {
-        // Don't allow removing the last activity
-        if (prev.length === 1) {
-          toast.error("You must have at least one activity selected");
-          return prev;
-        }
-        return prev.filter(a => a !== activityId);
-      } else {
-        return [...prev, activityId];
-      }
-    });
+  const handleSaveMatching = async () => {
+    if (!user) return;
+
+    setSaving(true);
+    try {
+      const paceValue = pace ? parseFloat(pace) : null;
+      const visibility: VisibilitySettings = {
+        visibleToAllLevels: visibleToAllLevels,
+        allowedLevels: visibleToAllLevels ? ["beginner", "intermediate", "pro"] : allowedLevels
+      };
+
+      await updateUserProfile(user.uid, {
+        fitnessLevel: fitnessLevel,
+        pace: paceValue,
+        visibility: visibility,
+        radiusPreference: radiusPreference
+      });
+      setIsEditingMatching(false);
+      toast.success("Matching preferences updated successfully!");
+    } catch (error: any) {
+      console.error("Error saving matching preferences:", error);
+      toast.error("Failed to save preferences. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLevelToggle = (level: FitnessLevel) => {
+    if (allowedLevels.includes(level)) {
+      setAllowedLevels(allowedLevels.filter(l => l !== level));
+    } else {
+      setAllowedLevels([...allowedLevels, level]);
+    }
+  };
+
+  const fitnessLevelOptions: { value: FitnessLevel; label: string }[] = [
+    { value: "beginner", label: "Beginner" },
+    { value: "intermediate", label: "Intermediate" },
+    { value: "pro", label: "Pro" }
+  ];
+
+  const radiusOptions: { value: RadiusPreference; label: string }[] = [
+    { value: "nearby", label: "Nearby" },
+    { value: "normal", label: "Normal" },
+    { value: "wide", label: "Wide" }
+  ];
+
+  const getPaceUnit = () => {
+    if (activity === "cycling") return "km/h";
+    return "min/km";
   };
 
   return (
@@ -255,7 +354,7 @@ const Settings = () => {
                 {/* Profile Photo */}
                 <div className="flex items-center gap-4">
                   <Avatar
-                    src="https://i.pravatar.cc/150?img=5"
+                    src={user?.photoURL || "https://via.placeholder.com/80"}
                     alt="Profile"
                     sx={{ width: 80, height: 80 }}
                   />
@@ -264,7 +363,7 @@ const Settings = () => {
                 {/* Username */}
                 <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">Username</Label>
-                  <p className="text-lg font-semibold">{userProfile?.username || "Not set"}</p>
+                  <p className="text-lg font-semibold">{username || "Not set"}</p>
                 </div>
 
                 {/* Email */}
@@ -276,31 +375,34 @@ const Settings = () => {
                   </div>
                 </div>
 
-                {/* Activities */}
+                {/* Activity */}
                 <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Activities</Label>
-                  <div className="flex gap-2 flex-wrap">
-                    {userProfile?.activities.map((activity) => {
-                      const activityData = activities.find(a => a.id === activity);
-                      if (!activityData) return null;
-                      const Icon = activityData.icon;
-                      return (
-                        <div
-                          key={activity}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
-                            activityData.color === 'success'
-                              ? 'bg-success/10 text-success'
-                              : activityData.color === 'primary'
-                              ? 'bg-primary/10 text-primary'
-                              : 'bg-warning/10 text-warning'
-                          }`}
-                        >
-                          <Icon style={{ fontSize: 18 }} />
-                          <span className="text-sm font-medium">{activityData.label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <Label className="text-sm text-muted-foreground">Activity</Label>
+                  {activity ? (
+                    <div className="flex gap-2 flex-wrap">
+                      {(() => {
+                        const activityData = activities.find(a => a.id === activity);
+                        if (!activityData) return null;
+                        const Icon = activityData.icon;
+                        return (
+                          <div
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
+                              activityData.color === 'success'
+                                ? 'bg-success/10 text-success'
+                                : activityData.color === 'primary'
+                                ? 'bg-primary/10 text-primary'
+                                : 'bg-warning/10 text-warning'
+                            }`}
+                          >
+                            <Icon style={{ fontSize: 18 }} />
+                            <span className="text-sm font-medium">{activityData.label}</span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <p className="text-base text-muted-foreground">Not set</p>
+                  )}
                 </div>
 
               </div>
@@ -310,11 +412,11 @@ const Settings = () => {
                 {/* Profile Photo */}
                 <div className="flex items-center gap-4">
                   <Avatar
-                    src="https://i.pravatar.cc/150?img=5"
+                    src={user?.photoURL || "https://via.placeholder.com/80"}
                     alt="Profile"
                     sx={{ width: 80, height: 80 }}
                   />
-                  <Button variant="outline" size="sm">Change Photo</Button>
+                  <Button variant="outline" size="sm" disabled>Change Photo</Button>
                 </div>
 
                 {/* Username */}
@@ -328,56 +430,6 @@ const Settings = () => {
                   />
                 </div>
 
-                {/* Activities - Editable */}
-                <div className="space-y-3">
-                  <Label>Activities</Label>
-                  <div className="space-y-2">
-                    {activities.map((activity) => {
-                      const Icon = activity.icon;
-                      const isSelected = selectedActivities.includes(activity.id as "running" | "cycling" | "walking");
-                      
-                      return (
-                        <motion.div
-                          key={activity.id}
-                          whileTap={{ scale: 0.98 }}
-                          className={`
-                            flex items-center justify-between p-3 rounded-xl border-2 transition-all duration-300 cursor-pointer
-                            ${isSelected 
-                              ? activity.color === 'success'
-                                ? 'border-success/30 bg-success/10'
-                                : activity.color === 'primary'
-                                ? 'border-primary/30 bg-primary/10'
-                                : 'border-warning/30 bg-warning/10'
-                              : 'border-border bg-muted/30'
-                            }
-                          `}
-                          onClick={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Icon 
-                              className={
-                                isSelected
-                                  ? activity.color === 'success'
-                                    ? 'text-success'
-                                    : activity.color === 'primary'
-                                    ? 'text-primary'
-                                    : 'text-warning'
-                                  : 'text-muted-foreground'
-                              }
-                              style={{ fontSize: 24 }} 
-                            />
-                            <span className="font-medium">{activity.label}</span>
-                          </div>
-                          <Checkbox 
-                            checked={isSelected}
-                            onCheckedChange={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
-                          />
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-                </div>
-
                 {/* Action Buttons */}
                 <div className="flex gap-3 pt-2">
                   <Button
@@ -389,9 +441,185 @@ const Settings = () => {
                   </Button>
                   <Button
                     onClick={handleSaveProfile}
+                    disabled={saving || authLoading}
                     className="flex-1 h-12 font-semibold"
                   >
-                    Save Changes
+                    {saving ? "Saving..." : "Save Changes"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Card>
+        </motion.div>
+
+        {/* Matching Preferences Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.25 }}
+        >
+          <Card className="p-6 space-y-6 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">Matching Preferences</h2>
+              {!isEditingMatching && (
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditingMatching(true)}
+                  className="h-10"
+                >
+                  Edit Preferences
+                </Button>
+              )}
+            </div>
+
+            {!isEditingMatching ? (
+              // Display Mode
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Fitness Level</Label>
+                  <p className="text-lg font-semibold capitalize">{fitnessLevel}</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Average Pace</Label>
+                  <p className="text-lg font-semibold">
+                    {pace ? `${pace} ${getPaceUnit()}` : "Not set"}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Visibility</Label>
+                  <p className="text-lg font-semibold">
+                    {visibleToAllLevels ? "Visible to all levels" : `Visible to: ${allowedLevels.join(", ")}`}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Search Radius</Label>
+                  <p className="text-lg font-semibold capitalize">{radiusPreference}</p>
+                </div>
+              </div>
+            ) : (
+              // Edit Mode
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <Label>Fitness Level</Label>
+                  <Select value={fitnessLevel} onValueChange={(value) => setFitnessLevel(value as FitnessLevel)}>
+                    <SelectTrigger className="h-12">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fitnessLevelOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="pace">
+                    Average Pace ({getPaceUnit()}) <span className="text-xs text-muted-foreground">(Optional)</span>
+                  </Label>
+                  <Input
+                    id="pace"
+                    type="number"
+                    step="0.1"
+                    placeholder={`e.g., ${activity === "cycling" ? "25" : "5.5"}`}
+                    value={pace}
+                    onChange={(e) => setPace(e.target.value)}
+                    className="h-12"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <Label>Who can see you?</Label>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="visibleToAll"
+                      checked={visibleToAllLevels}
+                      onCheckedChange={(checked) => {
+                        setVisibleToAllLevels(checked as boolean);
+                        if (checked) {
+                          setAllowedLevels(["beginner", "intermediate", "pro"]);
+                        }
+                      }}
+                    />
+                    <Label htmlFor="visibleToAll" className="text-sm font-normal cursor-pointer">
+                      Visible to all fitness levels
+                    </Label>
+                  </div>
+                  
+                  {!visibleToAllLevels && (
+                    <div className="space-y-2 pl-6">
+                      <Label className="text-sm text-muted-foreground">Select allowed levels:</Label>
+                      {fitnessLevelOptions.map((option) => (
+                        <div key={option.value} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`level-${option.value}`}
+                            checked={allowedLevels.includes(option.value)}
+                            onCheckedChange={() => handleLevelToggle(option.value)}
+                          />
+                          <Label htmlFor={`level-${option.value}`} className="text-sm font-normal cursor-pointer">
+                            {option.label}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Search Radius Preference</Label>
+                  <Select value={radiusPreference} onValueChange={(value) => setRadiusPreference(value as RadiusPreference)}>
+                    <SelectTrigger className="h-12">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {radiusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Controls how far the app searches for matches
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsEditingMatching(false);
+                      // Reset values
+                      if (user) {
+                        getUserData(user.uid).then(userData => {
+                          if (userData) {
+                            setFitnessLevel(userData.fitnessLevel || "intermediate");
+                            setPace(userData.pace ? userData.pace.toString() : "");
+                            if (userData.visibility) {
+                              setVisibleToAllLevels(userData.visibility.visibleToAllLevels ?? true);
+                              setAllowedLevels(userData.visibility.allowedLevels || ["beginner", "intermediate", "pro"]);
+                            }
+                            setRadiusPreference(userData.radiusPreference || "normal");
+                          }
+                        });
+                      }
+                    }}
+                    className="flex-1 h-12"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSaveMatching}
+                    disabled={saving || authLoading}
+                    className="flex-1 h-12 font-semibold"
+                  >
+                    {saving ? "Saving..." : "Save Changes"}
                   </Button>
                 </div>
               </div>

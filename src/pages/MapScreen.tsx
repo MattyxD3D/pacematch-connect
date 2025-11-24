@@ -1,8 +1,44 @@
-import { useState, useRef, useEffect } from "react";
+// Main map screen with Waze-like proximity matching
+import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import "../styles/animations.css";
+import {
+  GoogleMap,
+  Marker,
+  InfoWindow,
+  Polyline,
+  useJsApiLoader
+} from "@react-google-maps/api";
+import {
+  Box,
+  Button as MuiButton,
+  Fab,
+  Paper,
+  Typography,
+  CircularProgress,
+  Alert,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  ListItemAvatar,
+  Avatar,
+  Drawer,
+  IconButton,
+  Divider,
+  Slider
+} from "@mui/material";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
+import { useLocation } from "@/hooks/useLocation";
+import { useNearbyUsers } from "@/hooks/useNearbyUsers";
+import { useMatching } from "@/hooks/useMatching";
+import { useAuth } from "@/hooks/useAuth";
+import { formatDistance } from "@/utils/distance";
+import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
+import { updateUserVisibility } from "@/services/locationService";
+import { saveWorkout } from "@/services/workoutService";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
 import PauseIcon from "@mui/icons-material/Pause";
@@ -19,8 +55,21 @@ import TimerIcon from "@mui/icons-material/Timer";
 import SpeedIcon from "@mui/icons-material/Speed";
 import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import FavoriteIcon from "@mui/icons-material/Favorite";
-import { Drawer } from "@mui/material";
-import Avatar from "@mui/material/Avatar";
+import {
+  Settings as SettingsIconMui,
+  MyLocation as MyLocationMui,
+  CenterFocusStrong,
+  People as PeopleMui,
+  Close,
+  PlayArrow,
+  Stop,
+  DirectionsRun as DirectionsRunMui,
+  ViewInAr,
+  ViewComfy,
+  Navigation,
+  Explore as ExploreMui,
+  ZoomIn
+} from "@mui/icons-material";
 import { toast } from "sonner";
 import { NotificationBanner } from "@/components/NotificationBanner";
 import { MessageModal } from "@/components/MessageModal";
@@ -28,7 +77,6 @@ import { FriendRequestModal } from "@/components/FriendRequestModal";
 import { ProfileView } from "@/pages/ProfileView";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 import { BadgeCounter } from "@/components/NotificationSystem";
-import { NotificationTestButton } from "@/components/NotificationTestButton";
 import { WorkoutSummaryModal } from "@/components/WorkoutSummaryModal";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
@@ -39,18 +87,107 @@ type FriendStatus = "not_friends" | "request_pending" | "request_received" | "fr
 import SendIcon from "@mui/icons-material/Send";
 import CloseIcon from "@mui/icons-material/Close";
 
+const libraries: ("places")[] = ["places"];
+
+// Map container style
+const mapContainerStyle = {
+  width: "100%",
+  height: "100vh"
+};
+
+// Default map center (will be overridden by user location)
+const defaultCenter = {
+  lat: 14.5995,
+  lng: 120.9842 // Manila, Philippines
+};
+
+// Marker colors based on activity
+const getMarkerColor = (activity?: string | null): string => {
+  switch (activity) {
+    case "running":
+      return "🟢"; // Green for running
+    case "cycling":
+      return "🔵"; // Blue for cycling
+    case "walking":
+      return "🟡"; // Yellow for walking
+    default:
+      return "⚪"; // White/gray for unknown
+  }
+};
+
+/**
+ * Calculate zoom level from distance in meters
+ */
+const calculateZoomFromMeters = (distanceMeters: number): number => {
+  if (distanceMeters >= 50000) return 10; // 50km
+  if (distanceMeters >= 20000) return 11; // 20km
+  if (distanceMeters >= 10000) return 12; // 10km
+  if (distanceMeters >= 5000) return 13; // 5km
+  if (distanceMeters >= 2000) return 14; // 2km
+  if (distanceMeters >= 1000) return 15; // 1km
+  if (distanceMeters >= 500) return 16; // 500m
+  if (distanceMeters >= 250) return 17; // 250m
+  if (distanceMeters >= 150) return 18; // 150m
+  if (distanceMeters >= 100) return 18.5; // 100m
+  if (distanceMeters >= 50) return 19; // 50m
+  return 19.5; // Very close (25m or less)
+};
+
+interface Location {
+  lat: number;
+  lng: number;
+}
+
+interface LocationHistoryPoint {
+  lat: number;
+  lng: number;
+}
+
+interface UserTrails {
+  [userId: string]: LocationHistoryPoint[];
+}
+
+interface MapRef {
+  panTo: (center: { lat: number; lng: number }) => void;
+  setZoom: (zoom: number) => void;
+  setTilt: (tilt: number) => void;
+  setHeading: (heading: number) => void;
+}
+
+/**
+ * MapScreen Component
+ * Main screen showing map with user location and nearby users
+ */
 const MapScreen = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { userProfile, hasActivity, useMetric, addWorkout } = useUser();
   const { addNotification, unreadMessageCount, unreadFriendRequestCount } = useNotificationContext();
+  
+  // Google Maps state
+  const [visible, setVisible] = useState(true);
+  const [mapCenter, setMapCenter] = useState(defaultCenter);
+  const [mapZoom, setMapZoom] = useState(15);
+  const [mapRef, setMapRef] = useState<MapRef | null>(null);
+  const [showUserList, setShowUserList] = useState(false);
+  const [locationHistory, setLocationHistory] = useState<LocationHistoryPoint[]>([]);
+  const [userTrails, setUserTrails] = useState<UserTrails>({});
+  const [mapTilt, setMapTilt] = useState(0);
+  const [mapHeading, setMapHeading] = useState(0);
+  const [is3DMode, setIs3DMode] = useState(false);
+  const [isWazeMode, setIsWazeMode] = useState(false);
+  const [userHeading, setUserHeading] = useState<number | null>(null);
+  const [isNavigationStyle, setIsNavigationStyle] = useState(false);
+  const [viewDistanceMeters, setViewDistanceMeters] = useState(150);
+  const [showViewDistanceControl, setShowViewDistanceControl] = useState(false);
+  
+  // Workout tracking state
   const [isActive, setIsActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [showPeopleDrawer, setShowPeopleDrawer] = useState(false);
   const [pointsTracked, setPointsTracked] = useState(0);
   const [distance, setDistance] = useState(0);
   const [showNotification, setShowNotification] = useState(false);
-  
-  // Enhanced tracking state
   const [elapsedTime, setElapsedTime] = useState(0); // in seconds
   const [currentSpeed, setCurrentSpeed] = useState(0); // km/h
   const [avgSpeed, setAvgSpeed] = useState(0); // km/h
@@ -58,10 +195,9 @@ const MapScreen = () => {
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [showSummary, setShowSummary] = useState(false);
   const [showSpeedNotPace, setShowSpeedNotPace] = useState(true);
-  
-  // For speed calculation
   const lastDistanceRef = useRef(0);
   const lastTimeRef = useRef(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Get user's enabled activities from profile
   const userActivities = userProfile?.activities || ["running", "cycling", "walking"];
@@ -69,43 +205,74 @@ const MapScreen = () => {
     userActivities[0] as "running" | "cycling" | "walking"
   );
   
-  const [selectedUser, setSelectedUser] = useState<typeof nearbyUsers[0] | null>(null);
+  const [selectedUser, setSelectedUser] = useState<any>(null);
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [showFriendRequestModal, setShowFriendRequestModal] = useState(false);
   const [showProfileView, setShowProfileView] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Activity filter for People Drawer
   const [activityFilter, setActivityFilter] = useState<"all" | "running" | "cycling" | "walking">("all");
   
-  // Simulate receiving notifications (for demo purposes)
-  useEffect(() => {
-    // Simulate a message notification after 3 seconds
-    const messageTimer = setTimeout(() => {
-      addNotification({
-        type: "message",
-        userId: 1,
-        userName: "Sarah Johnson",
-        userAvatar: "https://i.pravatar.cc/150?img=1",
-        message: "Hi! Want to workout together?",
-      });
-    }, 3000);
+  // Load Google Maps API
+  const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: googleMapsApiKey || '',
+    libraries: libraries
+  });
 
-    // Simulate a friend request notification after 6 seconds
-    const friendRequestTimer = setTimeout(() => {
-      addNotification({
-        type: "friend_request",
-        userId: 4,
-        userName: "James Wilson",
-        userAvatar: "https://i.pravatar.cc/150?img=4",
-      });
-    }, 6000);
+  // Get user's current location - tracking controlled by activity button
+  const { location, error: locationError, isGettingLocation } = useLocation(
+    user?.uid || null,
+    isActive, // Use isActive instead of isActivityActive
+    visible
+  );
+  
+  // Calculate bearing (direction) between two points
+  const calculateBearing = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const lat1Rad = lat1 * Math.PI / 180;
+    const lat2Rad = lat2 * Math.PI / 180;
+    
+    const y = Math.sin(dLng) * Math.cos(lat2Rad);
+    const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - 
+              Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLng);
+    
+    const bearing = Math.atan2(y, x) * 180 / Math.PI;
+    return (bearing + 360) % 360; // Normalize to 0-360
+  };
 
-    return () => {
-      clearTimeout(messageTimer);
-      clearTimeout(friendRequestTimer);
-    };
-  }, [addNotification]);
+  // Calculate camera center offset to position user at bottom of screen
+  const calculateCameraOffset = (userLat: number, userLng: number, heading: number, offsetDistance: number = 0.002): Location => {
+    const headingRad = (heading || 0) * Math.PI / 180;
+    const offsetLat = userLat + offsetDistance * Math.cos(headingRad);
+    const offsetLng = userLng + offsetDistance * Math.sin(headingRad);
+    return { lat: offsetLat, lng: offsetLng };
+  };
+
+  // Get matched users using matching algorithm
+  const { matches, loading: matchesLoading } = useMatching({
+    currentUserId: user?.uid || "",
+    currentLocation: location,
+    activity: selectedActivity,
+    fitnessLevel: userProfile?.fitnessLevel || "intermediate",
+    pace: userProfile?.pace,
+    visibility: userProfile?.visibility || {
+      visibleToAllLevels: true,
+      allowedLevels: ["beginner", "intermediate", "pro"]
+    },
+    radiusPreference: userProfile?.radiusPreference || "normal"
+  });
+
+  // Get nearby users from hook (fallback for non-matched display)
+  const { nearbyUsers: nearbyUsersFromHook, loading: usersLoading } = useNearbyUsers(
+    location,
+    50,
+    "all",
+    "all",
+    user?.uid || null
+  );
+
   
   // Friend status tracking (mock data - replace with backend later)
   const [friendStatuses, setFriendStatuses] = useState<Record<number, { status: FriendStatus; cooldownUntil?: number }>>({
@@ -137,15 +304,38 @@ const MapScreen = () => {
     userActivities.includes(act.id as "running" | "cycling" | "walking")
   );
 
-  // Mock data for nearby users
-  const nearbyUsers = [
-    { id: 1, name: "Sarah Johnson", distance: "0.3 km", distanceValue: 0.3, activity: "Running", avatar: "https://i.pravatar.cc/150?img=1", lat: 40.7484, lng: -73.9857, photos: ["https://i.pravatar.cc/400?img=1", "https://i.pravatar.cc/400?img=11", "https://i.pravatar.cc/400?img=21"], bio: "Love running in Central Park! Looking for workout buddies 🏃‍♀️" },
-    { id: 2, name: "Mike Chen", distance: "0.5 km", distanceValue: 0.5, activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=2", lat: 40.7489, lng: -73.9860, photos: ["https://i.pravatar.cc/400?img=2", "https://i.pravatar.cc/400?img=12"], bio: "Cycling enthusiast and coffee lover ☕🚴" },
-    { id: 3, name: "Emma Davis", distance: "0.8 km", distanceValue: 0.8, activity: "Walking", avatar: "https://i.pravatar.cc/150?img=3", lat: 40.7495, lng: -73.9870, photos: ["https://i.pravatar.cc/400?img=3", "https://i.pravatar.cc/400?img=13", "https://i.pravatar.cc/400?img=23"], bio: "Walking is my meditation 🧘‍♀️" },
-    { id: 4, name: "James Wilson", distance: "1.2 km", distanceValue: 1.2, activity: "Running", avatar: "https://i.pravatar.cc/150?img=4", lat: 40.7500, lng: -73.9880, photos: ["https://i.pravatar.cc/400?img=4"] },
-    { id: 5, name: "Lisa Anderson", distance: "1.5 km", distanceValue: 1.5, activity: "Cycling", avatar: "https://i.pravatar.cc/150?img=5", lat: 40.7510, lng: -73.9890, photos: ["https://i.pravatar.cc/400?img=5", "https://i.pravatar.cc/400?img=15"] },
-    { id: 6, name: "Tom Martinez", distance: "2.0 km", distanceValue: 2.0, activity: "Walking", avatar: "https://i.pravatar.cc/150?img=6", lat: 40.7520, lng: -73.9900 },
-  ];
+  // Use matched users if available, otherwise fallback to nearby users
+  const matchedUsersForDisplay = matches.map((match) => ({
+    id: match.user.uid,
+    name: match.user.name || "User",
+    distance: formatDistance(match.distance / 1000),
+    distanceValue: match.distance / 1000,
+    activity: match.user.activity || "Running",
+    avatar: match.user.photoURL || "https://via.placeholder.com/150",
+    lat: match.user.location.lat,
+    lng: match.user.location.lng,
+    matchScore: match.score,
+    fitnessLevel: match.user.fitnessLevel,
+    pace: match.user.pace
+  }));
+
+  // Use nearby users from hook, or fallback to mock data for UI features
+  const nearbyUsers = matchedUsersForDisplay.length > 0 
+    ? matchedUsersForDisplay
+    : (nearbyUsersFromHook.length > 0 
+        ? nearbyUsersFromHook.map((userData: any) => ({
+            id: userData.id,
+            name: userData.name || "User",
+            distance: formatDistance(userData.distance),
+            distanceValue: userData.distance,
+            activity: userData.activity || "Running",
+            avatar: userData.photoURL || "https://via.placeholder.com/150",
+            lat: userData.lat,
+            lng: userData.lng,
+            photos: [],
+            bio: ""
+          }))
+        : []);
 
   // Filter users by activity
   const filteredUsers = activityFilter === "all" 
@@ -155,50 +345,78 @@ const MapScreen = () => {
   // Sort by distance
   const sortedUsers = [...filteredUsers].sort((a, b) => a.distanceValue - b.distanceValue);
 
-  // Enhanced tracking interval
+  // Track location history for trail when activity is active
   useEffect(() => {
-    if (isActive && !isPaused) {
-      intervalRef.current = setInterval(() => {
-        setElapsedTime(prev => prev + 1);
+    if (isActive && location) {
+      setLocationHistory((prev) => {
+        const newHistory = [...prev, { lat: location.lat, lng: location.lng }];
         
-        // Simulate realistic distance updates based on activity
-        const speedVariation = Math.random() * 0.2 - 0.1; // -0.1 to +0.1 variation
-        let baseSpeed = 0;
-        
-        if (selectedActivity === "running") {
-          baseSpeed = 10 + speedVariation; // 8-12 km/h
-        } else if (selectedActivity === "cycling") {
-          baseSpeed = 20 + speedVariation; // 15-25 km/h
-        } else {
-          baseSpeed = 5 + speedVariation; // 4-6 km/h
+        if (prev.length > 0) {
+          const lastPoint = prev[prev.length - 1];
+          const heading = calculateBearing(
+            lastPoint.lat,
+            lastPoint.lng,
+            location.lat,
+            location.lng
+          );
+          setUserHeading(heading);
+          
+          if (isWazeMode && mapRef && isLoaded && window.google) {
+            mapRef.setHeading(heading);
+            setMapHeading(heading);
+          }
         }
         
-        const distanceIncrement = baseSpeed / 3600; // km per second
+        return newHistory.slice(-100);
+      });
+    } else if (!isActive) {
+      setLocationHistory([]);
+      setUserHeading(null);
+    }
+  }, [location, isActive, isWazeMode, mapRef, isLoaded]);
+
+  // Enhanced tracking interval for workout stats
+  useEffect(() => {
+    if (isActive && !isPaused && location) {
+      intervalRef.current = setInterval(() => {
+        setElapsedTime(prev => prev + 1);
+        setPointsTracked(prev => prev + 1);
         
-        setDistance(prev => {
-          const newDistance = prev + distanceIncrement;
+        // Calculate distance from location history
+        if (locationHistory.length > 1) {
+          let totalDistance = 0;
+          for (let i = 1; i < locationHistory.length; i++) {
+            const prev = locationHistory[i - 1];
+            const curr = locationHistory[i];
+            // Haversine formula for distance
+            const R = 6371; // Earth's radius in km
+            const dLat = (curr.lat - prev.lat) * Math.PI / 180;
+            const dLng = (curr.lng - prev.lng) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(prev.lat * Math.PI / 180) * Math.cos(curr.lat * Math.PI / 180) *
+                      Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            totalDistance += R * c;
+          }
+          setDistance(totalDistance);
           
           // Calculate current speed
           const currentTime = Date.now();
           const timeDiff = (currentTime - lastTimeRef.current) / 1000; // seconds
           
           if (timeDiff >= 1 && lastTimeRef.current > 0) {
-            const distanceDiff = newDistance - lastDistanceRef.current;
+            const distanceDiff = totalDistance - lastDistanceRef.current;
             const speed = (distanceDiff / timeDiff) * 3600; // km/h
             setCurrentSpeed(speed);
             
-            lastDistanceRef.current = newDistance;
+            lastDistanceRef.current = totalDistance;
             lastTimeRef.current = currentTime;
           } else if (lastTimeRef.current === 0) {
             lastTimeRef.current = currentTime;
-            lastDistanceRef.current = newDistance;
+            lastDistanceRef.current = totalDistance;
           }
-          
-          return newDistance;
-        });
-        
-        setPointsTracked(prev => prev + 1);
-      }, 1000); // Update every second for smooth tracking
+        }
+      }, 1000);
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -211,7 +429,7 @@ const MapScreen = () => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [isActive, isPaused, selectedActivity]);
+  }, [isActive, isPaused, selectedActivity, location, locationHistory]);
   
   // Calculate average speed and calories
   useEffect(() => {
@@ -264,7 +482,12 @@ const MapScreen = () => {
     toast(isPaused ? "Activity resumed" : "Activity paused");
   };
   
-  const handleSaveWorkout = () => {
+  const handleSaveWorkout = async () => {
+    if (!user?.uid) {
+      toast.error("You must be logged in to save workouts");
+      return;
+    }
+
     // Filter nearby users who were active during the workout
     const activeNearbyUsers = nearbyUsers
       .filter(user => user.distanceValue <= 2.0) // Within 2km radius
@@ -277,7 +500,7 @@ const MapScreen = () => {
         distance: user.distance,
       }));
 
-    addWorkout({
+    const workoutData = {
       activity: selectedActivity,
       date: startTime || new Date(),
       duration: elapsedTime,
@@ -286,16 +509,28 @@ const MapScreen = () => {
       calories,
       nearbyUsers: activeNearbyUsers,
       location: "Central Park, New York", // This would come from GPS in real app
-    });
-    toast.success(`Workout saved! ${distance.toFixed(2)} km tracked.`);
-    setShowSummary(false);
-    setPointsTracked(0);
-    setDistance(0);
-    setElapsedTime(0);
-    setCurrentSpeed(0);
-    setAvgSpeed(0);
-    setCalories(0);
-    setStartTime(null);
+    };
+
+    try {
+      // Save to Firebase
+      await saveWorkout(user.uid, workoutData);
+      
+      // Also save to localStorage via context (for offline/fallback)
+      addWorkout(workoutData);
+      
+      toast.success(`Workout saved! ${distance.toFixed(2)} km tracked.`);
+      setShowSummary(false);
+      setPointsTracked(0);
+      setDistance(0);
+      setElapsedTime(0);
+      setCurrentSpeed(0);
+      setAvgSpeed(0);
+      setCalories(0);
+      setStartTime(null);
+    } catch (error) {
+      console.error("Error saving workout:", error);
+      toast.error("Failed to save workout. Please try again.");
+    }
   };
   
   const handleDiscardWorkout = () => {
@@ -342,6 +577,8 @@ const MapScreen = () => {
     setShowNotification(false);
     handleStartStop();
   };
+
+  // Removed test notification simulation - notifications now come from Firebase events only
 
   const handleUserMarkerClick = (user: typeof nearbyUsers[0]) => {
     setSelectedUser(user);
@@ -399,101 +636,305 @@ const MapScreen = () => {
     setSelectedUser(null);
   };
 
+  // Auto-follow user with camera offset in navigation-style mode
+  useEffect(() => {
+    if (isNavigationStyle && isWazeMode && location && mapRef && isLoaded && window.google) {
+      const updateTimer = setTimeout(() => {
+        const cameraCenter = calculateCameraOffset(
+          location.lat, 
+          location.lng, 
+          userHeading || 0,
+          0.002
+        );
+        
+        mapRef.panTo(cameraCenter);
+        mapRef.setTilt(67.5);
+        if (userHeading !== null) {
+          mapRef.setHeading(userHeading);
+          setMapHeading(userHeading);
+        }
+      }, 1000);
+      
+      return () => clearTimeout(updateTimer);
+    }
+  }, [location, isNavigationStyle, isWazeMode, userHeading, mapRef, isLoaded]);
+
+  // Track other users' movement trails
+  useEffect(() => {
+    nearbyUsers.forEach((userData: any) => {
+      if (userData.lat && userData.lng) {
+        setUserTrails((prev) => {
+          const userId = userData.id;
+          const currentTrail = prev[userId] || [];
+          const lastPoint = currentTrail[currentTrail.length - 1];
+          
+          if (!lastPoint || 
+              (Math.abs(lastPoint.lat - userData.lat) > 0.0001 || 
+               Math.abs(lastPoint.lng - userData.lng) > 0.0001)) {
+            const newTrail = [...currentTrail, { lat: userData.lat, lng: userData.lng }];
+            return { ...prev, [userId]: newTrail.slice(-50) };
+          }
+          return prev;
+        });
+      }
+    });
+  }, [nearbyUsers]);
+
+  // Update map center when location changes
+  useEffect(() => {
+    if (location && location.lat && location.lng) {
+      if (!isNavigationStyle) {
+        setMapCenter({ lat: location.lat, lng: location.lng });
+        // Center map on user when location is first obtained
+        if (mapRef && isLoaded && window.google) {
+          mapRef.panTo({ lat: location.lat, lng: location.lng });
+        }
+      } else if (isNavigationStyle && mapRef && isLoaded && window.google) {
+        const cameraCenter = calculateCameraOffset(location.lat, location.lng, userHeading || 0);
+        setMapCenter(cameraCenter);
+        mapRef.panTo(cameraCenter);
+      }
+    }
+  }, [location, isNavigationStyle, userHeading, mapRef, isLoaded]);
+
+  // Update zoom level based on view distance
+  useEffect(() => {
+    if (location && mapRef && isLoaded && window.google) {
+      const zoomLevel = calculateZoomFromMeters(viewDistanceMeters);
+      setMapZoom(zoomLevel);
+      mapRef.setZoom(zoomLevel);
+      if (!isNavigationStyle) {
+        mapRef.panTo({ lat: location.lat, lng: location.lng });
+      }
+    }
+  }, [viewDistanceMeters, location, mapRef, isLoaded, isNavigationStyle]);
+
+  const onMapLoad = useCallback((map: any) => {
+    setMapRef(map);
+    if (window.google && window.google.maps) {
+      map.setOptions({
+        mapTypeId: window.google.maps.MapTypeId.ROADMAP
+      });
+    }
+  }, []);
+
+  const onMarkerClick = (userData: any) => {
+    setSelectedUser(userData);
+    setShowProfileView(true);
+  };
+
+  const onInfoWindowClose = () => {
+    setSelectedUser(null);
+  };
+
+  const handleCenterOnUserMap = (userData: any) => {
+    if (mapRef && userData) {
+      const newCenter = { lat: userData.lat, lng: userData.lng };
+      mapRef.panTo(newCenter);
+      mapRef.setZoom(16);
+      setTimeout(() => {
+        setMapCenter(newCenter);
+        setMapZoom(16);
+      }, 100);
+      setShowUserList(false);
+      setSelectedUser(userData);
+    }
+  };
+
+  const handleCenterOnMyLocation = () => {
+    if (mapRef && location) {
+      const newCenter = { lat: location.lat, lng: location.lng };
+      mapRef.panTo(newCenter);
+      mapRef.setZoom(15);
+      setTimeout(() => {
+        setMapCenter(newCenter);
+        setMapZoom(15);
+      }, 100);
+    }
+  };
+
+  if (!googleMapsApiKey) {
+    return (
+      <div className="h-screen flex items-center justify-center p-4">
+        <div className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg text-sm">
+          Google Maps API key is missing. Please check your .env file.
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="h-screen flex items-center justify-center p-4">
+        <div className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg text-sm">
+          Error loading Google Maps: {loadError.message}
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoaded) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <CircularProgress />
+      </div>
+    );
+  }
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-muted pb-20">
-      {/* Map Placeholder */}
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-success/5 to-warning/10">
-        {/* Map simulation with demo user markers */}
-        <div className="relative w-full h-full flex items-center justify-center">
-          <div className="text-center space-y-4 p-8 bg-card/80 backdrop-blur-md rounded-3xl shadow-elevation-3 border border-border/50">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-            >
-              <ExploreIcon className="text-primary mx-auto" style={{ fontSize: 72 }} />
-            </motion.div>
-            <h2 className="text-2xl font-bold">Map View</h2>
-            <p className="text-muted-foreground max-w-xs text-sm leading-relaxed">
-              Google Maps integration will display here. This shows your location, nearby users, and activity trails.
-            </p>
-          </div>
+      {/* Google Maps */}
+      <div className="absolute inset-0">
+        <GoogleMap
+          mapContainerStyle={mapContainerStyle}
+          center={mapCenter}
+          zoom={mapZoom}
+          tilt={(is3DMode || isWazeMode) ? mapTilt : 0}
+          heading={(is3DMode || isWazeMode) ? mapHeading : 0}
+          onLoad={onMapLoad}
+          options={{
+            disableDefaultUI: false,
+            zoomControl: true,
+            streetViewControl: false,
+            mapTypeControl: true,
+            mapTypeControlOptions: isLoaded && window.google?.maps ? {
+              style: window.google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+              position: window.google.maps.ControlPosition.TOP_CENTER,
+              mapTypeIds: [
+                window.google.maps.MapTypeId.ROADMAP,
+                window.google.maps.MapTypeId.SATELLITE,
+                window.google.maps.MapTypeId.TERRAIN
+              ]
+            } : undefined,
+            fullscreenControl: true,
+            mapTypeId: isLoaded && window.google?.maps ? window.google.maps.MapTypeId.ROADMAP : undefined
+          }}
+        >
+          {/* Current user's activity trail */}
+          {isActive && locationHistory.length > 1 && (
+            <Polyline
+              path={locationHistory}
+              options={{
+                strokeColor: "#1976d2",
+                strokeOpacity: 0.6,
+                strokeWeight: 4,
+                geodesic: true
+              }}
+            />
+          )}
 
-          {/* Demo User Markers */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.5 }}
-            className="absolute top-1/3 left-1/4"
-          >
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => handleUserMarkerClick(nearbyUsers[0])}
-              className="relative"
-            >
-              <Avatar
-                src={nearbyUsers[0].avatar}
-                alt={nearbyUsers[0].name}
-                sx={{ width: 56, height: 56, border: "3px solid #ef4444" }}
-              />
-              <motion.div
-                animate={{ scale: [1, 1.3, 1] }}
-                transition={{ duration: 2, repeat: Infinity }}
-                className="absolute -inset-1 bg-destructive/30 rounded-full -z-10"
-              />
-            </motion.button>
-          </motion.div>
+          {/* Other users' movement trails */}
+          {Object.entries(userTrails).map(([userId, trail]) => {
+            if (trail.length > 1) {
+              return (
+                <Polyline
+                  key={`trail-${userId}`}
+                  path={trail}
+                  options={{
+                    strokeColor: "#d32f2f",
+                    strokeOpacity: 0.4,
+                    strokeWeight: 3,
+                    geodesic: true
+                  }}
+                />
+              );
+            }
+            return null;
+          })}
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.7 }}
-            className="absolute top-1/2 right-1/3"
-          >
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => handleUserMarkerClick(nearbyUsers[1])}
-              className="relative"
-            >
-              <Avatar
-                src={nearbyUsers[1].avatar}
-                alt={nearbyUsers[1].name}
-                sx={{ width: 56, height: 56, border: "3px solid #1976d2" }}
+          {/* Current user's marker - Always visible when location is available */}
+          {location && location.lat && location.lng && isLoaded && window.google && (
+            <>
+              <Marker
+                position={{ lat: location.lat, lng: location.lng }}
+                title={isActive ? "You are here (Active)" : "You are here"}
+                zIndex={1000}
+                icon={{
+                  url: isActive 
+                    ? "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+                    : "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+                  scaledSize: isActive 
+                    ? new window.google.maps.Size(48, 48) 
+                    : new window.google.maps.Size(40, 40),
+                  anchor: new window.google.maps.Point(isActive ? 24 : 20, isActive ? 24 : 20)
+                }}
+                animation={isActive && window.google.maps.Animation ? window.google.maps.Animation.BOUNCE : undefined}
               />
-              <motion.div
-                animate={{ scale: [1, 1.3, 1] }}
-                transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
-                className="absolute -inset-1 bg-primary/30 rounded-full -z-10"
-              />
-            </motion.button>
-          </motion.div>
+              {/* Circle around user location for better visibility when active */}
+              {isActive && window.google.maps && (
+                <Marker
+                  position={{ lat: location.lat, lng: location.lng }}
+                  icon={{
+                    path: window.google.maps.SymbolPath.CIRCLE,
+                    scale: 8,
+                    fillColor: "#2196F3",
+                    fillOpacity: 0.3,
+                    strokeColor: "#1976D2",
+                    strokeWeight: 2,
+                  }}
+                  zIndex={999}
+                />
+              )}
+            </>
+          )}
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.9 }}
-            className="absolute bottom-1/3 left-1/2"
-          >
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => handleUserMarkerClick(nearbyUsers[2])}
-              className="relative"
+          {/* Nearby users' markers */}
+          {nearbyUsers
+            .filter((userData: any) => userData.id !== user?.uid)
+            .map((userData: any) => {
+              const hasTrail = userTrails[userData.id] && userTrails[userData.id].length > 1;
+              const matchScore = userData.matchScore;
+              const scorePercent = matchScore ? Math.round(matchScore * 100) : null;
+              return isLoaded && window.google ? (
+                <Marker
+                  key={userData.id}
+                  position={{ lat: userData.lat, lng: userData.lng }}
+                  title={`${userData.name || "User"}${hasTrail ? " (Moving)" : ""}${scorePercent ? ` - ${scorePercent}% match` : ""}`}
+                  onClick={() => onMarkerClick(userData)}
+                  icon={{
+                    url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png",
+                    scaledSize: hasTrail 
+                      ? new window.google.maps.Size(36, 36) 
+                      : new window.google.maps.Size(32, 32)
+                  }}
+                  animation={hasTrail && window.google.maps.Animation ? window.google.maps.Animation.DROP : undefined}
+                />
+              ) : null;
+            })}
+
+          {/* Info window for selected user */}
+          {selectedUser && selectedUser.lat && selectedUser.lng && (
+            <InfoWindow
+              position={{
+                lat: selectedUser.lat,
+                lng: selectedUser.lng
+              }}
+              onCloseClick={onInfoWindowClose}
             >
-              <Avatar
-                src={nearbyUsers[2].avatar}
-                alt={nearbyUsers[2].name}
-                sx={{ width: 56, height: 56, border: "3px solid #ff9800" }}
-              />
-              <motion.div
-                animate={{ scale: [1, 1.3, 1] }}
-                transition={{ duration: 2, repeat: Infinity, delay: 1 }}
-                className="absolute -inset-1 bg-warning/30 rounded-full -z-10"
-              />
-            </motion.button>
-          </motion.div>
-        </div>
+              <Box sx={{ padding: 1, minWidth: 200 }}>
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>
+                  {selectedUser.name || "User"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  {getMarkerColor(selectedUser.activity)} {selectedUser.activity || "Active"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  {formatDistance(selectedUser.distanceValue || selectedUser.distance || 0)} away
+                </Typography>
+                <MuiButton
+                  variant="contained"
+                  size="small"
+                  fullWidth
+                  startIcon={<CenterFocusStrong />}
+                  onClick={() => handleCenterOnUserMap(selectedUser)}
+                  sx={{ mt: 1 }}
+                >
+                  Center on Location
+                </MuiButton>
+              </Box>
+            </InfoWindow>
+          )}
+        </GoogleMap>
       </div>
 
       {/* Notification Banner */}
@@ -502,7 +943,7 @@ const MapScreen = () => {
         onDismiss={() => setShowNotification(false)}
         onTap={handleNotificationTap}
       />
-      
+
       {/* Workout Summary Modal */}
       <WorkoutSummaryModal
         isOpen={showSummary}
@@ -878,7 +1319,7 @@ const MapScreen = () => {
         )}
       </div>
 
-      {/* People Drawer */}
+      {/* People Drawer with Matching Accordion */}
       <Drawer
         anchor="bottom"
         open={showPeopleDrawer}
@@ -895,9 +1336,9 @@ const MapScreen = () => {
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold">Nearby People</h2>
+              <h2 className="text-2xl font-bold">Nearby Matches</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                {sortedUsers.length} {sortedUsers.length === 1 ? "person" : "people"} nearby
+                {matches.length} {matches.length === 1 ? "match" : "matches"} found
               </p>
             </div>
             <button
@@ -908,177 +1349,35 @@ const MapScreen = () => {
             </button>
           </div>
 
-          {/* Activity Filter Chips */}
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("all")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 ${
-                activityFilter === "all"
-                  ? "bg-primary text-primary-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              All Activities ({nearbyUsers.length})
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("running")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 flex items-center gap-1.5 ${
-                activityFilter === "running"
-                  ? "bg-success text-success-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <DirectionsRunIcon style={{ fontSize: 18 }} />
-              Running ({nearbyUsers.filter(u => u.activity === "Running").length})
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("cycling")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 flex items-center gap-1.5 ${
-                activityFilter === "cycling"
-                  ? "bg-primary text-primary-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <DirectionsBikeIcon style={{ fontSize: 18 }} />
-              Cycling ({nearbyUsers.filter(u => u.activity === "Cycling").length})
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("walking")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 flex items-center gap-1.5 ${
-                activityFilter === "walking"
-                  ? "bg-warning text-warning-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <DirectionsWalkIcon style={{ fontSize: 18 }} />
-              Walking ({nearbyUsers.filter(u => u.activity === "Walking").length})
-            </motion.button>
-          </div>
-
-          {/* Users List */}
-          <div className="space-y-3 max-h-[50vh] overflow-y-auto">
-            {sortedUsers.length === 0 ? (
-              <div className="text-center py-12">
-                <PeopleIcon style={{ fontSize: 64 }} className="text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-muted-foreground">No users found</p>
-                <p className="text-xs text-muted-foreground mt-1">Try changing the activity filter</p>
-              </div>
-            ) : (
-              sortedUsers.map((user, index) => {
-                const userFriendStatus = getFriendStatus(user.id);
-                
-                return (
-                  <motion.div
-                    key={user.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="bg-card rounded-2xl shadow-elevation-2 border border-border/50 overflow-hidden cursor-pointer hover:shadow-elevation-3 transition-all"
-                    onClick={() => {
-                      setSelectedUser(user);
-                      setShowProfileView(true);
-                      setShowPeopleDrawer(false);
-                    }}
-                  >
-                    <div className="p-4">
-                      {/* User Info */}
-                      <div className="flex items-start gap-3 mb-3">
-                        <div className="relative flex-shrink-0">
-                          <Avatar 
-                            src={user.avatar} 
-                            alt={user.name} 
-                            sx={{ width: 56, height: 56 }}
-                          />
-                          {/* Activity Badge */}
-                          <div className={`absolute -bottom-1 -right-1 p-1.5 rounded-full ${
-                            user.activity === "Running"
-                              ? "bg-success"
-                              : user.activity === "Cycling"
-                              ? "bg-primary"
-                              : "bg-warning"
-                          }`}>
-                            {user.activity === "Running" && (
-                              <DirectionsRunIcon style={{ fontSize: 14 }} className="text-white" />
-                            )}
-                            {user.activity === "Cycling" && (
-                              <DirectionsBikeIcon style={{ fontSize: 14 }} className="text-white" />
-                            )}
-                            {user.activity === "Walking" && (
-                              <DirectionsWalkIcon style={{ fontSize: 14 }} className="text-white" />
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-base truncate">{user.name}</h3>
-                            {userFriendStatus === "friends" && (
-                              <div className="flex-shrink-0 px-2 py-0.5 bg-success/10 border border-success rounded-full">
-                                <span className="text-xs text-success font-medium">✓ Friend</span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-sm text-muted-foreground flex items-center gap-1">
-                              📍 {user.distance} away
-                            </span>
-                            <span className="text-muted-foreground">•</span>
-                            <span className="text-sm text-muted-foreground capitalize">
-                              {user.activity}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                        {/* View Profile Button */}
-                        <Button
-                          onClick={() => {
-                            setSelectedUser(user);
-                            setShowProfileView(true);
-                            setShowPeopleDrawer(false);
-                          }}
-                          size="sm"
-                          variant="outline"
-                          className="flex-1 h-10 border-2"
-                        >
-                          View Profile
-                        </Button>
-
-                        {/* Send Message Button */}
-                        <Button
-                          onClick={() => {
-                            setSelectedUser(user);
-                            setShowMessageModal(true);
-                            setShowPeopleDrawer(false);
-                          }}
-                          size="sm"
-                          className="flex-1 h-10 bg-primary text-primary-foreground hover:bg-primary/90"
-                        >
-                          <SendIcon style={{ fontSize: 18 }} className="mr-1.5" />
-                          Message
-                        </Button>
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })
-            )}
-          </div>
+          {/* Matching Accordion */}
+          <NearbyUsersAccordion
+            matches={matches}
+            loading={matchesLoading}
+            onViewProfile={(userId) => {
+              const user = nearbyUsers.find((u: any) => u.id === userId);
+              if (user) {
+                setSelectedUser(user);
+                setShowProfileView(true);
+                setShowPeopleDrawer(false);
+              }
+            }}
+            onAddFriend={(userId) => {
+              handleAddFriend(userId);
+            }}
+            onSendMessage={(userId) => {
+              const user = nearbyUsers.find((u: any) => u.id === userId);
+              if (user) {
+                setSelectedUser(user);
+                handleSendMessage();
+                setShowPeopleDrawer(false);
+              }
+            }}
+          />
         </div>
       </Drawer>
 
-      {/* Test Notification Button (Demo Only) */}
-      <NotificationTestButton />
-      
       <BottomNavigation />
     </div>
   );
 };
-
 export default MapScreen;

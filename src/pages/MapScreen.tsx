@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
+import PauseIcon from "@mui/icons-material/Pause";
 import ExploreIcon from "@mui/icons-material/Explore";
 import PeopleIcon from "@mui/icons-material/People";
 import MyLocationIcon from "@mui/icons-material/MyLocation";
@@ -14,6 +15,10 @@ import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import MailIcon from "@mui/icons-material/Mail";
 import EventIcon from "@mui/icons-material/Event";
+import TimerIcon from "@mui/icons-material/Timer";
+import SpeedIcon from "@mui/icons-material/Speed";
+import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
+import FavoriteIcon from "@mui/icons-material/Favorite";
 import { Drawer } from "@mui/material";
 import Avatar from "@mui/material/Avatar";
 import { toast } from "sonner";
@@ -24,6 +29,7 @@ import { ProfileView } from "@/pages/ProfileView";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 import { BadgeCounter } from "@/components/NotificationSystem";
 import { NotificationTestButton } from "@/components/NotificationTestButton";
+import { WorkoutSummaryModal } from "@/components/WorkoutSummaryModal";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
@@ -34,13 +40,27 @@ import CloseIcon from "@mui/icons-material/Close";
 
 const MapScreen = () => {
   const navigate = useNavigate();
-  const { userProfile, hasActivity } = useUser();
+  const { userProfile, hasActivity, useMetric, addWorkout } = useUser();
   const { addNotification, unreadMessageCount, unreadFriendRequestCount } = useNotificationContext();
   const [isActive, setIsActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [showPeopleDrawer, setShowPeopleDrawer] = useState(false);
   const [pointsTracked, setPointsTracked] = useState(0);
   const [distance, setDistance] = useState(0);
   const [showNotification, setShowNotification] = useState(false);
+  
+  // Enhanced tracking state
+  const [elapsedTime, setElapsedTime] = useState(0); // in seconds
+  const [currentSpeed, setCurrentSpeed] = useState(0); // km/h
+  const [avgSpeed, setAvgSpeed] = useState(0); // km/h
+  const [calories, setCalories] = useState(0);
+  const [startTime, setStartTime] = useState<Date | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
+  const [showSpeedNotPace, setShowSpeedNotPace] = useState(true);
+  
+  // For speed calculation
+  const lastDistanceRef = useRef(0);
+  const lastTimeRef = useRef(0);
   
   // Get user's enabled activities from profile
   const userActivities = userProfile?.activities || ["running", "cycling", "walking"];
@@ -134,13 +154,50 @@ const MapScreen = () => {
   // Sort by distance
   const sortedUsers = [...filteredUsers].sort((a, b) => a.distanceValue - b.distanceValue);
 
-  // Manage tracking interval
+  // Enhanced tracking interval
   useEffect(() => {
-    if (isActive) {
+    if (isActive && !isPaused) {
       intervalRef.current = setInterval(() => {
-        setDistance(prev => prev + 0.1);
+        setElapsedTime(prev => prev + 1);
+        
+        // Simulate realistic distance updates based on activity
+        const speedVariation = Math.random() * 0.2 - 0.1; // -0.1 to +0.1 variation
+        let baseSpeed = 0;
+        
+        if (selectedActivity === "running") {
+          baseSpeed = 10 + speedVariation; // 8-12 km/h
+        } else if (selectedActivity === "cycling") {
+          baseSpeed = 20 + speedVariation; // 15-25 km/h
+        } else {
+          baseSpeed = 5 + speedVariation; // 4-6 km/h
+        }
+        
+        const distanceIncrement = baseSpeed / 3600; // km per second
+        
+        setDistance(prev => {
+          const newDistance = prev + distanceIncrement;
+          
+          // Calculate current speed
+          const currentTime = Date.now();
+          const timeDiff = (currentTime - lastTimeRef.current) / 1000; // seconds
+          
+          if (timeDiff >= 1 && lastTimeRef.current > 0) {
+            const distanceDiff = newDistance - lastDistanceRef.current;
+            const speed = (distanceDiff / timeDiff) * 3600; // km/h
+            setCurrentSpeed(speed);
+            
+            lastDistanceRef.current = newDistance;
+            lastTimeRef.current = currentTime;
+          } else if (lastTimeRef.current === 0) {
+            lastTimeRef.current = currentTime;
+            lastDistanceRef.current = newDistance;
+          }
+          
+          return newDistance;
+        });
+        
         setPointsTracked(prev => prev + 1);
-      }, 2000);
+      }, 1000); // Update every second for smooth tracking
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -153,19 +210,117 @@ const MapScreen = () => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [isActive]);
+  }, [isActive, isPaused, selectedActivity]);
+  
+  // Calculate average speed and calories
+  useEffect(() => {
+    if (elapsedTime > 0 && distance > 0) {
+      const avgSpeedValue = (distance / elapsedTime) * 3600; // km/h
+      setAvgSpeed(avgSpeedValue);
+      
+      // Calculate calories based on activity type
+      let caloriesPerKm = 0;
+      if (selectedActivity === "running") {
+        caloriesPerKm = 100; // ~100 cal/km
+      } else if (selectedActivity === "cycling") {
+        caloriesPerKm = 50; // ~50 cal/km
+      } else {
+        caloriesPerKm = 60; // ~60 cal/km
+      }
+      
+      setCalories(Math.round(distance * caloriesPerKm));
+    }
+  }, [elapsedTime, distance, selectedActivity]);
 
   const handleStartStop = () => {
     if (!isActive) {
+      // Start activity
       toast.success("Activity started! GPS tracking enabled.");
       setIsActive(true);
+      setIsPaused(false);
+      setStartTime(new Date());
+      setElapsedTime(0);
+      setDistance(0);
+      setCurrentSpeed(0);
+      setAvgSpeed(0);
+      setCalories(0);
+      setPointsTracked(0);
+      lastDistanceRef.current = 0;
+      lastTimeRef.current = 0;
       setShowNotification(false);
     } else {
-      toast.success(`Activity stopped. Great workout! ${distance.toFixed(1)} km tracked.`);
+      // Stop activity - show summary
       setIsActive(false);
-      setPointsTracked(0);
-      setDistance(0);
+      setIsPaused(false);
+      if (distance > 0) {
+        setShowSummary(true);
+      }
     }
+  };
+  
+  const handlePause = () => {
+    setIsPaused(!isPaused);
+    toast(isPaused ? "Activity resumed" : "Activity paused");
+  };
+  
+  const handleSaveWorkout = () => {
+    addWorkout({
+      activity: selectedActivity,
+      date: startTime || new Date(),
+      duration: elapsedTime,
+      distance,
+      avgSpeed,
+      calories,
+    });
+    toast.success(`Workout saved! ${distance.toFixed(2)} km tracked.`);
+    setShowSummary(false);
+    setPointsTracked(0);
+    setDistance(0);
+    setElapsedTime(0);
+    setCurrentSpeed(0);
+    setAvgSpeed(0);
+    setCalories(0);
+    setStartTime(null);
+  };
+  
+  const handleDiscardWorkout = () => {
+    toast("Workout discarded");
+    setShowSummary(false);
+    setPointsTracked(0);
+    setDistance(0);
+    setElapsedTime(0);
+    setCurrentSpeed(0);
+    setAvgSpeed(0);
+    setCalories(0);
+    setStartTime(null);
+  };
+  
+  const formatTime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, "0")}`;
+  };
+  
+  const formatPace = (kmh: number) => {
+    if (kmh === 0) return "--:--";
+    const minPerKm = 60 / kmh;
+    const mins = Math.floor(minPerKm);
+    const secs = Math.round((minPerKm - mins) * 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+  
+  const convertDistance = (km: number) => {
+    if (useMetric) return { value: km.toFixed(2), unit: "km" };
+    return { value: (km * 0.621371).toFixed(2), unit: "mi" };
+  };
+  
+  const convertSpeed = (kmh: number) => {
+    if (useMetric) return { value: kmh.toFixed(1), unit: "km/h" };
+    return { value: (kmh * 0.621371).toFixed(1), unit: "mph" };
   };
 
   const handleNotificationTap = () => {
@@ -332,6 +487,20 @@ const MapScreen = () => {
         onDismiss={() => setShowNotification(false)}
         onTap={handleNotificationTap}
       />
+      
+      {/* Workout Summary Modal */}
+      <WorkoutSummaryModal
+        isOpen={showSummary}
+        onClose={() => setShowSummary(false)}
+        onSave={handleSaveWorkout}
+        onDiscard={handleDiscardWorkout}
+        activity={selectedActivity}
+        duration={elapsedTime}
+        distance={distance}
+        avgSpeed={avgSpeed}
+        calories={calories}
+        useMetric={useMetric}
+      />
 
       {/* Top Bar - Right Side Controls */}
       <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
@@ -431,35 +600,135 @@ const MapScreen = () => {
         onAccept={() => selectedUser && handleAcceptFriend(selectedUser.id)}
         onDecline={() => selectedUser && handleDeclineFriend(selectedUser.id)}
       />
+      {/* Enhanced Stats Display */}
       <AnimatePresence>
         {isActive && (
           <motion.div
-            initial={{ opacity: 0, x: -50, scale: 0.8 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: -50, scale: 0.8 }}
+            initial={{ opacity: 0, y: -30, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -30, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 200, damping: 20 }}
-            className="absolute top-4 left-4 z-10"
+            className="absolute top-4 left-4 right-4 z-10"
           >
-            <div className={`
-              bg-gradient-to-r px-5 py-4 rounded-2xl shadow-elevation-4 flex items-center gap-3 border-2
-              ${selectedActivity === 'running' 
-                ? 'from-success to-success/90 text-success-foreground border-success-foreground/20'
-                : selectedActivity === 'cycling'
-                ? 'from-primary to-primary/90 text-primary-foreground border-primary-foreground/20'
-                : 'from-warning to-warning/90 text-warning-foreground border-warning-foreground/20'
+            <div
+              className={`
+              bg-card/95 backdrop-blur-md rounded-3xl shadow-elevation-4 border-2 overflow-hidden
+              ${
+                selectedActivity === "running"
+                  ? "border-success/30"
+                  : selectedActivity === "cycling"
+                  ? "border-primary/30"
+                  : "border-warning/30"
               }
-            `}>
-              <motion.div
-                animate={{ scale: [1, 1.15, 1] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
+            `}
+            >
+              {/* Top Section - Primary Stats */}
+              <div className="p-6 space-y-4">
+                {/* Activity Header with Pulsing Heart */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {selectedActivity === "running" && (
+                      <DirectionsRunIcon className="text-success" style={{ fontSize: 32 }} />
+                    )}
+                    {selectedActivity === "cycling" && (
+                      <DirectionsBikeIcon className="text-primary" style={{ fontSize: 32 }} />
+                    )}
+                    {selectedActivity === "walking" && (
+                      <DirectionsWalkIcon className="text-warning" style={{ fontSize: 32 }} />
+                    )}
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">
+                        {selectedActivity.charAt(0).toUpperCase() + selectedActivity.slice(1)}
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        {isPaused ? "Paused" : "Active"}
+                      </p>
+                    </div>
+                  </div>
+                  <motion.div
+                    animate={{ scale: isPaused ? 1 : [1, 1.2, 1] }}
+                    transition={{ duration: 1, repeat: isPaused ? 0 : Infinity }}
+                  >
+                    <FavoriteIcon
+                      className={
+                        selectedActivity === "running"
+                          ? "text-success"
+                          : selectedActivity === "cycling"
+                          ? "text-primary"
+                          : "text-warning"
+                      }
+                      style={{ fontSize: 32 }}
+                    />
+                  </motion.div>
+                </div>
+
+                {/* Large Primary Stats */}
+                <div className="grid grid-cols-3 gap-4">
+                  {/* Time */}
+                  <div className="text-center">
+                    <TimerIcon className="text-muted-foreground mx-auto mb-1" style={{ fontSize: 24 }} />
+                    <div className="text-3xl font-bold text-foreground tabular-nums">
+                      {formatTime(elapsedTime)}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Duration</div>
+                  </div>
+
+                  {/* Distance */}
+                  <div className="text-center">
+                    <div className="text-2xl mb-1">📍</div>
+                    <div className="text-3xl font-bold text-foreground tabular-nums">
+                      {convertDistance(distance).value}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {convertDistance(distance).unit}
+                    </div>
+                  </div>
+
+                  {/* Speed/Pace */}
+                  <button
+                    onClick={() => setShowSpeedNotPace(!showSpeedNotPace)}
+                    className="text-center active:scale-95 transition-transform"
+                  >
+                    <SpeedIcon className="text-muted-foreground mx-auto mb-1" style={{ fontSize: 24 }} />
+                    <div className="text-3xl font-bold text-foreground tabular-nums">
+                      {showSpeedNotPace
+                        ? convertSpeed(currentSpeed).value
+                        : formatPace(currentSpeed)}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {showSpeedNotPace ? convertSpeed(currentSpeed).unit : "min/km"}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Bottom Section - Secondary Stats */}
+              <div
+                className={`
+                grid grid-cols-2 gap-px
+                ${
+                  selectedActivity === "running"
+                    ? "bg-success/10"
+                    : selectedActivity === "cycling"
+                    ? "bg-primary/10"
+                    : "bg-warning/10"
+                }
+              `}
               >
-                {selectedActivity === 'running' && <DirectionsRunIcon style={{ fontSize: 28 }} />}
-                {selectedActivity === 'cycling' && <DirectionsBikeIcon style={{ fontSize: 28 }} />}
-                {selectedActivity === 'walking' && <DirectionsWalkIcon style={{ fontSize: 28 }} />}
-              </motion.div>
-              <div className="flex flex-col">
-                <span className="text-sm font-bold">Activity Active</span>
-                <span className="text-xs opacity-90 font-medium">{distance.toFixed(1)} km • {pointsTracked} points</span>
+                <div className="bg-card p-4 text-center">
+                  <div className="text-xs text-muted-foreground mb-1">Avg Speed</div>
+                  <div className="text-lg font-bold text-foreground tabular-nums">
+                    {convertSpeed(avgSpeed).value}{" "}
+                    <span className="text-xs font-normal">{convertSpeed(avgSpeed).unit}</span>
+                  </div>
+                </div>
+                <div className="bg-card p-4 text-center">
+                  <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">
+                    <LocalFireDepartmentIcon style={{ fontSize: 14 }} className="text-warning" />
+                    Calories
+                  </div>
+                  <div className="text-lg font-bold text-foreground tabular-nums">{calories}</div>
+                </div>
               </div>
             </div>
           </motion.div>
@@ -528,40 +797,70 @@ const MapScreen = () => {
 
         {/* 3D Controls removed */}
 
-        {/* Start/Stop Activity Button */}
-        <motion.div 
-          whileTap={{ scale: 0.97 }}
-          animate={!isActive ? { scale: [1, 1.01, 1] } : {}}
-          transition={!isActive ? { duration: 2, repeat: Infinity, repeatDelay: 3 } : {}}
-        >
-          <Button
-            onClick={handleStartStop}
-            className={`
-              w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl
-              ${
-                isActive
-                  ? "bg-gradient-to-r from-destructive to-destructive/90 text-destructive-foreground hover:from-destructive/90 hover:to-destructive"
-                  : selectedActivity === 'running'
-                  ? "bg-gradient-to-r from-success to-success/90 text-success-foreground hover:from-success/90 hover:to-success"
-                  : selectedActivity === 'cycling'
-                  ? "bg-gradient-to-r from-primary to-primary/90 text-primary-foreground hover:from-primary/90 hover:to-primary"
-                  : "bg-gradient-to-r from-warning to-warning/90 text-warning-foreground hover:from-warning/90 hover:to-warning"
-              }
-            `}
+        {/* Start/Stop/Pause Activity Buttons */}
+        {isActive ? (
+          <div className="flex gap-3">
+            <motion.div whileTap={{ scale: 0.97 }} className="flex-1">
+              <Button
+                onClick={handlePause}
+                className={`
+                  w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl
+                  ${
+                    selectedActivity === "running"
+                      ? "bg-gradient-to-r from-warning to-warning/90 text-warning-foreground hover:from-warning/90 hover:to-warning"
+                      : selectedActivity === "cycling"
+                      ? "bg-gradient-to-r from-secondary to-secondary/90 text-secondary-foreground hover:from-secondary/90 hover:to-secondary"
+                      : "bg-gradient-to-r from-secondary to-secondary/90 text-secondary-foreground hover:from-secondary/90 hover:to-secondary"
+                  }
+                `}
+              >
+                {isPaused ? (
+                  <>
+                    <PlayArrowIcon className="mr-2" style={{ fontSize: 28 }} />
+                    Resume
+                  </>
+                ) : (
+                  <>
+                    <PauseIcon className="mr-2" style={{ fontSize: 28 }} />
+                    Pause
+                  </>
+                )}
+              </Button>
+            </motion.div>
+            <motion.div whileTap={{ scale: 0.97 }} className="flex-1">
+              <Button
+                onClick={handleStartStop}
+                className="w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl bg-gradient-to-r from-destructive to-destructive/90 text-destructive-foreground hover:from-destructive/90 hover:to-destructive"
+              >
+                <StopIcon className="mr-2" style={{ fontSize: 28 }} />
+                Stop
+              </Button>
+            </motion.div>
+          </div>
+        ) : (
+          <motion.div
+            whileTap={{ scale: 0.97 }}
+            animate={{ scale: [1, 1.01, 1] }}
+            transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
           >
-            {isActive ? (
-              <>
-                <StopIcon className="mr-3" style={{ fontSize: 32 }} />
-                Stop Activity
-              </>
-            ) : (
-              <>
-                <PlayArrowIcon className="mr-3" style={{ fontSize: 32 }} />
-                Start {availableActivities.find(a => a.id === selectedActivity)?.label}
-              </>
-            )}
-          </Button>
-        </motion.div>
+            <Button
+              onClick={handleStartStop}
+              className={`
+                w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl
+                ${
+                  selectedActivity === "running"
+                    ? "bg-gradient-to-r from-success to-success/90 text-success-foreground hover:from-success/90 hover:to-success"
+                    : selectedActivity === "cycling"
+                    ? "bg-gradient-to-r from-primary to-primary/90 text-primary-foreground hover:from-primary/90 hover:to-primary"
+                    : "bg-gradient-to-r from-warning to-warning/90 text-warning-foreground hover:from-warning/90 hover:to-warning"
+                }
+              `}
+            >
+              <PlayArrowIcon className="mr-3" style={{ fontSize: 32 }} />
+              Start {availableActivities.find((a) => a.id === selectedActivity)?.label}
+            </Button>
+          </motion.div>
+        )}
       </div>
 
       {/* People Drawer */}

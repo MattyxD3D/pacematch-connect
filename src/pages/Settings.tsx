@@ -4,14 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Avatar from "@mui/material/Avatar";
-import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
-import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
-import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import LockIcon from "@mui/icons-material/Lock";
@@ -26,10 +22,6 @@ const Settings = () => {
   const [isVisible, setIsVisible] = useState(true);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [username, setUsername] = useState(userProfile?.username || "");
-  const [selectedActivities, setSelectedActivities] = useState<("running" | "cycling" | "walking")[]>(
-    userProfile?.activities || ["running"]
-  );
-  const [gender, setGender] = useState(userProfile?.gender || "");
   const [email] = useState("john.doe@example.com");
 
   // Privacy controls - users who can/cannot see your location
@@ -49,14 +41,6 @@ const Settings = () => {
     { id: 4, name: "James Wilson", avatar: "https://i.pravatar.cc/150?img=4", activity: "Running" },
     { id: 5, name: "Lisa Anderson", avatar: "https://i.pravatar.cc/150?img=5", activity: "Walking" },
   ];
-
-  const activities = [
-    { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
-    { id: "cycling", label: "Cycling", icon: DirectionsBikeIcon, color: "primary" },
-    { id: "walking", label: "Walking", icon: DirectionsWalkIcon, color: "warning" },
-  ] as const;
-
-  const genderOptions = ["Male", "Female", "Other", "Prefer not to say"];
 
   const handleVisibilityToggle = () => {
     const newVisibility = !isVisible;
@@ -88,16 +72,11 @@ const Settings = () => {
       return;
     }
 
-    if (selectedActivities.length === 0) {
-      toast.error("Please select at least one activity");
-      return;
-    }
-
-    // Update user profile
+    // Update user profile (keeping activities and gender unchanged)
     setUserProfile({
       username: username.trim(),
-      activities: selectedActivities,
-      gender: gender || undefined,
+      activities: userProfile?.activities || ["running"],
+      gender: userProfile?.gender,
     });
 
     setIsEditingProfile(false);
@@ -107,24 +86,7 @@ const Settings = () => {
   const handleCancelEdit = () => {
     // Reset to original values
     setUsername(userProfile?.username || "");
-    setSelectedActivities(userProfile?.activities || ["running"]);
-    setGender(userProfile?.gender || "");
     setIsEditingProfile(false);
-  };
-
-  const handleActivityToggle = (activityId: "running" | "cycling" | "walking") => {
-    setSelectedActivities(prev => {
-      if (prev.includes(activityId)) {
-        // Don't allow removing the last activity
-        if (prev.length === 1) {
-          toast.error("You must have at least one activity selected");
-          return prev;
-        }
-        return prev.filter(a => a !== activityId);
-      } else {
-        return [...prev, activityId];
-      }
-    });
   };
 
   return (
@@ -227,41 +189,6 @@ const Settings = () => {
                     <span className="text-base">{email}</span>
                   </div>
                 </div>
-
-                {/* Activities */}
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Activities</Label>
-                  <div className="flex gap-2">
-                    {userProfile?.activities.map((activity) => {
-                      const activityData = activities.find(a => a.id === activity);
-                      if (!activityData) return null;
-                      const Icon = activityData.icon;
-                      return (
-                        <div
-                          key={activity}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
-                            activityData.color === 'success'
-                              ? 'bg-success/10 text-success'
-                              : activityData.color === 'primary'
-                              ? 'bg-primary/10 text-primary'
-                              : 'bg-warning/10 text-warning'
-                          }`}
-                        >
-                          <Icon style={{ fontSize: 18 }} />
-                          <span className="text-sm font-medium">{activityData.label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Gender */}
-                {userProfile?.gender && (
-                  <div className="space-y-2">
-                    <Label className="text-sm text-muted-foreground">Gender</Label>
-                    <p className="text-base">{userProfile.gender}</p>
-                  </div>
-                )}
               </div>
             ) : (
               // Edit Mode
@@ -287,80 +214,6 @@ const Settings = () => {
                   />
                 </div>
 
-                {/* Activities */}
-                <div className="space-y-3">
-                  <Label>Activities</Label>
-                  <div className="space-y-2">
-                    {activities.map((activity) => {
-                      const Icon = activity.icon;
-                      const isSelected = selectedActivities.includes(activity.id as "running" | "cycling" | "walking");
-                      
-                      return (
-                        <motion.div
-                          key={activity.id}
-                          whileTap={{ scale: 0.98 }}
-                          className={`
-                            flex items-center justify-between p-3 rounded-xl border-2 transition-all duration-300 cursor-pointer
-                            ${isSelected 
-                              ? activity.color === 'success'
-                                ? 'border-success/30 bg-success/10'
-                                : activity.color === 'primary'
-                                ? 'border-primary/30 bg-primary/10'
-                                : 'border-warning/30 bg-warning/10'
-                              : 'border-border bg-muted/30'
-                            }
-                          `}
-                          onClick={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Icon 
-                              className={
-                                isSelected
-                                  ? activity.color === 'success'
-                                    ? 'text-success'
-                                    : activity.color === 'primary'
-                                    ? 'text-primary'
-                                    : 'text-warning'
-                                  : 'text-muted-foreground'
-                              }
-                              style={{ fontSize: 24 }} 
-                            />
-                            <span className="font-medium">{activity.label}</span>
-                          </div>
-                          <Checkbox 
-                            checked={isSelected}
-                            onCheckedChange={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
-                          />
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Gender */}
-                <div className="space-y-3">
-                  <Label>Gender <span className="text-muted-foreground text-sm font-normal">(Optional)</span></Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {genderOptions.map((option) => (
-                      <motion.button
-                        key={option}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => setGender(option)}
-                        className={`
-                          p-3 rounded-xl border-2 text-sm font-semibold transition-all duration-300
-                          ${
-                            gender === option
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "border-border bg-card text-foreground hover:bg-secondary"
-                          }
-                        `}
-                      >
-                        {option}
-                      </motion.button>
-                    ))}
-                  </div>
-                </div>
-
                 {/* Action Buttons */}
                 <div className="flex gap-3 pt-2">
                   <Button
@@ -382,117 +235,11 @@ const Settings = () => {
           </Card>
         </motion.div>
 
-        {/* Activity Section */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.2 }}
-        >
-          <Card className="p-6 space-y-5 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
-            <div>
-              <h2 className="text-2xl font-bold">Your Activities</h2>
-              <p className="text-sm text-muted-foreground mt-1">Select activities you want to track</p>
-            </div>
-
-            <div className="space-y-3">
-              {activities.map((activity) => {
-                const Icon = activity.icon;
-                const isSelected = selectedActivities.includes(activity.id as "running" | "cycling" | "walking");
-                
-                return (
-                  <motion.div
-                    key={activity.id}
-                    whileTap={{ scale: 0.98 }}
-                    className={`
-                      flex items-center justify-between p-4 rounded-xl border-2 transition-all duration-300 cursor-pointer
-                      ${isSelected 
-                        ? activity.color === 'success'
-                          ? 'border-success/30 bg-success/10'
-                          : activity.color === 'primary'
-                          ? 'border-primary/30 bg-primary/10'
-                          : 'border-warning/30 bg-warning/10'
-                        : 'border-border bg-muted/30'
-                      }
-                    `}
-                    onClick={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${isSelected ? activity.color === 'success' ? 'bg-success/20' : activity.color === 'primary' ? 'bg-primary/20' : 'bg-warning/20' : 'bg-muted'}`}>
-                        <Icon 
-                          className={
-                            isSelected
-                              ? activity.color === 'success'
-                                ? 'text-success'
-                                : activity.color === 'primary'
-                                ? 'text-primary'
-                                : 'text-warning'
-                              : 'text-muted-foreground'
-                          }
-                          style={{ fontSize: 28 }} 
-                        />
-                      </div>
-                      <div>
-                        <p className="font-semibold">{activity.label}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {isSelected ? 'Active' : 'Not selected'}
-                        </p>
-                      </div>
-                    </div>
-                    <Checkbox 
-                      checked={isSelected}
-                      onCheckedChange={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
-                      className="scale-125"
-                    />
-                  </motion.div>
-                );
-              })}
-            </div>
-
-            <p className="text-xs text-muted-foreground px-1">
-              Selected activities will appear in your activity selector on the map screen. You must have at least one activity selected.
-            </p>
-          </Card>
-        </motion.div>
-
-        {/* Gender Selection */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.25 }}
-        >
-          <Card className="p-6 space-y-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
-            <div>
-              <h2 className="text-2xl font-bold">Gender</h2>
-              <p className="text-sm text-muted-foreground mt-1">Optional</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              {genderOptions.map((option) => (
-                <motion.button
-                  key={option}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setGender(option)}
-                  className={`
-                    p-4 rounded-xl border-2 text-sm font-semibold transition-all duration-300
-                    ${
-                      gender === option
-                        ? "border-primary bg-primary/10 text-primary shadow-elevation-1"
-                        : "border-border bg-card text-foreground hover:bg-secondary hover:border-muted"
-                    }
-                  `}
-                >
-                  {option}
-                </motion.button>
-              ))}
-            </div>
-          </Card>
-        </motion.div>
-
         {/* Privacy Controls Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.3 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
         >
           <Card className="p-6 space-y-5 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
             <div className="flex items-center gap-3">
@@ -573,48 +320,44 @@ const Settings = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.35 }}
+          transition={{ duration: 0.4, delay: 0.25 }}
         >
           <Card className="p-6 space-y-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
             <h2 className="text-2xl font-bold">Privacy & Data</h2>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between p-3 hover:bg-secondary rounded-lg transition-colors cursor-pointer">
-                <span className="text-sm">Location sharing</span>
-                <span className="text-sm text-muted-foreground">On</span>
+                <p className="font-medium text-foreground">Data Download</p>
+                <Button variant="ghost" size="sm" className="text-primary hover:text-primary">Request</Button>
               </div>
               <div className="flex items-center justify-between p-3 hover:bg-secondary rounded-lg transition-colors cursor-pointer">
-                <span className="text-sm">Data usage</span>
-                <span className="text-sm text-muted-foreground">Learn more</span>
+                <p className="font-medium text-foreground">Delete Account</p>
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">Delete</Button>
               </div>
-              <div className="flex items-center justify-between p-3 hover:bg-secondary rounded-lg transition-colors cursor-pointer">
-                <span className="text-sm">Privacy policy</span>
-                <span className="text-sm text-muted-foreground">View</span>
-              </div>
+            </div>
+
+            <div className="pt-2 px-1">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Your privacy is important. You can download your data or delete your account at any time.
+              </p>
             </div>
           </Card>
         </motion.div>
 
-        {/* Account Section */}
+        {/* Sign Out */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.4 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
         >
-          <Card className="p-6 space-y-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
-            <h2 className="text-2xl font-bold">Account</h2>
-
-            <motion.div whileTap={{ scale: 0.98 }}>
-              <Button
-                onClick={handleSignOut}
-                variant="destructive"
-                className="w-full h-14 text-base font-semibold shadow-elevation-2"
-              >
-                <LogoutIcon className="mr-2" style={{ fontSize: 24 }} />
-                Sign Out
-              </Button>
-            </motion.div>
-          </Card>
+          <Button
+            onClick={handleSignOut}
+            variant="outline"
+            className="w-full h-14 text-base font-semibold border-2 hover:bg-destructive/10 hover:border-destructive/30 hover:text-destructive transition-all"
+          >
+            <LogoutIcon className="mr-2" style={{ fontSize: 24 }} />
+            Sign Out
+          </Button>
         </motion.div>
       </div>
     </div>

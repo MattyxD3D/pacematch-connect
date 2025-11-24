@@ -4,10 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useNavigate } from "react-router-dom";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Avatar from "@mui/material/Avatar";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
+import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
+import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import EmailIcon from "@mui/icons-material/Email";
@@ -20,10 +23,30 @@ const Settings = () => {
   const [isVisible, setIsVisible] = useState(true);
   const [username, setUsername] = useState("JohnDoe");
   const [email] = useState("john.doe@example.com");
+  const [enabledActivities, setEnabledActivities] = useState({
+    running: true,
+    cycling: true,
+    walking: true,
+  });
+
+  const activities = [
+    { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
+    { id: "cycling", label: "Cycling", icon: DirectionsBikeIcon, color: "primary" },
+    { id: "walking", label: "Walking", icon: DirectionsWalkIcon, color: "warning" },
+  ] as const;
 
   const handleVisibilityToggle = () => {
     setIsVisible(!isVisible);
     toast.success(isVisible ? "You're now invisible on the map" : "You're now visible on the map");
+  };
+
+  const handleActivityToggle = (activityId: keyof typeof enabledActivities) => {
+    setEnabledActivities(prev => ({
+      ...prev,
+      [activityId]: !prev[activityId],
+    }));
+    const activityName = activities.find(a => a.id === activityId)?.label;
+    toast.success(`${activityName} ${!enabledActivities[activityId] ? 'enabled' : 'disabled'}`);
   };
 
   const handleSignOut = () => {
@@ -142,19 +165,69 @@ const Settings = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.2 }}
         >
-          <Card className="p-6 space-y-4 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
-            <h2 className="text-2xl font-bold">Activity</h2>
-
-            <div className="flex items-center justify-between p-4 bg-success/10 rounded-lg">
-              <div className="flex items-center gap-3">
-                <DirectionsRunIcon className="text-success" style={{ fontSize: 28 }} />
-                <div>
-                  <p className="font-semibold">Running</p>
-                  <p className="text-sm text-muted-foreground">Current activity</p>
-                </div>
-              </div>
-              <Button variant="outline" size="sm">Change</Button>
+          <Card className="p-6 space-y-5 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
+            <div>
+              <h2 className="text-2xl font-bold">Activity Types</h2>
+              <p className="text-sm text-muted-foreground mt-1">Select which activities you want to track</p>
             </div>
+
+            <div className="space-y-3">
+              {activities.map((activity) => {
+                const Icon = activity.icon;
+                const isEnabled = enabledActivities[activity.id as keyof typeof enabledActivities];
+                
+                return (
+                  <motion.div
+                    key={activity.id}
+                    whileTap={{ scale: 0.98 }}
+                    className={`
+                      flex items-center justify-between p-4 rounded-xl border-2 transition-all duration-300 cursor-pointer
+                      ${isEnabled 
+                        ? activity.color === 'success'
+                          ? 'border-success/30 bg-success/10'
+                          : activity.color === 'primary'
+                          ? 'border-primary/30 bg-primary/10'
+                          : 'border-warning/30 bg-warning/10'
+                        : 'border-border bg-muted/30'
+                      }
+                    `}
+                    onClick={() => handleActivityToggle(activity.id as keyof typeof enabledActivities)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${isEnabled ? activity.color === 'success' ? 'bg-success/20' : activity.color === 'primary' ? 'bg-primary/20' : 'bg-warning/20' : 'bg-muted'}`}>
+                        <Icon 
+                          className={
+                            isEnabled
+                              ? activity.color === 'success'
+                                ? 'text-success'
+                                : activity.color === 'primary'
+                                ? 'text-primary'
+                                : 'text-warning'
+                              : 'text-muted-foreground'
+                          }
+                          style={{ fontSize: 28 }} 
+                        />
+                      </div>
+                      <div>
+                        <p className="font-semibold">{activity.label}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {isEnabled ? 'Available' : 'Hidden'}
+                        </p>
+                      </div>
+                    </div>
+                    <Checkbox 
+                      checked={isEnabled}
+                      onCheckedChange={() => handleActivityToggle(activity.id as keyof typeof enabledActivities)}
+                      className="scale-125"
+                    />
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            <p className="text-xs text-muted-foreground px-1">
+              Disabled activities will be hidden from your activity selector and won't appear in your profile.
+            </p>
           </Card>
         </motion.div>
 

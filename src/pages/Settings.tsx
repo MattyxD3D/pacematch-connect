@@ -24,6 +24,7 @@ const Settings = () => {
   const navigate = useNavigate();
   const { userProfile, setUserProfile } = useUser();
   const [isVisible, setIsVisible] = useState(true);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [username, setUsername] = useState(userProfile?.username || "");
   const [selectedActivities, setSelectedActivities] = useState<("running" | "cycling" | "walking")[]>(
     userProfile?.activities || ["running"]
@@ -99,7 +100,16 @@ const Settings = () => {
       gender: gender || undefined,
     });
 
+    setIsEditingProfile(false);
     toast.success("Profile updated successfully!");
+  };
+
+  const handleCancelEdit = () => {
+    // Reset to original values
+    setUsername(userProfile?.username || "");
+    setSelectedActivities(userProfile?.activities || ["running"]);
+    setGender(userProfile?.gender || "");
+    setIsEditingProfile(false);
   };
 
   const handleActivityToggle = (activityId: "running" | "cycling" | "walking") => {
@@ -178,43 +188,197 @@ const Settings = () => {
           transition={{ duration: 0.4, delay: 0.1 }}
         >
           <Card className="p-6 space-y-6 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
-            <h2 className="text-2xl font-bold">Profile</h2>
-
-            {/* Profile Photo */}
-            <div className="flex items-center gap-4">
-              <Avatar
-                src="https://i.pravatar.cc/150?img=5"
-                alt="Profile"
-                sx={{ width: 80, height: 80 }}
-              />
-              <Button variant="outline">Change Photo</Button>
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">Profile</h2>
+              {!isEditingProfile && (
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditingProfile(true)}
+                  className="h-10"
+                >
+                  Edit Profile
+                </Button>
+              )}
             </div>
 
-            {/* Username */}
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="h-12"
-              />
-            </div>
+            {!isEditingProfile ? (
+              // Display Mode
+              <div className="space-y-4">
+                {/* Profile Photo */}
+                <div className="flex items-center gap-4">
+                  <Avatar
+                    src="https://i.pravatar.cc/150?img=5"
+                    alt="Profile"
+                    sx={{ width: 80, height: 80 }}
+                  />
+                </div>
 
-            {/* Email (read-only) */}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="flex items-center gap-2 h-12 px-4 bg-muted rounded-lg">
-                <EmailIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
-                <span className="text-sm text-muted-foreground">{email}</span>
+                {/* Username */}
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Username</Label>
+                  <p className="text-lg font-semibold">{userProfile?.username || "Not set"}</p>
+                </div>
+
+                {/* Email */}
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Email</Label>
+                  <div className="flex items-center gap-2">
+                    <EmailIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
+                    <span className="text-base">{email}</span>
+                  </div>
+                </div>
+
+                {/* Activities */}
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Activities</Label>
+                  <div className="flex gap-2">
+                    {userProfile?.activities.map((activity) => {
+                      const activityData = activities.find(a => a.id === activity);
+                      if (!activityData) return null;
+                      const Icon = activityData.icon;
+                      return (
+                        <div
+                          key={activity}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
+                            activityData.color === 'success'
+                              ? 'bg-success/10 text-success'
+                              : activityData.color === 'primary'
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-warning/10 text-warning'
+                          }`}
+                        >
+                          <Icon style={{ fontSize: 18 }} />
+                          <span className="text-sm font-medium">{activityData.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Gender */}
+                {userProfile?.gender && (
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground">Gender</Label>
+                    <p className="text-base">{userProfile.gender}</p>
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              // Edit Mode
+              <div className="space-y-6">
+                {/* Profile Photo */}
+                <div className="flex items-center gap-4">
+                  <Avatar
+                    src="https://i.pravatar.cc/150?img=5"
+                    alt="Profile"
+                    sx={{ width: 80, height: 80 }}
+                  />
+                  <Button variant="outline" size="sm">Change Photo</Button>
+                </div>
 
-            <motion.div whileTap={{ scale: 0.98 }}>
-              <Button onClick={handleSaveProfile} className="w-full h-14 text-base font-semibold shadow-elevation-2">
-                Save Changes
-              </Button>
-            </motion.div>
+                {/* Username */}
+                <div className="space-y-2">
+                  <Label htmlFor="username">Username</Label>
+                  <Input
+                    id="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="h-12"
+                  />
+                </div>
+
+                {/* Activities */}
+                <div className="space-y-3">
+                  <Label>Activities</Label>
+                  <div className="space-y-2">
+                    {activities.map((activity) => {
+                      const Icon = activity.icon;
+                      const isSelected = selectedActivities.includes(activity.id as "running" | "cycling" | "walking");
+                      
+                      return (
+                        <motion.div
+                          key={activity.id}
+                          whileTap={{ scale: 0.98 }}
+                          className={`
+                            flex items-center justify-between p-3 rounded-xl border-2 transition-all duration-300 cursor-pointer
+                            ${isSelected 
+                              ? activity.color === 'success'
+                                ? 'border-success/30 bg-success/10'
+                                : activity.color === 'primary'
+                                ? 'border-primary/30 bg-primary/10'
+                                : 'border-warning/30 bg-warning/10'
+                              : 'border-border bg-muted/30'
+                            }
+                          `}
+                          onClick={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Icon 
+                              className={
+                                isSelected
+                                  ? activity.color === 'success'
+                                    ? 'text-success'
+                                    : activity.color === 'primary'
+                                    ? 'text-primary'
+                                    : 'text-warning'
+                                  : 'text-muted-foreground'
+                              }
+                              style={{ fontSize: 24 }} 
+                            />
+                            <span className="font-medium">{activity.label}</span>
+                          </div>
+                          <Checkbox 
+                            checked={isSelected}
+                            onCheckedChange={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
+                          />
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Gender */}
+                <div className="space-y-3">
+                  <Label>Gender <span className="text-muted-foreground text-sm font-normal">(Optional)</span></Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {genderOptions.map((option) => (
+                      <motion.button
+                        key={option}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => setGender(option)}
+                        className={`
+                          p-3 rounded-xl border-2 text-sm font-semibold transition-all duration-300
+                          ${
+                            gender === option
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border bg-card text-foreground hover:bg-secondary"
+                          }
+                        `}
+                      >
+                        {option}
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleCancelEdit}
+                    className="flex-1 h-12"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSaveProfile}
+                    className="flex-1 h-12 font-semibold"
+                  >
+                    Save Changes
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         </motion.div>
 

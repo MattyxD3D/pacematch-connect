@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
-import ThreeDRotationIcon from "@mui/icons-material/ThreeDRotation";
 import ExploreIcon from "@mui/icons-material/Explore";
 import PeopleIcon from "@mui/icons-material/People";
 import MyLocationIcon from "@mui/icons-material/MyLocation";
@@ -20,12 +19,12 @@ import { NotificationBanner } from "@/components/NotificationBanner";
 const MapScreen = () => {
   const navigate = useNavigate();
   const [isActive, setIsActive] = useState(false);
-  const [is3DMode, setIs3DMode] = useState(false);
   const [showPeopleDrawer, setShowPeopleDrawer] = useState(false);
   const [pointsTracked, setPointsTracked] = useState(0);
   const [distance, setDistance] = useState(0);
   const [showNotification, setShowNotification] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<"running" | "cycling" | "walking">("running");
+  const [selectedUser, setSelectedUser] = useState<typeof nearbyUsers[0] | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const activities = [
@@ -80,16 +79,30 @@ const MapScreen = () => {
     handleStartStop();
   };
 
-  const handleToggle3D = () => {
-    setIs3DMode(!is3DMode);
-    toast.info(is3DMode ? "Switched to 2D view" : "Switched to 3D view");
+  const handleUserMarkerClick = (user: typeof nearbyUsers[0]) => {
+    setSelectedUser(user);
+  };
+
+  const handleCenterOnUser = () => {
+    if (selectedUser) {
+      toast.success(`Centering on ${selectedUser.name}`);
+      // In real implementation, this would pan the map
+    }
+  };
+
+  const handleAddFriend = () => {
+    if (selectedUser) {
+      toast.success(`Friend request sent to ${selectedUser.name}`);
+      setSelectedUser(null);
+    }
   };
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-muted">
       {/* Map Placeholder */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-success/5 to-warning/10">
-        <div className="flex items-center justify-center h-full">
+        {/* Map simulation with demo user markers */}
+        <div className="relative w-full h-full flex items-center justify-center">
           <div className="text-center space-y-4 p-8 bg-card/80 backdrop-blur-md rounded-3xl shadow-elevation-3 border border-border/50">
             <motion.div
               animate={{ rotate: 360 }}
@@ -102,6 +115,82 @@ const MapScreen = () => {
               Google Maps integration will display here. This shows your location, nearby users, and activity trails.
             </p>
           </div>
+
+          {/* Demo User Markers */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.5 }}
+            className="absolute top-1/3 left-1/4"
+          >
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => handleUserMarkerClick(nearbyUsers[0])}
+              className="relative"
+            >
+              <Avatar
+                src={nearbyUsers[0].avatar}
+                alt={nearbyUsers[0].name}
+                sx={{ width: 56, height: 56, border: "3px solid #ef4444" }}
+              />
+              <motion.div
+                animate={{ scale: [1, 1.3, 1] }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="absolute -inset-1 bg-destructive/30 rounded-full -z-10"
+              />
+            </motion.button>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.7 }}
+            className="absolute top-1/2 right-1/3"
+          >
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => handleUserMarkerClick(nearbyUsers[1])}
+              className="relative"
+            >
+              <Avatar
+                src={nearbyUsers[1].avatar}
+                alt={nearbyUsers[1].name}
+                sx={{ width: 56, height: 56, border: "3px solid #1976d2" }}
+              />
+              <motion.div
+                animate={{ scale: [1, 1.3, 1] }}
+                transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
+                className="absolute -inset-1 bg-primary/30 rounded-full -z-10"
+              />
+            </motion.button>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.9 }}
+            className="absolute bottom-1/3 left-1/2"
+          >
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => handleUserMarkerClick(nearbyUsers[2])}
+              className="relative"
+            >
+              <Avatar
+                src={nearbyUsers[2].avatar}
+                alt={nearbyUsers[2].name}
+                sx={{ width: 56, height: 56, border: "3px solid #ff9800" }}
+              />
+              <motion.div
+                animate={{ scale: [1, 1.3, 1] }}
+                transition={{ duration: 2, repeat: Infinity, delay: 1 }}
+                className="absolute -inset-1 bg-warning/30 rounded-full -z-10"
+              />
+            </motion.button>
+          </motion.div>
         </div>
       </div>
 
@@ -114,35 +203,6 @@ const MapScreen = () => {
 
       {/* Top Bar - Right Side Controls */}
       <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
-        {/* 3D View Toggle */}
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={handleToggle3D}
-          className={`
-            touch-target rounded-full shadow-elevation-3 transition-all duration-300
-            ${is3DMode ? "bg-purple text-purple-foreground" : "bg-primary text-primary-foreground"}
-          `}
-          style={{ width: 56, height: 56 }}
-        >
-          <ThreeDRotationIcon style={{ fontSize: 28 }} />
-        </motion.button>
-
-        {/* Compass/Reset (3D mode only) */}
-        <AnimatePresence>
-          {is3DMode && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              whileTap={{ scale: 0.95 }}
-              className="touch-target bg-warning text-warning-foreground rounded-full shadow-elevation-3"
-              style={{ width: 56, height: 56 }}
-            >
-              <ExploreIcon style={{ fontSize: 28 }} />
-            </motion.button>
-          )}
-        </AnimatePresence>
-
         {/* People List */}
         <motion.button
           whileTap={{ scale: 0.95 }}
@@ -176,7 +236,74 @@ const MapScreen = () => {
         </motion.button>
       </div>
 
-      {/* Activity Badge (Top Left) */}
+      {/* User Info Window */}
+      <AnimatePresence>
+        {selectedUser && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 20 }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30"
+          >
+            <div className="bg-card/95 backdrop-blur-xl rounded-3xl shadow-elevation-4 p-6 border-2 border-border/50 min-w-[300px]">
+              {/* Close button */}
+              <button
+                onClick={() => setSelectedUser(null)}
+                className="absolute top-3 right-3 p-2 hover:bg-secondary rounded-full transition-colors"
+              >
+                <span className="text-lg">✕</span>
+              </button>
+
+              {/* User Info */}
+              <div className="flex flex-col items-center space-y-4 mt-2">
+                <Avatar
+                  src={selectedUser.avatar}
+                  alt={selectedUser.name}
+                  sx={{ width: 80, height: 80, border: "3px solid hsl(var(--primary))" }}
+                />
+                <div className="text-center">
+                  <h3 className="text-xl font-bold">{selectedUser.name}</h3>
+                  <div className="flex items-center justify-center gap-2 mt-2">
+                    {selectedUser.activity === "Running" && (
+                      <DirectionsRunIcon className="text-success" style={{ fontSize: 20 }} />
+                    )}
+                    {selectedUser.activity === "Cycling" && (
+                      <DirectionsBikeIcon className="text-primary" style={{ fontSize: 20 }} />
+                    )}
+                    {selectedUser.activity === "Walking" && (
+                      <DirectionsWalkIcon className="text-warning" style={{ fontSize: 20 }} />
+                    )}
+                    <span className="text-sm text-muted-foreground">{selectedUser.activity}</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    📍 {selectedUser.distance} away
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 w-full pt-2">
+                  <Button
+                    onClick={handleCenterOnUser}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    <MyLocationIcon style={{ fontSize: 20 }} className="mr-2" />
+                    Center
+                  </Button>
+                  <Button
+                    onClick={handleAddFriend}
+                    className="flex-1 bg-gradient-to-r from-primary to-primary/90"
+                  >
+                    <PeopleIcon style={{ fontSize: 20 }} className="mr-2" />
+                    Add Friend
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {isActive && (
           <motion.div
@@ -268,24 +395,7 @@ const MapScreen = () => {
           )}
         </AnimatePresence>
 
-        {/* 3D Controls (3D mode only) */}
-        <AnimatePresence>
-          {is3DMode && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="mb-4 bg-card/90 backdrop-blur-sm rounded-2xl p-4 shadow-elevation-3"
-            >
-              <p className="text-sm font-medium mb-2">3D Controls</p>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm">Tilt ↕</Button>
-                <Button variant="outline" size="sm">Rotate ↺</Button>
-                <Button variant="outline" size="sm">Reset</Button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* 3D Controls removed */}
 
         {/* Start/Stop Activity Button */}
         <motion.div 

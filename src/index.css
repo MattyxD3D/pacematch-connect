@@ -240,3 +240,18 @@ All colors MUST be HSL.
     background-color: hsl(var(--activity-walking));
   }
 }
+
+@keyframes slide-in-bottom {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-bottom {
+  animation: slide-in-bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}

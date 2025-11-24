@@ -16,6 +16,12 @@ import Avatar from "@mui/material/Avatar";
 import { toast } from "sonner";
 import { NotificationBanner } from "@/components/NotificationBanner";
 import { MessageModal } from "@/components/MessageModal";
+import { FriendRequestModal } from "@/components/FriendRequestModal";
+import PersonAddIcon from "@mui/icons-material/PersonAdd";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
+
+type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 import SendIcon from "@mui/icons-material/Send";
 import CloseIcon from "@mui/icons-material/Close";
 
@@ -29,7 +35,27 @@ const MapScreen = () => {
   const [selectedActivity, setSelectedActivity] = useState<"running" | "cycling" | "walking">("running");
   const [selectedUser, setSelectedUser] = useState<typeof nearbyUsers[0] | null>(null);
   const [showMessageModal, setShowMessageModal] = useState(false);
+  const [showFriendRequestModal, setShowFriendRequestModal] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Friend status tracking (mock data - replace with backend later)
+  const [friendStatuses, setFriendStatuses] = useState<Record<number, { status: FriendStatus; cooldownUntil?: number }>>({
+    1: { status: "not_friends" },
+    2: { status: "friends" }, // Mike Chen is already a friend
+    3: { status: "not_friends" },
+  });
+  
+  const getFriendStatus = (userId: number): FriendStatus => {
+    return friendStatuses[userId]?.status || "not_friends";
+  };
+  
+  const getCooldownDays = (userId: number): number => {
+    const cooldownUntil = friendStatuses[userId]?.cooldownUntil;
+    if (!cooldownUntil) return 0;
+    const now = Date.now();
+    const diff = cooldownUntil - now;
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  };
 
   const activities = [
     { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
@@ -94,11 +120,34 @@ const MapScreen = () => {
     }
   };
 
-  const handleAddFriend = () => {
+  const handleAddFriend = (userId: number) => {
     if (selectedUser) {
+      setFriendStatuses(prev => ({
+        ...prev,
+        [userId]: { status: "request_pending" }
+      }));
       toast.success(`Friend request sent to ${selectedUser.name}`);
-      // In real implementation, this would send to backend
     }
+  };
+
+  const handleAcceptFriend = (userId: number) => {
+    setFriendStatuses(prev => ({
+      ...prev,
+      [userId]: { status: "friends" }
+    }));
+    setShowFriendRequestModal(false);
+    toast.success("Friend request accepted!");
+  };
+
+  const handleDeclineFriend = (userId: number) => {
+    // Set 7-day cooldown
+    const cooldownUntil = Date.now() + (7 * 24 * 60 * 60 * 1000);
+    setFriendStatuses(prev => ({
+      ...prev,
+      [userId]: { status: "denied", cooldownUntil }
+    }));
+    setShowFriendRequestModal(false);
+    toast("Friend request declined. The user won't be notified.");
   };
 
   const handleSendMessage = () => {
@@ -301,24 +350,61 @@ const MapScreen = () => {
 
                 {/* Action Buttons */}
                 <div className="flex flex-col gap-3 w-full pt-2">
+                  {/* Friend Badge (if friends) */}
+                  {getFriendStatus(selectedUser.id) === "friends" && (
+                    <div className="flex items-center justify-center gap-2 px-4 py-2 bg-[hsl(142,76%,36%)]/10 border-2 border-[hsl(142,76%,36%)] rounded-xl">
+                      <CheckCircleIcon style={{ fontSize: 20, color: "hsl(142, 76%, 36%)" }} />
+                      <span className="text-[hsl(142,76%,36%)] font-bold text-base">Friend</span>
+                    </div>
+                  )}
+
                   {/* Primary: Send Message */}
                   <Button
                     onClick={handleSendMessage}
                     className="w-full h-12 bg-primary text-primary-foreground hover:bg-primary/90 text-base font-semibold"
                   >
                     <SendIcon className="mr-2" fontSize="small" />
-                    Send Message
+                    {getFriendStatus(selectedUser.id) === "friends" ? "Message" : "Send Message"}
                   </Button>
 
-                  {/* Secondary: Add Friend */}
-                  <Button
-                    onClick={handleAddFriend}
-                    variant="outline"
-                    className="w-full h-12 border-2 text-base font-semibold"
-                  >
-                    <PeopleIcon className="mr-2" fontSize="small" />
-                    Add Friend
-                  </Button>
+                  {/* Add Friend Button - Different states */}
+                  {getFriendStatus(selectedUser.id) === "not_friends" && (
+                    <Button
+                      onClick={() => handleAddFriend(selectedUser.id)}
+                      variant="outline"
+                      className="w-full h-12 border-2 text-base font-semibold"
+                    >
+                      <PersonAddIcon className="mr-2" fontSize="small" />
+                      Add Friend
+                    </Button>
+                  )}
+
+                  {getFriendStatus(selectedUser.id) === "request_pending" && (
+                    <Button
+                      disabled
+                      variant="outline"
+                      className="w-full h-12 border-2 text-base font-semibold cursor-not-allowed opacity-60"
+                    >
+                      <HourglassEmptyIcon className="mr-2" fontSize="small" />
+                      Request Pending
+                    </Button>
+                  )}
+
+                  {getFriendStatus(selectedUser.id) === "denied" && (
+                    <div className="space-y-1">
+                      <Button
+                        disabled
+                        variant="outline"
+                        className="w-full h-12 border-2 text-base font-semibold cursor-not-allowed opacity-60"
+                      >
+                        <PersonAddIcon className="mr-2" fontSize="small" />
+                        Add Friend
+                      </Button>
+                      <p className="text-xs text-muted-foreground text-center">
+                        Try again in {getCooldownDays(selectedUser.id)} days
+                      </p>
+                    </div>
+                  )}
 
                   {/* Tertiary: Center on Location */}
                   <Button
@@ -342,6 +428,15 @@ const MapScreen = () => {
         userName={selectedUser?.name || ""}
         onClose={() => setShowMessageModal(false)}
         onSend={handleMessageSent}
+      />
+
+      {/* Friend Request Modal */}
+      <FriendRequestModal
+        isOpen={showFriendRequestModal}
+        onClose={() => setShowFriendRequestModal(false)}
+        userName={selectedUser?.name || ""}
+        onAccept={() => selectedUser && handleAcceptFriend(selectedUser.id)}
+        onDecline={() => selectedUser && handleDeclineFriend(selectedUser.id)}
       />
       <AnimatePresence>
         {isActive && (

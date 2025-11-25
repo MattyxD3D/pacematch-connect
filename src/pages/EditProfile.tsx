@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
@@ -17,9 +17,12 @@ import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
+import { getUserData, updateUserProfile } from "@/services/authService";
 
 const EditProfile = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { userProfile, setUserProfile } = useUser();
   
   const [username, setUsername] = useState(userProfile?.username || "");
@@ -29,6 +32,48 @@ const EditProfile = () => {
   const [selectedActivities, setSelectedActivities] = useState<("running" | "cycling" | "walking")[]>(
     userProfile?.activities || []
   );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Load user data from Firebase on mount to get onboarding selections
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (user) {
+        try {
+          const userData = await getUserData(user.uid);
+          if (userData) {
+            // Load username from Firebase
+            if (userData.name) {
+              setUsername(userData.name);
+            }
+            
+            // Load gender from Firebase and lock it
+            if (userData.gender) {
+              setGender(userData.gender);
+            }
+            
+            // Load activity from Firebase (onboarding saves as single value)
+            // Convert to array format for checkboxes
+            if (userData.activity) {
+              const activity = userData.activity as "running" | "cycling" | "walking";
+              setSelectedActivities([activity]);
+            } else if (userProfile?.activities && userProfile.activities.length > 0) {
+              // Fallback to userProfile if Firebase doesn't have it
+              setSelectedActivities(userProfile.activities);
+            }
+          }
+        } catch (error) {
+          console.error("Error loading user data:", error);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
+      }
+    };
+    
+    loadUserData();
+  }, [user]);
 
   const activities = [
     { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
@@ -74,7 +119,12 @@ const EditProfile = () => {
     setPhotos(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!user) {
+      toast.error("You must be logged in to save changes");
+      return;
+    }
+
     if (!username.trim()) {
       toast.error("Username cannot be empty");
       return;
@@ -85,17 +135,39 @@ const EditProfile = () => {
       return;
     }
 
-    setUserProfile({
-      ...userProfile!,
-      username: username.trim(),
-      bio: bio.trim(),
-      gender,
-      photos,
-      activities: selectedActivities,
-    });
+    setSaving(true);
+    try {
+      // Prepare data to save to Firebase
+      const profileData: any = {
+        name: username.trim(), // Save username as 'name' in Firebase
+        bio: bio.trim() || null,
+        photos: photos.length > 0 ? photos : null,
+        // Save activities - use first activity as primary activity for compatibility
+        activity: selectedActivities[0], // Primary activity (for backward compatibility)
+        activities: selectedActivities, // Array of all selected activities
+      };
 
-    toast.success("Profile updated successfully!");
-    navigate("/settings");
+      // Save to Firebase
+      await updateUserProfile(user.uid, profileData);
+
+      // Also update local context
+      setUserProfile({
+        ...userProfile!,
+        username: username.trim(),
+        bio: bio.trim(),
+        gender,
+        photos,
+        activities: selectedActivities,
+      });
+
+      toast.success("Profile updated successfully!");
+      navigate("/settings");
+    } catch (error: any) {
+      console.error("Error saving profile:", error);
+      toast.error("Failed to save profile. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -119,6 +191,21 @@ const EditProfile = () => {
       </motion.div>
 
       <div className="max-w-2xl mx-auto px-6 py-6 space-y-6 pb-10">
+        {/* Profile Picture */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="flex justify-center"
+        >
+          <Avatar
+            src={user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.displayName || user?.email || 'User')}&size=120`}
+            alt="Profile"
+            sx={{ width: 120, height: 120 }}
+            className="border-4 border-primary/20 shadow-elevation-3"
+          />
+        </motion.div>
+
         {/* Photos Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -194,8 +281,8 @@ const EditProfile = () => {
 
             <div className="space-y-2">
               <Label htmlFor="gender">Gender</Label>
-              <Select value={gender} onValueChange={setGender}>
-                <SelectTrigger className="h-12">
+              <Select value={gender} onValueChange={setGender} disabled>
+                <SelectTrigger className="h-12" disabled>
                   <SelectValue placeholder="Select gender" />
                 </SelectTrigger>
                 <SelectContent>
@@ -205,6 +292,7 @@ const EditProfile = () => {
                   <SelectItem value="prefer-not-to-say">Prefer not to say</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">Gender cannot be changed after onboarding</p>
             </div>
           </Card>
         </motion.div>
@@ -242,7 +330,7 @@ const EditProfile = () => {
                     `}
                     onClick={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-1">
                       <Icon 
                         className={
                           isSelected
@@ -257,10 +345,20 @@ const EditProfile = () => {
                       />
                       <span className="font-medium">{activity.label}</span>
                     </div>
-                    <Checkbox 
-                      checked={isSelected}
-                      onCheckedChange={() => handleActivityToggle(activity.id as "running" | "cycling" | "walking")}
-                    />
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleActivityToggle(activity.id as "running" | "cycling" | "walking");
+                      }}
+                      className="flex-shrink-0"
+                    >
+                      <Checkbox 
+                        checked={isSelected}
+                        onCheckedChange={(checked) => {
+                          handleActivityToggle(activity.id as "running" | "cycling" | "walking");
+                        }}
+                      />
+                    </div>
                   </motion.div>
                 );
               })}
@@ -274,8 +372,12 @@ const EditProfile = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
         >
-          <Button onClick={handleSave} className="w-full h-12 text-base font-bold">
-            Save Changes
+          <Button 
+            onClick={handleSave} 
+            disabled={saving || loading}
+            className="w-full h-12 text-base font-bold"
+          >
+            {saving ? "Saving..." : "Save Changes"}
           </Button>
         </motion.div>
       </div>

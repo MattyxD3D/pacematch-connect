@@ -7,17 +7,28 @@ import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import CloseIcon from "@mui/icons-material/Close";
 import SendIcon from "@mui/icons-material/Send";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
+import PersonRemoveIcon from "@mui/icons-material/PersonRemove";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
 import { Card } from "@/components/ui/card";
 import { useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 
 interface ProfileViewProps {
   user: {
-    id: number;
+    id: string | number;
     name: string;
     distance: string;
     activity: string;
@@ -32,6 +43,7 @@ interface ProfileViewProps {
   onAddFriend: () => void;
   onAcceptFriend: () => void;
   onDeclineFriend: () => void;
+  onUnfriend?: () => void;
   onPoke?: () => void;
   hasPoked?: boolean;
 }
@@ -45,10 +57,12 @@ export const ProfileView = ({
   onAddFriend,
   onAcceptFriend,
   onDeclineFriend,
+  onUnfriend,
   onPoke,
   hasPoked = false,
 }: ProfileViewProps) => {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [showUnfriendDialog, setShowUnfriendDialog] = useState(false);
   
   const displayPhotos = user.photos && user.photos.length > 0 
     ? user.photos 
@@ -258,10 +272,49 @@ export const ProfileView = ({
                 <SendIcon className="mr-2" style={{ fontSize: 20 }} />
                 Send Message
               </Button>
+
+              {/* Unfriend Button - Only show when friends */}
+              {friendStatus === "friends" && onUnfriend && (
+                <Button
+                  onClick={() => setShowUnfriendDialog(true)}
+                  variant="outline"
+                  className="w-full h-12 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                >
+                  <PersonRemoveIcon className="mr-2" style={{ fontSize: 20 }} />
+                  Unfriend
+                </Button>
+              )}
             </div>
           </div>
         </Card>
       </motion.div>
+
+      {/* Unfriend Confirmation Dialog */}
+      <AlertDialog open={showUnfriendDialog} onOpenChange={setShowUnfriendDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unfriend {user.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to unfriend {user.name}? 
+              They will be removed from your friends list and won't be able to see your location during workouts.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (onUnfriend) {
+                  onUnfriend();
+                }
+                setShowUnfriendDialog(false);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Unfriend
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </motion.div>
   );
 };

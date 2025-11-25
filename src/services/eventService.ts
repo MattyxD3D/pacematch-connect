@@ -8,7 +8,7 @@ export interface Event {
   id: string;
   title: string;
   description: string;
-  type: "running" | "cycling" | "walking";
+  type: "running" | "cycling" | "walking" | "others";
   category: "user" | "sponsored";
   date: string; // ISO date string
   time: string;
@@ -310,5 +310,90 @@ export const getCheckInsAtEventLocation = async (eventId: string): Promise<Check
     console.error("❌ Error getting check-ins at event location:", error);
     return [];
   }
+};
+
+/**
+ * Listen to check-ins at an event's location in real-time
+ */
+export const listenToEventCheckIns = (
+  eventId: string,
+  callback: (checkIns: CheckIn[]) => void
+): (() => void) => {
+  let venueUnsubscribe: (() => void) | null = null;
+  let eventCheckInsUnsubscribe: (() => void) | null = null;
+  
+  const eventRef = ref(database, `events/${eventId}`);
+  
+  const eventUnsubscribe = onValue(
+    eventRef,
+    async (snapshot: DataSnapshot) => {
+      // Clean up previous listeners
+      if (venueUnsubscribe) {
+        venueUnsubscribe();
+        venueUnsubscribe = null;
+      }
+      if (eventCheckInsUnsubscribe) {
+        eventCheckInsUnsubscribe();
+        eventCheckInsUnsubscribe = null;
+      }
+      
+      if (!snapshot.exists()) {
+        callback([]);
+        return;
+      }
+      
+      const event = snapshot.val() as Event;
+      
+      // Try to find a matching venue
+      const venue = findVenueForEvent(event.lat, event.lng);
+      
+      if (venue) {
+        // Listen to venue check-ins
+        venueUnsubscribe = onValue(
+          ref(database, `checkIns/${venue.id}`),
+          (checkInsSnapshot: DataSnapshot) => {
+            if (!checkInsSnapshot.exists()) {
+              callback([]);
+              return;
+            }
+            const checkIns = checkInsSnapshot.val();
+            callback(Object.values(checkIns) as CheckIn[]);
+          },
+          (error) => {
+            console.error("❌ Error listening to venue check-ins:", error);
+            callback([]);
+          }
+        );
+      } else {
+        // Listen to event-specific check-ins
+        const eventCheckInsRef = ref(database, `eventCheckIns/${eventId}`);
+        eventCheckInsUnsubscribe = onValue(
+          eventCheckInsRef,
+          (checkInsSnapshot: DataSnapshot) => {
+            if (!checkInsSnapshot.exists()) {
+              callback([]);
+              return;
+            }
+            const checkIns = checkInsSnapshot.val();
+            callback(Object.values(checkIns) as CheckIn[]);
+          },
+          (error) => {
+            console.error("❌ Error listening to event check-ins:", error);
+            callback([]);
+          }
+        );
+      }
+    },
+    (error) => {
+      console.error("❌ Error listening to event:", error);
+      callback([]);
+    }
+  );
+  
+  return () => {
+    if (venueUnsubscribe) venueUnsubscribe();
+    if (eventCheckInsUnsubscribe) eventCheckInsUnsubscribe();
+    off(eventRef);
+  };
 };
 

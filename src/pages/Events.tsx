@@ -1,14 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { listenToEvents, Event as FirebaseEvent, joinEvent } from "@/services/eventService";
+import { listenToEvents, Event as FirebaseEvent, joinEvent, listenToEventCheckIns, createEvent } from "@/services/eventService";
+import { getUserData } from "@/services/authService";
+import { calculateDistance, formatDistance } from "@/utils/distance";
+import { GoogleMap, Marker, InfoWindow, OverlayView, useJsApiLoader } from "@react-google-maps/api";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ExploreIcon from "@mui/icons-material/Explore";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
+import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
 import EventIcon from "@mui/icons-material/Event";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import PeopleIcon from "@mui/icons-material/People";
@@ -19,6 +23,8 @@ import ViewListIcon from "@mui/icons-material/ViewList";
 import MapIcon from "@mui/icons-material/Map";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import CloseIcon from "@mui/icons-material/Close";
+import MenuIcon from "@mui/icons-material/Menu";
 import Avatar from "@mui/material/Avatar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +33,17 @@ import { EventDetailModal } from "@/components/EventDetailModal";
 import { CreateEventModal } from "@/components/CreateEventModal";
 import { QuickCheckInModal } from "@/components/QuickCheckInModal";
 import BottomNavigation from "@/components/BottomNavigation";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+} from "@/components/ui/drawer";
 
-type EventType = "running" | "cycling" | "walking";
+const libraries: ("places")[] = ["places"];
+
+type EventType = "running" | "cycling" | "walking" | "others";
 type EventCategory = "all" | "user" | "sponsored";
 
 interface Event {
@@ -53,6 +68,70 @@ interface Event {
   isJoined?: boolean;
 }
 
+// Custom Event Marker Component
+interface EventMarkerProps {
+  event: Event;
+  checkInCount: number;
+  countdown: string;
+  onClick: () => void;
+}
+
+const EventMarker = ({ event, checkInCount, countdown, onClick }: EventMarkerProps) => {
+  const getActivityColor = (type: EventType): string => {
+    switch (type) {
+      case "running":
+        return "#22c55e"; // success/green
+      case "cycling":
+        return "#3b82f6"; // primary/blue
+      case "walking":
+        return "#eab308"; // warning/yellow
+      case "others":
+        return "#a855f7"; // secondary/purple
+      default:
+        return "#6b7280"; // gray
+    }
+  };
+
+  const borderColor = getActivityColor(event.type);
+
+  return (
+    <div
+      onClick={onClick}
+      className="relative cursor-pointer transform transition-transform hover:scale-110"
+      style={{ transform: "translate(-50%, -50%)" }}
+    >
+      {/* Profile Photo Marker */}
+      <div
+        className="relative rounded-full border-4 shadow-lg overflow-hidden"
+        style={{
+          width: "56px",
+          height: "56px",
+          borderColor: borderColor,
+        }}
+      >
+        <img
+          src={event.hostAvatar || `https://ui-avatars.com/api/?name=${event.hostName || 'User'}`}
+          alt={event.hostName || "Host"}
+          className="w-full h-full object-cover"
+          onError={(e) => {
+            e.currentTarget.src = `https://ui-avatars.com/api/?name=${event.hostName || 'User'}`;
+          }}
+        />
+        {/* Check-in Count Badge */}
+        {checkInCount > 0 && (
+          <div className="absolute -bottom-1 -right-1 bg-primary text-primary-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center border-2 border-background shadow-md">
+            +{checkInCount}
+          </div>
+        )}
+      </div>
+      {/* Countdown Timer Badge */}
+      <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-background/90 backdrop-blur-sm text-xs font-semibold px-2 py-1 rounded-full border border-border shadow-md whitespace-nowrap">
+        {countdown}
+      </div>
+    </div>
+  );
+};
+
 const Events = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
@@ -65,21 +144,182 @@ const Events = () => {
   const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // Start closed on mobile
+  const [drawerOpen, setDrawerOpen] = useState(false); // Mobile drawer state
+  const [checkInCounts, setCheckInCounts] = useState<Record<string, number>>({});
+  const [selectedMarkerEvent, setSelectedMarkerEvent] = useState<Event | null>(null);
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 14.5995, lng: 120.9842 });
+  const [mapZoom, setMapZoom] = useState(13);
+  const [mapRef, setMapRef] = useState<any>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  
+  // Google Maps API loader
+  const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: googleMapsApiKey || '',
+    libraries: libraries
+  });
+
+  // Get user location - try to get from browser geolocation once
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  
+  useEffect(() => {
+    if (navigator.geolocation && currentUser?.uid) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+        },
+        (error) => {
+          console.warn("Could not get user location:", error);
+          // Set default location or try to get from user data
+        }
+      );
+    }
+  }, [currentUser?.uid]);
+
+  // Countdown timer utility function
+  const calculateCountdown = useCallback((date: string, time: string): string => {
+    try {
+      // Parse date (could be in various formats)
+      let eventDate: Date;
+      
+      // If date is already a full ISO string with time
+      if (date.includes('T')) {
+        eventDate = new Date(date);
+      } else if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        // ISO date format (YYYY-MM-DD) - combine with time
+        eventDate = new Date(`${date}T${time}`);
+      } else if (date.includes('/')) {
+        // Assume format like "12/25/2024" or "MM/DD/YYYY"
+        const parts = date.split('/');
+        if (parts.length === 3) {
+          // Check if it's MM/DD/YYYY or DD/MM/YYYY by checking first part
+          const firstPart = parseInt(parts[0]);
+          if (firstPart > 12) {
+            // DD/MM/YYYY format
+            eventDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T${time}`);
+          } else {
+            // MM/DD/YYYY format
+            eventDate = new Date(`${parts[2]}-${parts[0]}-${parts[1]}T${time}`);
+          }
+        } else {
+          eventDate = new Date(`${date}T${time}`);
+        }
+      } else {
+        // Try parsing as-is or with time appended
+        eventDate = new Date(`${date}T${time}`);
+      }
+      
+      // Validate the date
+      if (isNaN(eventDate.getTime())) {
+        return "Invalid date";
+      }
+      
+      const now = currentTime;
+      const diff = eventDate.getTime() - now.getTime();
+      
+      if (diff < 0) {
+        const pastDiff = Math.abs(diff);
+        const pastHours = Math.floor(pastDiff / (1000 * 60 * 60));
+        if (pastHours < 24) {
+          return "Started";
+        }
+        return "Expired";
+      }
+      
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      
+      if (hours > 24) {
+        const days = Math.floor(hours / 24);
+        return `${days}d ${hours % 24}h`;
+      } else if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+      } else if (minutes > 0) {
+        return `${minutes}m`;
+      } else {
+        return "Starting soon";
+      }
+    } catch (error) {
+      return "Invalid date";
+    }
+  }, [currentTime]);
+
+  // Update current time every minute for countdown
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000); // Update every minute
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Listen to events from Firebase
   useEffect(() => {
     const unsubscribe = listenToEvents((firebaseEvents: FirebaseEvent[]) => {
       // Transform Firebase events to match local Event interface
-      const transformedEvents: Event[] = firebaseEvents.map((event) => ({
-        ...event,
-        isJoined: currentUser?.uid ? event.participants.includes(currentUser.uid) : false,
-      }));
+      const transformedEvents: Event[] = firebaseEvents.map((event) => {
+        // Calculate distance if user location is available
+        let distance = "Unknown";
+        let distanceValue = Infinity;
+        
+        if (userLocation && event.lat && event.lng) {
+          const dist = calculateDistance(
+            userLocation.lat,
+            userLocation.lng,
+            event.lat,
+            event.lng
+          );
+          if (dist !== null) {
+            distanceValue = dist;
+            distance = formatDistance(dist);
+          }
+        }
+        
+        return {
+          ...event,
+          isJoined: currentUser?.uid ? event.participants.includes(currentUser.uid) : false,
+          distance,
+          distanceValue,
+        };
+      });
       setEvents(transformedEvents);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, userLocation]);
+
+  // Center map on user location when available
+  useEffect(() => {
+    if (userLocation && mapRef) {
+      setMapCenter({ lat: userLocation.lat, lng: userLocation.lng });
+      mapRef.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+    }
+  }, [userLocation, mapRef]);
+
+  // Listen to check-ins for each event
+  useEffect(() => {
+    const unsubscribes: (() => void)[] = [];
+    
+    events.forEach((event) => {
+      const unsubscribe = listenToEventCheckIns(event.id, (checkIns) => {
+        setCheckInCounts((prev) => ({
+          ...prev,
+          [event.id]: checkIns.length,
+        }));
+      });
+      unsubscribes.push(unsubscribe);
+    });
+
+    return () => {
+      unsubscribes.forEach((unsub) => unsub());
+    };
+  }, [events]);
 
   // Filter events
   const filteredEvents = events.filter((event) => {
@@ -112,38 +352,49 @@ const Events = () => {
     setShowEventDetail(true);
   };
 
-  const handleCreateEvent = (eventData: any) => {
-    // In real implementation, this would save to backend
-    console.log("Creating event:", eventData);
-    
-    // Create a new event object
-    const newEvent: Event = {
-      id: String(events.length + 1),
-      title: eventData.title,
-      description: eventData.description,
-      type: eventData.activityType,
-      category: "user",
-      date: new Date(eventData.date).toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: '2-digit', 
-        day: '2-digit' 
-      }),
-      time: eventData.time,
-      location: eventData.location,
-      distance: "0.0 km",
-      distanceValue: 0,
-      participants: currentUser?.uid ? [currentUser.uid] : [],
-      maxParticipants: eventData.maxParticipants,
-      hostName: "You",
-      hostAvatar: "https://i.pravatar.cc/150?img=10",
-      lat: 40.7829,
-      lng: -73.9654,
-      isJoined: true,
-    };
+  const handleCreateEvent = async (eventData: any) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to create events");
+      return;
+    }
 
-    // Add to events (in real app, would update state from backend response)
-    events.unshift(newEvent);
-    toast.success("Event created successfully!");
+    try {
+      // Get user data for host info
+      const userData = await getUserData(currentUser.uid);
+      
+      // Get location - use selected location from form, then userLocation, then user's saved location or default
+      let eventLat = eventData.lat || userLocation?.lat || userData?.lat || 14.5995;
+      let eventLng = eventData.lng || userLocation?.lng || userData?.lng || 120.9842;
+      
+      // Format date properly (ISO string)
+      const eventDate = new Date(eventData.date);
+      const formattedDate = eventDate.toISOString().split('T')[0];
+      
+      // Create event in Firebase
+      const eventId = await createEvent(currentUser.uid, {
+        title: eventData.title,
+        description: eventData.description,
+        type: eventData.activityType,
+        category: "user",
+        date: formattedDate,
+        time: eventData.time,
+        location: eventData.location,
+        distance: "0.0 km", // Will be calculated by listeners
+        distanceValue: 0,
+        lat: eventLat,
+        lng: eventLng,
+        hostName: userData?.name || currentUser.displayName || "User",
+        hostAvatar: userData?.photoURL || currentUser.photoURL || "",
+        maxParticipants: eventData.maxParticipants,
+      });
+      
+      toast.success("Event created successfully!");
+      setShowCreateEvent(false);
+      // The real-time listener will update the events automatically
+    } catch (error: any) {
+      console.error("Error creating event:", error);
+      toast.error(error.message || "Failed to create event");
+    }
   };
 
   const getActivityIcon = (type: EventType) => {
@@ -154,6 +405,8 @@ const Events = () => {
         return <DirectionsBikeIcon className="text-primary" style={{ fontSize: 20 }} />;
       case "walking":
         return <DirectionsWalkIcon className="text-warning" style={{ fontSize: 20 }} />;
+      case "others":
+        return <FitnessCenterIcon className="text-secondary" style={{ fontSize: 20 }} />;
     }
   };
 
@@ -165,6 +418,8 @@ const Events = () => {
         return "primary";
       case "walking":
         return "warning";
+      case "others":
+        return "secondary";
     }
   };
 
@@ -235,8 +490,8 @@ const Events = () => {
         </div>
       </motion.div>
 
-      {/* Filters */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+      {/* Filters - Hidden on mobile, shown on desktop */}
+      <div className="hidden sm:block max-w-7xl mx-auto px-4 sm:px-6 py-4">
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -293,6 +548,18 @@ const Events = () => {
               <DirectionsWalkIcon style={{ fontSize: 18 }} />
               Walking
             </motion.button>
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActivityFilter("others")}
+              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                activityFilter === "others"
+                  ? "bg-secondary text-secondary-foreground shadow-elevation-2"
+                  : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              <FitnessCenterIcon style={{ fontSize: 18 }} />
+              Others
+            </motion.button>
           </div>
 
           {/* Category Filter */}
@@ -336,7 +603,7 @@ const Events = () => {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24">
+      <div className="max-w-7xl mx-auto px-0 sm:px-4 sm:px-6 pb-20 sm:pb-24">
         <AnimatePresence mode="wait">
           {viewMode === "map" ? (
             <motion.div
@@ -345,40 +612,251 @@ const Events = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.3 }}
-              className="space-y-4"
+              className="relative w-full"
             >
-              {/* Map Placeholder */}
-              <Card className="p-8 shadow-elevation-3 border-2 border-border/50">
-                <div className="relative w-full h-[400px] bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 rounded-2xl flex items-center justify-center">
-                  <div className="text-center space-y-4">
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+              {/* Map Container */}
+              <div className="relative w-full h-[calc(100vh-200px)] sm:h-[600px] rounded-2xl overflow-hidden shadow-elevation-3 border-2 border-border/50">
+                {loadError ? (
+                  <div className="w-full h-full flex items-center justify-center bg-muted">
+                    <div className="text-center">
+                      <p className="text-destructive font-semibold">Error loading map</p>
+                      <p className="text-sm text-muted-foreground">Please check your Google Maps API key</p>
+                    </div>
+                  </div>
+                ) : !isLoaded ? (
+                  <div className="w-full h-full flex items-center justify-center bg-muted">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                      <p className="text-muted-foreground">Loading map...</p>
+                    </div>
+                  </div>
+                ) : (
+                  <GoogleMap
+                    mapContainerStyle={{ width: "100%", height: "100%" }}
+                    center={mapCenter}
+                    zoom={mapZoom}
+                    onLoad={(map) => {
+                      setMapRef(map);
+                      if (userLocation) {
+                        map.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+                      }
+                    }}
+                    options={{
+                      disableDefaultUI: false,
+                      zoomControl: true,
+                      streetViewControl: false,
+                      mapTypeControl: false,
+                      fullscreenControl: true,
+                    }}
+                  >
+                    {/* User Location Marker */}
+                    {userLocation && (
+                      <Marker
+                        position={{ lat: userLocation.lat, lng: userLocation.lng }}
+                        icon={{
+                          url: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+                          scaledSize: new window.google.maps.Size(32, 32),
+                        }}
+                        title="Your location"
+                      />
+                    )}
+
+                    {/* Event Markers */}
+                    {sortedEvents.map((event) => {
+                      const checkInCount = checkInCounts[event.id] || 0;
+                      const countdown = calculateCountdown(event.date, event.time);
+                      const isSelected = selectedMarkerEvent?.id === event.id;
+
+                      return (
+                        <OverlayView
+                          key={event.id}
+                          position={{ lat: event.lat, lng: event.lng }}
+                          mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+                        >
+                          <EventMarker
+                            event={event}
+                            checkInCount={checkInCount}
+                            countdown={countdown}
+                            onClick={() => setSelectedMarkerEvent(event)}
+                          />
+                        </OverlayView>
+                      );
+                    })}
+
+                    {/* InfoWindow for selected marker */}
+                    {selectedMarkerEvent && (
+                      <InfoWindow
+                        position={{ lat: selectedMarkerEvent.lat, lng: selectedMarkerEvent.lng }}
+                        onCloseClick={() => setSelectedMarkerEvent(null)}
+                      >
+                        <div className="p-2 min-w-[200px]">
+                          <h3 className="font-bold text-base mb-2">{selectedMarkerEvent.title}</h3>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex items-center gap-2">
+                              {getActivityIcon(selectedMarkerEvent.type)}
+                              <span className="capitalize">{selectedMarkerEvent.type}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <AccessTimeIcon style={{ fontSize: 16 }} />
+                              <span>{selectedMarkerEvent.date} at {selectedMarkerEvent.time}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <span className="font-semibold">Countdown: {calculateCountdown(selectedMarkerEvent.date, selectedMarkerEvent.time)}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <PeopleIcon style={{ fontSize: 16 }} />
+                              <span>
+                                {checkInCounts[selectedMarkerEvent.id] || 0} checked in · {selectedMarkerEvent.participants.length} participants
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <LocationOnIcon style={{ fontSize: 16 }} />
+                              <span>{selectedMarkerEvent.distance}</span>
+                            </div>
+                            <Button
+                              onClick={() => {
+                                handleEventClick(selectedMarkerEvent);
+                                setSelectedMarkerEvent(null);
+                              }}
+                              className="w-full mt-2 h-8 text-xs"
+                              size="sm"
+                            >
+                              View Details
+                            </Button>
+                          </div>
+                        </div>
+                      </InfoWindow>
+                    )}
+                  </GoogleMap>
+                )}
+              </div>
+
+              {/* Top Right Controls - Like MapScreen */}
+              <div className="absolute top-4 right-4 flex flex-col gap-3 z-30">
+                {/* Create Event Button */}
+                <motion.button
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setShowCreateEvent(true)}
+                  className="touch-target bg-primary text-primary-foreground rounded-full shadow-elevation-3 border-2 border-primary-foreground/20 hover:shadow-elevation-4 transition-all duration-300 flex items-center justify-center"
+                  style={{ width: 56, height: 56 }}
+                  title="Create event"
+                >
+                  <AddIcon style={{ fontSize: 28 }} />
+                </motion.button>
+
+                {/* Events Drawer/List Button - Mobile only */}
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setDrawerOpen(true)}
+                  className="sm:hidden touch-target rounded-full shadow-elevation-3 border-2 bg-card/90 backdrop-blur-sm text-foreground border-border"
+                  style={{ width: 56, height: 56 }}
+                  title="Events list"
+                >
+                  <ViewListIcon style={{ fontSize: 28 }} />
+                  {sortedEvents.length > 0 && (
+                    <Badge 
+                      className="absolute -top-1 -right-1 bg-success text-white text-xs min-w-[20px] h-5 flex items-center justify-center rounded-full px-1 border-2 border-background"
                     >
-                      <ExploreIcon className="text-primary mx-auto" style={{ fontSize: 72 }} />
-                    </motion.div>
-                    <h3 className="text-xl font-bold">Interactive Event Map</h3>
-                    <p className="text-muted-foreground max-w-sm text-sm">
-                      Map integration will display event locations, allowing you to see all nearby events at a glance.
-                    </p>
+                      {sortedEvents.length > 9 ? '9+' : sortedEvents.length}
+                    </Badge>
+                  )}
+                </motion.button>
+
+                {/* Desktop Sidebar Toggle */}
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="hidden sm:flex touch-target rounded-full shadow-elevation-3 border-2 bg-card/90 backdrop-blur-sm text-foreground border-border hover:border-primary items-center justify-center"
+                  style={{ width: 56, height: 56 }}
+                  title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+                >
+                  {sidebarOpen ? <CloseIcon style={{ fontSize: 28 }} /> : <MenuIcon style={{ fontSize: 28 }} />}
+                </motion.button>
+              </div>
+
+              {/* Desktop Sidebar */}
+              <motion.div
+                initial={false}
+                animate={{
+                  x: sidebarOpen ? 0 : 400,
+                  opacity: sidebarOpen ? 1 : 0,
+                }}
+                transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                className="hidden sm:block absolute top-0 right-0 w-80 sm:w-96 h-full bg-background/95 backdrop-blur-md shadow-elevation-4 border-l border-border overflow-hidden z-30 pointer-events-none"
+                style={{ pointerEvents: sidebarOpen ? 'auto' : 'none' }}
+              >
+                <div className="h-full flex flex-col">
+                  <div className="p-4 border-b border-border">
+                    <h2 className="text-lg font-bold">Events</h2>
+                    <p className="text-xs text-muted-foreground">{sortedEvents.length} events found</p>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {sortedEvents.length === 0 ? (
+                      <div className="text-center py-8">
+                        <EventIcon className="text-muted-foreground/30 mx-auto mb-2" style={{ fontSize: 48 }} />
+                        <p className="text-sm text-muted-foreground">No events found</p>
+                      </div>
+                    ) : (
+                      sortedEvents.map((event, index) => {
+                        const checkInCount = checkInCounts[event.id] || 0;
+                        const countdown = calculateCountdown(event.date, event.time);
+                        
+                        return (
+                          <motion.div
+                            key={event.id}
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            onClick={() => {
+                              if (mapRef) {
+                                mapRef.panTo({ lat: event.lat, lng: event.lng });
+                                mapRef.setZoom(15);
+                              }
+                              setSelectedMarkerEvent(event);
+                            }}
+                            className="cursor-pointer"
+                          >
+                            <Card className="p-3 hover:shadow-elevation-2 transition-all border border-border">
+                              <div className="flex items-start gap-3">
+                                <Avatar
+                                  src={event.hostAvatar}
+                                  alt={event.hostName}
+                                  sx={{ width: 48, height: 48 }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    {getActivityIcon(event.type)}
+                                    <h4 className="font-semibold text-sm truncate">{event.title}</h4>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    {event.date} at {event.time}
+                                  </p>
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                    <Badge variant="secondary" className="text-xs">
+                                      {countdown}
+                                    </Badge>
+                                    {checkInCount > 0 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        +{checkInCount} checked in
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {event.distance}
+                                  </p>
+                                </div>
+                              </div>
+                            </Card>
+                          </motion.div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
-              </Card>
-
-              {/* Events near map */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {sortedEvents.slice(0, 6).map((event, index) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    index={index}
-                    onJoin={handleJoinEvent}
-                    onClick={() => handleEventClick(event)}
-                    getActivityIcon={getActivityIcon}
-                    getActivityColor={getActivityColor}
-                  />
-                ))}
-              </div>
+              </motion.div>
             </motion.div>
           ) : (
             <motion.div
@@ -416,17 +894,21 @@ const Events = () => {
         </AnimatePresence>
       </div>
 
-      {/* Create Event FAB */}
-      <motion.button
-        initial={{ scale: 0 }}
-        animate={{ scale: 1 }}
-        transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
-        whileTap={{ scale: 0.9 }}
-        onClick={() => setShowCreateEvent(true)}
-        className="fixed bottom-6 right-6 w-16 h-16 bg-primary text-primary-foreground rounded-full shadow-elevation-4 hover:shadow-elevation-5 transition-all duration-300 flex items-center justify-center z-30"
-      >
-        <AddIcon style={{ fontSize: 32 }} />
-      </motion.button>
+      {/* Create Event Button - For list view only */}
+      {viewMode === "list" && (
+        <motion.button
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setShowCreateEvent(true)}
+          className="fixed bottom-6 right-6 touch-target bg-primary text-primary-foreground rounded-full shadow-elevation-4 hover:shadow-elevation-5 transition-all duration-300 flex items-center justify-center z-30"
+          style={{ width: 56, height: 56 }}
+          title="Create event"
+        >
+          <AddIcon style={{ fontSize: 28 }} />
+        </motion.button>
+      )}
 
       {/* Event Detail Modal */}
       {showEventDetail && (
@@ -445,6 +927,7 @@ const Events = () => {
         <CreateEventModal
           onClose={() => setShowCreateEvent(false)}
           onCreateEvent={handleCreateEvent}
+          userLocation={userLocation}
         />
       )}
 
@@ -454,6 +937,166 @@ const Events = () => {
           onClose={() => setShowQuickCheckIn(false)}
         />
       )}
+
+      {/* Mobile Events Drawer */}
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerContent className="max-h-[85vh]">
+          <DrawerHeader className="border-b border-border">
+            <div className="flex items-center justify-between">
+              <div>
+                <DrawerTitle>Events</DrawerTitle>
+                <DrawerDescription>
+                  {sortedEvents.length} event{sortedEvents.length !== 1 ? "s" : ""} found
+                </DrawerDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setDrawerOpen(false)}
+                className="h-8 w-8"
+              >
+                <CloseIcon style={{ fontSize: 20 }} />
+              </Button>
+            </div>
+          </DrawerHeader>
+
+          <div className="overflow-y-auto flex-1">
+            {/* Filters inside drawer - Only activity filters */}
+            <div className="p-4 border-b border-border bg-muted/30">
+              <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">Filter by Activity</p>
+              <div className="grid grid-cols-2 gap-2">
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setActivityFilter("all")}
+                  className={`px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                    activityFilter === "all"
+                      ? "bg-primary text-primary-foreground shadow-elevation-2"
+                      : "bg-background text-foreground hover:bg-accent border border-border"
+                  }`}
+                >
+                  <FilterListIcon style={{ fontSize: 18 }} />
+                  All Activities
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setActivityFilter("running")}
+                  className={`px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                    activityFilter === "running"
+                      ? "bg-success text-success-foreground shadow-elevation-2"
+                      : "bg-background text-foreground hover:bg-accent border border-border"
+                  }`}
+                >
+                  <DirectionsRunIcon style={{ fontSize: 20 }} />
+                  Running
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setActivityFilter("cycling")}
+                  className={`px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                    activityFilter === "cycling"
+                      ? "bg-primary text-primary-foreground shadow-elevation-2"
+                      : "bg-background text-foreground hover:bg-accent border border-border"
+                  }`}
+                >
+                  <DirectionsBikeIcon style={{ fontSize: 20 }} />
+                  Cycling
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setActivityFilter("walking")}
+                  className={`px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                    activityFilter === "walking"
+                      ? "bg-warning text-warning-foreground shadow-elevation-2"
+                      : "bg-background text-foreground hover:bg-accent border border-border"
+                  }`}
+                >
+                  <DirectionsWalkIcon style={{ fontSize: 20 }} />
+                  Walking
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setActivityFilter("others")}
+                  className={`px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 col-span-2 ${
+                    activityFilter === "others"
+                      ? "bg-secondary text-secondary-foreground shadow-elevation-2"
+                      : "bg-background text-foreground hover:bg-accent border border-border"
+                  }`}
+                >
+                  <FitnessCenterIcon style={{ fontSize: 20 }} />
+                  Others
+                </motion.button>
+              </div>
+            </div>
+
+            {/* Event List */}
+            <div className="p-4 space-y-3">
+              {sortedEvents.length === 0 ? (
+                <div className="text-center py-8">
+                  <EventIcon className="text-muted-foreground/30 mx-auto mb-2" style={{ fontSize: 48 }} />
+                  <p className="text-sm text-muted-foreground">No events found</p>
+                  <p className="text-xs text-muted-foreground mt-1">Try adjusting your filters</p>
+                </div>
+              ) : (
+                sortedEvents.map((event, index) => {
+                  const checkInCount = checkInCounts[event.id] || 0;
+                  const countdown = calculateCountdown(event.date, event.time);
+                  
+                  return (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      onClick={() => {
+                        if (mapRef) {
+                          mapRef.panTo({ lat: event.lat, lng: event.lng });
+                          mapRef.setZoom(15);
+                        }
+                        setSelectedMarkerEvent(event);
+                        setDrawerOpen(false);
+                        if (viewMode !== "map") {
+                          setViewMode("map");
+                        }
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <Card className="p-3 hover:shadow-elevation-2 transition-all border border-border">
+                        <div className="flex items-start gap-3">
+                          <Avatar
+                            src={event.hostAvatar}
+                            alt={event.hostName}
+                            sx={{ width: 48, height: 48 }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              {getActivityIcon(event.type)}
+                              <h4 className="font-semibold text-sm truncate">{event.title}</h4>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              {event.date} at {event.time}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                              <Badge variant="secondary" className="text-xs">
+                                {countdown}
+                              </Badge>
+                              {checkInCount > 0 && (
+                                <Badge variant="outline" className="text-xs">
+                                  +{checkInCount} checked in
+                                </Badge>
+                              )}
+                              <span className="text-xs">· {event.distance}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    </motion.div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
       
       <BottomNavigation />
     </div>

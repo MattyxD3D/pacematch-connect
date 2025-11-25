@@ -87,3 +87,40 @@ export const cancelFriendRequest = (toUserId: number): void => {
   requests.outgoing = requests.outgoing.filter(id => id !== toUserId);
   localStorage.setItem("friendRequests", JSON.stringify(requests));
 };
+
+// Unfriend a user
+export const unfriend = (userId: number): void => {
+  const userProfile = localStorage.getItem("userProfile");
+  if (userProfile) {
+    const profile = JSON.parse(userProfile);
+    profile.friends = profile.friends || [];
+    profile.friends = profile.friends.filter((id: number) => id !== userId);
+    localStorage.setItem("userProfile", JSON.stringify(profile));
+  }
+  
+  // Also remove from location sharing settings
+  const locationSharing = getLocationSharingSettings();
+  delete locationSharing[userId];
+  localStorage.setItem("locationSharing", JSON.stringify(locationSharing));
+};
+
+// Location sharing settings (which friends can see your location during workouts)
+export const getLocationSharingSettings = (): Record<number, boolean> => {
+  const stored = localStorage.getItem("locationSharing");
+  return stored ? JSON.parse(stored) : {};
+};
+
+export const setLocationSharing = (friendId: number, enabled: boolean): void => {
+  const settings = getLocationSharingSettings();
+  if (enabled) {
+    settings[friendId] = true;
+  } else {
+    delete settings[friendId];
+  }
+  localStorage.setItem("locationSharing", JSON.stringify(settings));
+};
+
+export const canFriendSeeLocation = (friendId: number): boolean => {
+  const settings = getLocationSharingSettings();
+  return settings[friendId] === true;
+};

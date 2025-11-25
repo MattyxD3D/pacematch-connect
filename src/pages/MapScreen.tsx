@@ -40,7 +40,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation as useRouterLocation } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
 import { useLocation } from "@/hooks/useLocation";
 import { useNearbyUsers } from "@/hooks/useNearbyUsers";
@@ -48,13 +48,12 @@ import { useMatching } from "@/hooks/useMatching";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDistance } from "@/utils/distance";
 import { SearchFilter } from "@/services/matchingService";
-import { MatchActionsModal } from "@/components/MatchActionsModal";
 import { updateUserProfile } from "@/services/authService";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
 import { updateUserVisibility } from "@/services/locationService";
 import { saveWorkout } from "@/services/workoutService";
-import { listenToFriendRequests } from "@/services/friendService";
+import { listenToFriendRequests, removeFriend } from "@/services/friendService";
 import { getUserConversations } from "@/services/messageService";
 import { listenToPokes, sendPoke, acceptPoke, dismissPoke, hasPokedUser } from "@/services/pokeService";
 import { PokeModal } from "@/components/PokeModal";
@@ -181,9 +180,13 @@ interface MapRef {
  */
 const MapScreen = () => {
   const navigate = useNavigate();
+  const routerLocation = useRouterLocation();
   const { user } = useAuth();
-  const { userProfile, hasActivity, useMetric, addWorkout } = useUser();
+  const { userProfile, hasActivity, useMetric, addWorkout, setUserProfile } = useUser();
   const { addNotification, unreadMessageCount, unreadFriendRequestCount } = useNotificationContext();
+  
+  // Get focusFriend from navigation state (when coming from Index page)
+  const focusFriend = routerLocation.state?.focusFriend;
   
   // Google Maps state
   const [visible, setVisible] = useState(true);
@@ -205,8 +208,9 @@ const MapScreen = () => {
   // Workout tracking state
   const [isActive, setIsActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(true); // Sidebar visibility toggle
+  const [showSidebar, setShowSidebar] = useState(false); // Sidebar visibility toggle - starts closed
   const [lastViewedMatchesCount, setLastViewedMatchesCount] = useState(0); // Track viewed matches for notification
+  const hasAutoOpenedRef = useRef(false); // Track if sidebar was auto-opened to prevent re-opening
   const [showStopConfirmation, setShowStopConfirmation] = useState(false); // Confirmation dialog for stopping session
   const [showMatchesDrawer, setShowMatchesDrawer] = useState(false); // Matches drawer visibility toggle
   const [pointsTracked, setPointsTracked] = useState(0);
@@ -216,6 +220,8 @@ const MapScreen = () => {
   const [currentSpeed, setCurrentSpeed] = useState(0); // km/h
   const [avgSpeed, setAvgSpeed] = useState(0); // km/h
   const [startTime, setStartTime] = useState<Date | null>(null);
+  const [pauseStartTime, setPauseStartTime] = useState<Date | null>(null); // Track when pause started
+  const [totalPausedTime, setTotalPausedTime] = useState(0); // Total paused duration in seconds
   const [showSummary, setShowSummary] = useState(false);
   const [showSpeedNotPace, setShowSpeedNotPace] = useState(true);
   const lastDistanceRef = useRef(0);
@@ -235,7 +241,6 @@ const MapScreen = () => {
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [showFriendRequestModal, setShowFriendRequestModal] = useState(false);
   const [showProfileView, setShowProfileView] = useState(false);
-  const [showMatchActionsModal, setShowMatchActionsModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showPokeModal, setShowPokeModal] = useState(false);
   const [searchFilter, setSearchFilter] = useState<SearchFilter>("all");
@@ -356,10 +361,15 @@ const MapScreen = () => {
           if (parsed.startTime) {
             const savedStartTime = new Date(parsed.startTime);
             setStartTime(savedStartTime);
+            setTotalPausedTime(parsed.totalPausedTime || 0);
+            if (parsed.isPaused && parsed.pauseStartTime) {
+              setPauseStartTime(new Date(parsed.pauseStartTime));
+            }
             // Calculate elapsed time based on saved start time
             const now = new Date();
-            const elapsed = Math.floor((now.getTime() - savedStartTime.getTime()) / 1000);
-            setElapsedTime(parsed.isPaused ? (parsed.elapsedTime || 0) : elapsed);
+            const totalElapsed = Math.floor((now.getTime() - savedStartTime.getTime()) / 1000);
+            // If paused, use saved elapsed time, otherwise calculate from start time minus paused time
+            setElapsedTime(parsed.isPaused ? (parsed.elapsedTime || 0) : (totalElapsed - (parsed.totalPausedTime || 0)));
           }
           
           console.log("✅ Restored activity state from localStorage");
@@ -380,6 +390,8 @@ const MapScreen = () => {
         isPaused,
         startTime: startTime?.toISOString() || null,
         elapsedTime,
+        totalPausedTime,
+        pauseStartTime: pauseStartTime?.toISOString() || null,
         distance,
         currentSpeed,
         avgSpeed,
@@ -512,6 +524,15 @@ const MapScreen = () => {
     return () => clearInterval(interval);
   }, [user?.uid, userProfile?.friends]);
 
+  // Auto-open sidebar only if there are new friend requests or message requests
+  useEffect(() => {
+    const hasNewRequests = friendRequests.incoming.length > 0 || messageRequests.length > 0;
+    if (hasNewRequests && !hasAutoOpenedRef.current) {
+      setShowSidebar(true);
+      hasAutoOpenedRef.current = true;
+    }
+  }, [friendRequests.incoming.length, messageRequests.length]);
+
   // Fetch user data for message requests
   useEffect(() => {
     if (messageRequests.length === 0) {
@@ -591,7 +612,30 @@ const MapScreen = () => {
   
   const getFriendStatus = (userId: string | number): FriendStatus => {
     const id = typeof userId === "number" ? userId.toString() : userId;
-    return friendStatuses[id]?.status || "not_friends";
+    
+    // Check if already friends
+    const friends = userProfile?.friends || [];
+    if (friends.some((f: any) => String(f) === id)) {
+      return "friends";
+    }
+    
+    // Check if request pending (outgoing)
+    if (friendRequests.outgoing.includes(id)) {
+      return "request_pending";
+    }
+    
+    // Check if request received (incoming)
+    if (friendRequests.incoming.includes(id)) {
+      return "request_received";
+    }
+    
+    // Check local state
+    const localStatus = friendStatuses[id];
+    if (localStatus) {
+      return localStatus.status;
+    }
+    
+    return "not_friends";
   };
   
   const getCooldownDaysForFriend = (userId: string | number): number => {
@@ -627,6 +671,7 @@ const MapScreen = () => {
       })
       .map((match) => ({
         id: match.user.uid,
+        // Use 'name' field from Firebase (username), not displayName from Google
         name: match.user.name || "User",
         distance: formatDistance(match.distance / 1000),
         distanceValue: match.distance / 1000,
@@ -706,7 +751,8 @@ const MapScreen = () => {
     // Mark these users as processed
     newUserIds.forEach((id: string) => processedUserIdsRef.current.add(id));
     
-    // Update workout nearby users state
+    // Update workout nearby users state with REAL Firebase users
+    // These users come from Firebase via useNearbyUsers hook -> locationService -> Firebase Realtime Database
     setWorkoutNearbyUsers(prev => {
       const existingIds = new Set(prev.map(u => u.id));
       const newUsers = currentNearbyUsers
@@ -724,6 +770,7 @@ const MapScreen = () => {
         return prev;
       }
       
+      console.log(`✅ Added ${newUsers.length} real Firebase user(s) to workout tracking:`, newUsers.map(u => u.name));
       return [...prev, ...newUsers];
     });
   }, [isActive, nearbyUserIdsString]);
@@ -797,48 +844,61 @@ const MapScreen = () => {
     }
   }, [location, isActive, isWazeMode, mapRef, isLoaded]);
 
-  // Enhanced tracking interval for workout stats
+  // Timer interval - runs continuously when active (even when paused, to show paused time)
   useEffect(() => {
-    if (isActive && !isPaused && location && startTime) {
+    if (isActive && startTime) {
       intervalRef.current = setInterval(() => {
-        // Calculate elapsed time from startTime for accuracy (handles page reloads)
         const now = new Date();
-        const elapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
-        setElapsedTime(elapsed);
-        setPointsTracked(prev => prev + 1);
+        // Calculate total elapsed time from start
+        const totalElapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
         
-        // Calculate distance from location history
-        if (locationHistory.length > 1) {
-          let totalDistance = 0;
-          for (let i = 1; i < locationHistory.length; i++) {
-            const prev = locationHistory[i - 1];
-            const curr = locationHistory[i];
-            // Haversine formula for distance
-            const R = 6371; // Earth's radius in km
-            const dLat = (curr.lat - prev.lat) * Math.PI / 180;
-            const dLng = (curr.lng - prev.lng) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                      Math.cos(prev.lat * Math.PI / 180) * Math.cos(curr.lat * Math.PI / 180) *
-                      Math.sin(dLng/2) * Math.sin(dLng/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            totalDistance += R * c;
-          }
-          setDistance(totalDistance);
+        // Subtract paused time
+        let currentPausedTime = totalPausedTime;
+        if (isPaused && pauseStartTime) {
+          // Add current pause duration
+          currentPausedTime += Math.floor((now.getTime() - pauseStartTime.getTime()) / 1000);
+        }
+        
+        const activeElapsed = totalElapsed - currentPausedTime;
+        setElapsedTime(activeElapsed);
+        
+        // Only update distance and speed when not paused and location is available
+        if (!isPaused && location) {
+          setPointsTracked(prev => prev + 1);
           
-          // Calculate current speed
-          const currentTime = Date.now();
-          const timeDiff = (currentTime - lastTimeRef.current) / 1000; // seconds
-          
-          if (timeDiff >= 1 && lastTimeRef.current > 0) {
-            const distanceDiff = totalDistance - lastDistanceRef.current;
-            const speed = (distanceDiff / timeDiff) * 3600; // km/h
-            setCurrentSpeed(speed);
+          // Calculate distance from location history
+          if (locationHistory.length > 1) {
+            let totalDistance = 0;
+            for (let i = 1; i < locationHistory.length; i++) {
+              const prev = locationHistory[i - 1];
+              const curr = locationHistory[i];
+              // Haversine formula for distance
+              const R = 6371; // Earth's radius in km
+              const dLat = (curr.lat - prev.lat) * Math.PI / 180;
+              const dLng = (curr.lng - prev.lng) * Math.PI / 180;
+              const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                        Math.cos(prev.lat * Math.PI / 180) * Math.cos(curr.lat * Math.PI / 180) *
+                        Math.sin(dLng/2) * Math.sin(dLng/2);
+              const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+              totalDistance += R * c;
+            }
+            setDistance(totalDistance);
             
-            lastDistanceRef.current = totalDistance;
-            lastTimeRef.current = currentTime;
-          } else if (lastTimeRef.current === 0) {
-            lastTimeRef.current = currentTime;
-            lastDistanceRef.current = totalDistance;
+            // Calculate current speed
+            const currentTime = Date.now();
+            const timeDiff = (currentTime - lastTimeRef.current) / 1000; // seconds
+            
+            if (timeDiff >= 1 && lastTimeRef.current > 0) {
+              const distanceDiff = totalDistance - lastDistanceRef.current;
+              const speed = (distanceDiff / timeDiff) * 3600; // km/h
+              setCurrentSpeed(speed);
+              
+              lastDistanceRef.current = totalDistance;
+              lastTimeRef.current = currentTime;
+            } else if (lastTimeRef.current === 0) {
+              lastTimeRef.current = currentTime;
+              lastDistanceRef.current = totalDistance;
+            }
           }
         }
       }, 1000);
@@ -854,7 +914,7 @@ const MapScreen = () => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [isActive, isPaused, selectedActivity, location, locationHistory, startTime]);
+  }, [isActive, isPaused, startTime, pauseStartTime, totalPausedTime, location, locationHistory]);
   
   // Calculate average speed
   useEffect(() => {
@@ -876,6 +936,8 @@ const MapScreen = () => {
       setCurrentSpeed(0);
       setAvgSpeed(0);
       setPointsTracked(0);
+      setTotalPausedTime(0);
+      setPauseStartTime(null);
       lastDistanceRef.current = 0;
       lastTimeRef.current = 0;
       setShowNotification(false);
@@ -892,34 +954,129 @@ const MapScreen = () => {
     // Stop activity - show summary
     setIsActive(false);
     setIsPaused(false);
+    setPauseStartTime(null);
     setShowStopConfirmation(false);
-    if (distance > 0) {
-      setShowSummary(true);
+    
+    // Log real Firebase users detected during workout
+    if (workoutNearbyUsers.length > 0) {
+      console.log(`✅ Found ${workoutNearbyUsers.length} real Firebase users during workout:`, workoutNearbyUsers);
+    } else {
+      console.log("⚠️ No real Firebase users detected during workout");
     }
+    
+    // Add dummy users for testing ONLY if no real Firebase users were detected
+    // Real Firebase data is always prioritized - dummy data is fallback for testing
+    if (workoutNearbyUsers.length === 0) {
+      console.log("🧪 Adding dummy users for testing purposes");
+      setWorkoutNearbyUsers(generateDummyNearbyUsers());
+    }
+    
+    // Always show summary when stopping activity (to show nearby people and stats)
+    // Use a small delay to ensure state updates are complete
+    setTimeout(() => {
+      setShowSummary(true);
+    }, 100);
   };
   
   const handlePause = () => {
-    setIsPaused(!isPaused);
-    toast(isPaused ? "Activity resumed" : "Activity paused");
+    if (!isPaused) {
+      // Pausing - record pause start time
+      setPauseStartTime(new Date());
+      setIsPaused(true);
+      toast("Activity paused");
+    } else {
+      // Resuming - calculate and add paused duration
+      if (pauseStartTime) {
+        const pauseDuration = Math.floor((new Date().getTime() - pauseStartTime.getTime()) / 1000);
+        setTotalPausedTime(prev => prev + pauseDuration);
+        setPauseStartTime(null);
+      }
+      setIsPaused(false);
+      toast("Activity resumed");
+    }
   };
   
+  // Generate dummy nearby users for testing (only used when no real Firebase users detected)
+  const generateDummyNearbyUsers = () => {
+    console.log("🧪 Generating dummy users for testing (no real Firebase users detected)");
+    const dummyUsers = [
+      {
+        id: "dummy-user-1",
+        name: "Sarah Johnson",
+        avatar: "https://i.pravatar.cc/150?img=1",
+        activity: "running",
+        distance: "0.5 km",
+        distanceValue: 0.5
+      },
+      {
+        id: "dummy-user-2",
+        name: "Mike Chen",
+        avatar: "https://i.pravatar.cc/150?img=2",
+        activity: "cycling",
+        distance: "1.2 km",
+        distanceValue: 1.2
+      },
+      {
+        id: "dummy-user-3",
+        name: "Emma Davis",
+        avatar: "https://i.pravatar.cc/150?img=3",
+        activity: "walking",
+        distance: "0.8 km",
+        distanceValue: 0.8
+      },
+      {
+        id: "dummy-user-4",
+        name: "James Wilson",
+        avatar: "https://i.pravatar.cc/150?img=4",
+        activity: "running",
+        distance: "1.5 km",
+        distanceValue: 1.5
+      },
+      {
+        id: "dummy-user-5",
+        name: "Lisa Anderson",
+        avatar: "https://i.pravatar.cc/150?img=5",
+        activity: "cycling",
+        distance: "0.9 km",
+        distanceValue: 0.9
+      }
+    ];
+    return dummyUsers;
+  };
+
   const handleSaveWorkout = async () => {
     if (!user?.uid) {
       toast.error("You must be logged in to save workouts");
       return;
     }
 
-    // Filter nearby users who were active during the workout
-    const activeNearbyUsers = nearbyUsers
-      .filter(user => user.distanceValue <= 2.0) // Within 2km radius
-      .slice(0, 5) // Limit to 5 users
-      .map(user => ({
-        id: user.id,
-        name: user.name,
-        avatar: user.avatar,
-        activity: user.activity,
-        distance: user.distance,
-      }));
+    // Use workoutNearbyUsers - all REAL Firebase users detected during the workout session
+    // These are populated from Firebase via useNearbyUsers hook and locationService
+    let activeNearbyUsers = workoutNearbyUsers.map(user => ({
+      id: user.id,
+      name: user.name,
+      avatar: user.avatar,
+      activity: user.activity,
+      distance: user.distance,
+    }));
+
+    // Log what we're saving
+    const realUserCount = activeNearbyUsers.filter(u => !u.id.startsWith('dummy-')).length;
+    const dummyUserCount = activeNearbyUsers.filter(u => u.id.startsWith('dummy-')).length;
+    
+    if (realUserCount > 0) {
+      console.log(`✅ Saving workout with ${realUserCount} real Firebase users`);
+    }
+    if (dummyUserCount > 0) {
+      console.log(`🧪 Including ${dummyUserCount} dummy users for testing`);
+    }
+
+    // Add dummy users for testing ONLY if no real Firebase users were detected
+    // Real Firebase data is always prioritized - dummy data is fallback for testing
+    if (activeNearbyUsers.length === 0) {
+      console.log("🧪 No real users detected - adding dummy users for testing");
+      activeNearbyUsers = generateDummyNearbyUsers();
+    }
 
     const workoutData = {
       activity: selectedActivity,
@@ -933,8 +1090,10 @@ const MapScreen = () => {
     };
 
     try {
-      // Save to Firebase
+      // Save to Firebase Realtime Database
+      console.log("💾 Saving workout to Firebase:", workoutData);
       await saveWorkout(user.uid, workoutData);
+      console.log("✅ Workout saved successfully to Firebase");
       
       // Also save to localStorage via context (for offline/fallback)
       addWorkout(workoutData);
@@ -962,6 +1121,8 @@ const MapScreen = () => {
     setCurrentSpeed(0);
     setAvgSpeed(0);
     setStartTime(null);
+    setTotalPausedTime(0);
+    setPauseStartTime(null);
     setWorkoutPokes([]);
     setWorkoutNearbyUsers([]);
   };
@@ -1046,6 +1207,50 @@ const MapScreen = () => {
     toast("Friend request declined. The user won't be notified.");
   };
 
+  const handleUnfriend = async (userId: string | number) => {
+    if (!user?.uid) {
+      toast.error("You must be logged in to unfriend someone");
+      return;
+    }
+
+    const id = typeof userId === "number" ? userId.toString() : userId;
+    
+    try {
+      // Remove from Firebase
+      await removeFriend(user.uid, id);
+      
+      // Update local state
+      setFriendStatuses(prev => ({
+        ...prev,
+        [id]: { status: "not_friends" }
+      }));
+      
+      // Update userProfile context
+      if (userProfile) {
+        const updatedFriends = (userProfile.friends || []).filter(
+          (f: any) => String(f) !== id
+        );
+        setUserProfile({
+          ...userProfile,
+          friends: updatedFriends
+        });
+      }
+      
+      // Also remove from localStorage socialStorage
+      const { unfriend: unfriendLocal } = await import("@/lib/socialStorage");
+      if (typeof userId === "number") {
+        unfriendLocal(userId);
+      }
+      
+      toast.success(`Unfriended ${selectedUser?.name || "user"}`);
+      setShowProfileView(false);
+      setSelectedUser(null);
+    } catch (error) {
+      console.error("Error unfriending user:", error);
+      toast.error("Failed to unfriend. Please try again.");
+    }
+  };
+
   const handleSendMessage = () => {
     setShowMessageModal(true);
   };
@@ -1113,10 +1318,30 @@ const MapScreen = () => {
     });
   }, [nearbyUsers]);
 
+  // Handle focusFriend from navigation (when coming from Index page)
+  useEffect(() => {
+    if (focusFriend && focusFriend.lat && focusFriend.lng && mapRef && isLoaded && window.google) {
+      // Center map on friend's location
+      const friendCenter = { lat: focusFriend.lat, lng: focusFriend.lng };
+      setMapCenter(friendCenter);
+      mapRef.panTo(friendCenter);
+      mapRef.setCenter(friendCenter);
+      setMapZoom(16); // Zoom in a bit to focus on friend
+      
+      // Clear the focusFriend from state after handling
+      navigate("/map", { replace: true, state: {} });
+    }
+  }, [focusFriend, mapRef, isLoaded]);
+
   // Update map center when location changes
   // When activity is selected, always keep map centered on user (locked perspective)
   useEffect(() => {
     if (!location || !location.lat || !location.lng || !mapRef || !isLoaded || !window.google) {
+      return;
+    }
+    
+    // Don't update center if we're focusing on a friend
+    if (focusFriend) {
       return;
     }
     
@@ -1231,8 +1456,18 @@ const MapScreen = () => {
   }, [selectedActivity]);
 
   const onMarkerClick = (userData: any) => {
-    setSelectedUser(userData);
-    setShowMatchActionsModal(true);
+    // Ensure user data structure matches ProfileView expectations
+    // Use 'name' field from Firebase (username), not displayName from Google
+    setSelectedUser({
+      id: userData.id,
+      name: userData.name || "User", // Always use username from Firebase, never displayName
+      distance: userData.distance || formatDistance(userData.distanceValue || 0),
+      activity: userData.activity || "Running",
+      avatar: userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&size=150`,
+      photos: userData.photos || [],
+      bio: userData.bio || ""
+    });
+    setShowProfileView(true); // Open ProfileView directly instead of MatchActionsModal
   };
 
   const handleUpdateSearchFilter = async (newFilter: SearchFilter) => {
@@ -1257,7 +1492,7 @@ const MapScreen = () => {
     const updated = { ...declinedUsers, [userId]: cooldownUntil };
     setDeclinedUsers(updated);
     localStorage.setItem("declinedUsers", JSON.stringify(updated));
-    setShowMatchActionsModal(false);
+    setShowProfileView(false);
     setSelectedUser(null);
   };
 
@@ -1419,15 +1654,8 @@ const MapScreen = () => {
                       animate={{ opacity: 1, x: 0 }}
                       className="p-3 bg-muted/50 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer relative"
                       onClick={() => {
-                        if (userData) {
-                          setSelectedUser({
-                            id: userId,
-                            name: userData.name,
-                            avatar: userData.photoURL,
-                            activity: userData.activity
-                          });
-                          setShowFriendRequestModal(true);
-                        }
+                        setShowSidebar(false); // Auto-close sidebar
+                        navigate("/friends", { state: { tab: "requests" } });
                       }}
                     >
                       {/* New badge */}
@@ -1495,6 +1723,7 @@ const MapScreen = () => {
                       animate={{ opacity: 1, x: 0 }}
                       className="p-3 bg-muted/50 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer relative"
                       onClick={() => {
+                        setShowSidebar(false); // Auto-close sidebar
                         if (userData) {
                           navigate("/chat", {
                             state: {
@@ -1850,6 +2079,7 @@ const MapScreen = () => {
             onAddFriend={() => handleAddFriend(selectedUser.id)}
             onAcceptFriend={() => handleAcceptFriend(selectedUser.id)}
             onDeclineFriend={() => handleDeclineFriend(selectedUser.id)}
+            onUnfriend={() => handleUnfriend(selectedUser.id)}
             onPoke={() => handlePoke(selectedUser.id)}
             hasPoked={hasPokedUsers[selectedUser.id] || false}
           />
@@ -2133,41 +2363,6 @@ const MapScreen = () => {
       </div>
 
 
-      {/* Match Actions Modal */}
-      {selectedUser && (
-        <MatchActionsModal
-          isOpen={showMatchActionsModal}
-          onClose={() => {
-            setShowMatchActionsModal(false);
-            setSelectedUser(null);
-          }}
-          user={{
-            id: selectedUser.id,
-            name: selectedUser.name,
-            avatar: selectedUser.avatar,
-            activity: selectedUser.activity,
-            distance: selectedUser.distance,
-            fitnessLevel: selectedUser.fitnessLevel
-          }}
-          friendStatus={getFriendStatus(selectedUser.id)}
-          cooldownDays={getCooldownDays(selectedUser.id) || getCooldownDaysForFriend(selectedUser.id)}
-          onAddFriend={() => {
-            handleAddFriend(selectedUser.id);
-            setShowMatchActionsModal(false);
-          }}
-          onDecline={() => handleDeclineMatch(selectedUser.id)}
-          onChat={() => {
-            handleSendMessage();
-            setShowMatchActionsModal(false);
-          }}
-          onViewProfile={() => {
-            setShowProfileView(true);
-            setShowMatchActionsModal(false);
-          }}
-          onPoke={() => handlePoke(selectedUser.id)}
-          hasPoked={hasPokedUsers[selectedUser.id] || false}
-        />
-      )}
 
       {/* Nearby Matches Drawer */}
       <AnimatePresence>

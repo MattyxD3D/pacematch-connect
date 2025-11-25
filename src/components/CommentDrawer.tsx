@@ -1,11 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar } from "@mui/material";
-import { WorkoutPost, getMockUserById, Comment } from "@/lib/mockData";
-import { getCommentsForPost, addComment, deleteComment } from "@/lib/socialStorage";
+import { WorkoutPost as FirebaseWorkoutPost, Comment, addComment as addFirebaseComment, deleteComment as deleteFirebaseComment } from "@/services/feedService";
 import CloseIcon from "@mui/icons-material/Close";
 import SendIcon from "@mui/icons-material/Send";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -14,9 +13,9 @@ import { toast } from "sonner";
 
 interface CommentDrawerProps {
   isOpen: boolean;
-  post: WorkoutPost | null;
+  post: FirebaseWorkoutPost | null;
   onClose: () => void;
-  currentUserId: number;
+  currentUserId: string;
   currentUsername: string;
   currentAvatar: string;
 }
@@ -32,45 +31,57 @@ export const CommentDrawer = ({
   const [commentText, setCommentText] = useState("");
   const [comments, setComments] = useState<Comment[]>([]);
 
-  const loadComments = () => {
-    if (post) {
-      setComments(getCommentsForPost(post.id));
+  // Load comments from post when drawer opens or post changes
+  useEffect(() => {
+    if (post && isOpen) {
+      setComments(post.comments || []);
+    }
+  }, [post, isOpen]);
+
+  const handleAddComment = async () => {
+    if (!commentText.trim() || !post) return;
+
+    try {
+      await addFirebaseComment(post.id, {
+        userId: currentUserId,
+        username: currentUsername,
+        avatar: currentAvatar,
+        text: commentText.trim(),
+      });
+
+      // Optimistically update UI - Firebase listener will update it properly
+      const newComment: Comment = {
+        id: `temp-${Date.now()}`,
+        userId: currentUserId,
+        username: currentUsername,
+        avatar: currentAvatar,
+        text: commentText.trim(),
+        timestamp: Date.now(),
+      };
+
+      setComments([...comments, newComment]);
+      setCommentText("");
+      toast.success("Comment added!");
+    } catch (error) {
+      console.error("Error adding comment:", error);
+      toast.error("Failed to add comment");
     }
   };
 
-  const handleAddComment = () => {
-    if (!commentText.trim() || !post) return;
-
-    const newComment: Comment = {
-      id: `comment-${Date.now()}`,
-      userId: currentUserId,
-      username: currentUsername,
-      avatar: currentAvatar,
-      text: commentText.trim(),
-      timestamp: new Date(),
-    };
-
-    addComment(post.id, newComment);
-    setComments([...comments, newComment]);
-    setCommentText("");
-    toast.success("Comment added!");
-  };
-
-  const handleDeleteComment = (commentId: string) => {
+  const handleDeleteComment = async (commentId: string) => {
     if (!post) return;
-    deleteComment(post.id, commentId);
-    setComments(comments.filter(c => c.id !== commentId));
-    toast.success("Comment deleted");
+
+    try {
+      await deleteFirebaseComment(post.id, commentId, currentUserId);
+      setComments(comments.filter(c => c.id !== commentId));
+      toast.success("Comment deleted");
+    } catch (error: any) {
+      console.error("Error deleting comment:", error);
+      toast.error(error.message || "Failed to delete comment");
+    }
   };
 
-  const user = post ? getMockUserById(post.userId) : null;
-
-  if (!isOpen || !post || !user) return null;
-
-  // Load comments when drawer opens
-  if (isOpen && comments.length === 0) {
-    loadComments();
-  }
+  if (!isOpen || !post) return null;
 
   return (
     <AnimatePresence>

@@ -108,10 +108,31 @@ const ProfileSetup = () => {
   ];
 
   const genderOptions = ["Male", "Female", "Other", "Prefer not to say"];
-  const fitnessLevelOptions: { value: FitnessLevel; label: string }[] = [
-    { value: "beginner", label: "Beginner" },
-    { value: "intermediate", label: "Intermediate" },
-    { value: "pro", label: "Pro" }
+  const fitnessLevelOptions: { value: FitnessLevel; label: string; description: string; color: string; bgColor: string; borderColor: string }[] = [
+    { 
+      value: "beginner", 
+      label: "Beginner", 
+      description: "Just starting out or getting back into fitness. You're building a foundation and learning the basics.",
+      color: "text-blue-600 dark:text-blue-400",
+      bgColor: "bg-blue-50 dark:bg-blue-950/30",
+      borderColor: "border-blue-200 dark:border-blue-800"
+    },
+    { 
+      value: "intermediate", 
+      label: "Intermediate", 
+      description: "Regular exerciser with a consistent routine. You can handle moderate workouts and are comfortable with your activity.",
+      color: "text-green-600 dark:text-green-400",
+      bgColor: "bg-green-50 dark:bg-green-950/30",
+      borderColor: "border-green-200 dark:border-green-800"
+    },
+    { 
+      value: "pro", 
+      label: "Pro", 
+      description: "Advanced athlete with high performance goals. You train regularly at high intensity and push your limits.",
+      color: "text-purple-600 dark:text-purple-400",
+      bgColor: "bg-purple-50 dark:bg-purple-950/30",
+      borderColor: "border-purple-200 dark:border-purple-800"
+    }
   ];
   const radiusOptions: { value: RadiusPreference; label: string }[] = [
     { value: "nearby", label: "Nearby" },
@@ -260,16 +281,35 @@ const ProfileSetup = () => {
           <Label className="text-base">Fitness Level</Label>
           <Select value={fitnessLevel} onValueChange={(value) => setFitnessLevel(value as FitnessLevel)}>
             <SelectTrigger className="h-12">
-              <SelectValue />
+              <div className="flex items-center gap-2">
+                {fitnessLevel && (
+                  <div className={`w-3 h-3 rounded-full ${
+                    fitnessLevel === "beginner" ? "bg-blue-500" :
+                    fitnessLevel === "intermediate" ? "bg-green-500" :
+                    "bg-purple-500"
+                  }`} />
+                )}
+                <SelectValue />
+              </div>
             </SelectTrigger>
             <SelectContent>
               {fitnessLevelOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
+                <SelectItem 
+                  key={option.value} 
+                  value={option.value} 
+                  className="py-3 cursor-pointer focus:bg-transparent"
+                >
+                  <div className={`flex flex-col gap-1 p-3 rounded-lg border-2 transition-all ${option.bgColor} ${option.borderColor} ${fitnessLevel === option.value ? 'ring-2 ring-offset-2 ring-current' : ''}`}>
+                    <span className={`font-bold text-base ${option.color}`}>{option.label}</span>
+                    <span className="text-xs text-muted-foreground leading-relaxed">{option.description}</span>
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Choose the level that best matches your current fitness and training intensity.
+          </p>
         </motion.div>
 
         {/* Pace Input */}
@@ -326,15 +366,34 @@ const ProfileSetup = () => {
             <div className="space-y-2 pl-6">
               <Label className="text-sm text-muted-foreground">Select allowed levels:</Label>
               {fitnessLevelOptions.map((option) => (
-                <div key={option.value} className="flex items-center space-x-2">
+                <div 
+                  key={option.value} 
+                  className={`flex items-center space-x-3 p-2 rounded-lg border transition-all ${
+                    allowedLevels.includes(option.value) 
+                      ? `${option.bgColor} ${option.borderColor} border-2` 
+                      : 'border-border/50'
+                  }`}
+                >
                   <Checkbox
                     id={`level-${option.value}`}
                     checked={allowedLevels.includes(option.value)}
                     onCheckedChange={() => handleLevelToggle(option.value)}
                   />
-                  <Label htmlFor={`level-${option.value}`} className="text-sm font-normal cursor-pointer">
-                    {option.label}
-                  </Label>
+                  <div className="flex items-center gap-2 flex-1">
+                    <div className={`w-2.5 h-2.5 rounded-full ${
+                      option.value === "beginner" ? "bg-blue-500" :
+                      option.value === "intermediate" ? "bg-green-500" :
+                      "bg-purple-500"
+                    }`} />
+                    <Label 
+                      htmlFor={`level-${option.value}`} 
+                      className={`text-sm font-medium cursor-pointer ${
+                        allowedLevels.includes(option.value) ? option.color : ''
+                      }`}
+                    >
+                      {option.label}
+                    </Label>
+                  </div>
                 </div>
               ))}
             </div>

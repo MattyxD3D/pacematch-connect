@@ -1,10 +1,11 @@
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar } from "@mui/material";
-import React from "react";
+import React, { useState, useEffect } from "react";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -17,9 +18,15 @@ import CloseIcon from "@mui/icons-material/Close";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import SendIcon from "@mui/icons-material/Send";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import PersonIcon from "@mui/icons-material/Person";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import type { WorkoutHistory, NearbyUser } from "@/contexts/UserContext";
+import { useAuth } from "@/hooks/useAuth";
+import { useUser } from "@/contexts/UserContext";
+import { sendFriendRequest } from "@/services/friendService";
+import { listenToFriendRequests } from "@/services/friendService";
+import { ProfileView } from "@/pages/ProfileView";
 
 interface WorkoutDetailModalProps {
   isOpen: boolean;
@@ -28,27 +35,109 @@ interface WorkoutDetailModalProps {
   useMetric: boolean;
 }
 
+type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
+
 export const WorkoutDetailModal = ({
   isOpen,
   onClose,
   workout,
   useMetric,
 }: WorkoutDetailModalProps) => {
-  // Mock friend statuses - in real app this would come from backend
-  const [friendStatuses, setFriendStatuses] = React.useState<Record<number, "none" | "pending" | "friends">>({});
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { userProfile } = useUser();
+  const [friendStatuses, setFriendStatuses] = useState<Record<string, { status: FriendStatus; cooldownUntil?: number }>>({});
+  const [friendRequests, setFriendRequests] = useState<{ incoming: string[]; outgoing: string[] }>({ incoming: [], outgoing: [] });
+  const [selectedUser, setSelectedUser] = useState<NearbyUser | null>(null);
+  const [showProfileView, setShowProfileView] = useState(false);
 
-  const handleAddFriend = (user: NearbyUser) => {
-    setFriendStatuses(prev => ({ ...prev, [user.id]: "pending" }));
-    toast.success(`Friend request sent to ${user.name}`);
+  // Listen to friend requests
+  useEffect(() => {
+    if (!user?.uid || !isOpen) return;
+    
+    const unsubscribe = listenToFriendRequests(user.uid, (requests) => {
+      setFriendRequests(requests);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid, isOpen]);
+
+  // Determine friend status for a user
+  const getFriendStatus = (userId: string | number): FriendStatus => {
+    const id = typeof userId === "number" ? userId.toString() : userId;
+    
+    // Check if already friends
+    const friends = userProfile?.friends || [];
+    if (friends.some((f: any) => String(f) === id)) {
+      return "friends";
+    }
+    
+    // Check if request pending (outgoing)
+    if (friendRequests.outgoing.includes(id)) {
+      return "request_pending";
+    }
+    
+    // Check if request received (incoming)
+    if (friendRequests.incoming.includes(id)) {
+      return "request_received";
+    }
+    
+    // Check local state
+    const localStatus = friendStatuses[id];
+    if (localStatus) {
+      return localStatus.status;
+    }
+    
+    return "not_friends";
   };
 
-  const handleSendMessage = (user: NearbyUser) => {
-    toast.success(`Opening chat with ${user.name}`);
-    // In real app, this would navigate to messages or open a chat modal
+  const handleAddFriend = async (userData: NearbyUser) => {
+    if (!user?.uid) {
+      toast.error("You must be logged in to add friends");
+      return;
+    }
+
+    const userId = typeof userData.id === "number" ? userData.id.toString() : userData.id;
+    
+    try {
+      await sendFriendRequest(user.uid, userId);
+      setFriendStatuses(prev => ({
+        ...prev,
+        [userId]: { status: "request_pending" }
+      }));
+      toast.success(`Friend request sent to ${userData.name}`);
+    } catch (error) {
+      console.error("Error sending friend request:", error);
+      toast.error("Failed to send friend request. Please try again.");
+    }
   };
 
-  const getFriendStatus = (userId: number) => {
-    return friendStatuses[userId] || "none";
+  const handleSendMessage = (userData: NearbyUser) => {
+    navigate("/chat", {
+      state: {
+        user: {
+          id: userData.id,
+          name: userData.name,
+          avatar: userData.avatar || ""
+        }
+      }
+    });
+    onClose(); // Close workout modal when navigating
+  };
+
+  const handleViewProfile = (userData: NearbyUser) => {
+    setSelectedUser(userData);
+    setShowProfileView(true);
+  };
+
+  const getCooldownDays = (userId: string | number): number => {
+    const id = typeof userId === "number" ? userId.toString() : userId;
+    const cooldownUntil = friendStatuses[id]?.cooldownUntil;
+    if (!cooldownUntil) return 0;
+    const now = Date.now();
+    const diff = cooldownUntil - now;
+    if (diff <= 0) return 0;
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
   };
   const formatTime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
@@ -230,6 +319,7 @@ export const WorkoutDetailModal = ({
                   <div className="space-y-3">
                     {workout.nearbyUsers.map((user, index) => {
                       const friendStatus = getFriendStatus(user.id);
+                      const cooldownDays = getCooldownDays(user.id);
                       
                       return (
                         <motion.div
@@ -239,21 +329,31 @@ export const WorkoutDetailModal = ({
                           transition={{ delay: index * 0.05 }}
                           className="flex items-center gap-3 p-4 rounded-xl bg-muted/50 hover:bg-muted transition-colors border border-border"
                         >
-                          <Avatar
-                            src={user.avatar}
-                            alt={user.name}
-                            sx={{ width: 56, height: 56 }}
-                          />
+                          <button
+                            onClick={() => handleViewProfile(user)}
+                            className="flex-shrink-0"
+                          >
+                            <Avatar
+                              src={user.avatar}
+                              alt={user.name}
+                              sx={{ width: 56, height: 56, cursor: "pointer" }}
+                            />
+                          </button>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <p className="font-semibold">{user.name}</p>
+                              <button
+                                onClick={() => handleViewProfile(user)}
+                                className="font-semibold hover:underline text-left"
+                              >
+                                {user.name}
+                              </button>
                               {friendStatus === "friends" && (
                                 <div className="flex items-center gap-1 px-2 py-0.5 bg-success/10 border border-success rounded-full">
                                   <CheckCircleIcon style={{ fontSize: 14 }} className="text-success" />
                                   <span className="text-xs text-success font-medium">Friends</span>
                                 </div>
                               )}
-                              {friendStatus === "pending" && (
+                              {friendStatus === "request_pending" && (
                                 <div className="px-2 py-0.5 bg-warning/10 border border-warning rounded-full">
                                   <span className="text-xs text-warning font-medium">Request Sent</span>
                                 </div>
@@ -265,7 +365,7 @@ export const WorkoutDetailModal = ({
                                 {user.activity === "Cycling" && "🚴"}
                                 {user.activity === "Walking" && "🚶"}
                               </span>
-                              <span>{user.activity}</span>
+                              <span className="capitalize">{user.activity?.toLowerCase()}</span>
                               <span>•</span>
                               <span>{user.distance} away</span>
                             </div>
@@ -273,7 +373,19 @@ export const WorkoutDetailModal = ({
 
                           {/* Action Buttons */}
                           <div className="flex gap-2 flex-shrink-0">
-                            {friendStatus === "none" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewProfile(user);
+                              }}
+                              className="h-9 px-3"
+                              title="View Profile"
+                            >
+                              <PersonIcon style={{ fontSize: 18 }} />
+                            </Button>
+                            {friendStatus === "not_friends" && (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -281,13 +393,15 @@ export const WorkoutDetailModal = ({
                                   e.stopPropagation();
                                   handleAddFriend(user);
                                 }}
+                                disabled={cooldownDays > 0}
                                 className="h-9 px-3"
+                                title={cooldownDays > 0 ? `Try again in ${cooldownDays} day${cooldownDays !== 1 ? 's' : ''}` : "Add Friend"}
                               >
                                 <PersonAddIcon style={{ fontSize: 18 }} className="mr-1" />
                                 Add
                               </Button>
                             )}
-                            {friendStatus === "pending" && (
+                            {friendStatus === "request_pending" && (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -297,32 +411,17 @@ export const WorkoutDetailModal = ({
                                 Pending
                               </Button>
                             )}
-                            {friendStatus === "friends" && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSendMessage(user);
-                                }}
-                                className="h-9 px-3"
-                              >
-                                <SendIcon style={{ fontSize: 18 }} className="mr-1" />
-                                Message
-                              </Button>
-                            )}
-                            {friendStatus === "none" && (
-                              <Button
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSendMessage(user);
-                                }}
-                                className="h-9 px-3"
-                              >
-                                <SendIcon style={{ fontSize: 18 }} />
-                              </Button>
-                            )}
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSendMessage(user);
+                              }}
+                              className="h-9 px-3"
+                              title="Send Message"
+                            >
+                              <SendIcon style={{ fontSize: 18 }} />
+                            </Button>
                           </div>
                         </motion.div>
                       );
@@ -370,6 +469,45 @@ export const WorkoutDetailModal = ({
           </div>
         </ScrollArea>
       </DialogContent>
+
+      {/* Profile View Modal */}
+      <AnimatePresence>
+        {showProfileView && selectedUser && (
+          <ProfileView
+            user={{
+              id: selectedUser.id,
+              name: selectedUser.name,
+              distance: selectedUser.distance || "Unknown",
+              activity: selectedUser.activity || "Active",
+              avatar: selectedUser.avatar || "",
+              photos: [],
+              bio: ""
+            }}
+            friendStatus={getFriendStatus(selectedUser.id)}
+            cooldownDays={getCooldownDays(selectedUser.id)}
+            onClose={() => {
+              setShowProfileView(false);
+              setSelectedUser(null);
+            }}
+            onSendMessage={() => {
+              setShowProfileView(false);
+              handleSendMessage(selectedUser);
+            }}
+            onAddFriend={() => {
+              handleAddFriend(selectedUser);
+              setShowProfileView(false);
+            }}
+            onAcceptFriend={() => {
+              // This would be handled by the friend request modal
+              setShowProfileView(false);
+            }}
+            onDeclineFriend={() => {
+              // This would be handled by the friend request modal
+              setShowProfileView(false);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </Dialog>
   );
 };

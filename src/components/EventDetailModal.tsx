@@ -10,6 +10,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
+import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
 import EventIcon from "@mui/icons-material/Event";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import PeopleIcon from "@mui/icons-material/People";
@@ -27,7 +28,7 @@ import { checkInToEventLocation, getCheckInsAtEventLocation } from "@/services/e
 import { useAuth } from "@/hooks/useAuth";
 import { getUserData } from "@/services/authService";
 
-type EventType = "running" | "cycling" | "walking";
+type EventType = "running" | "cycling" | "walking" | "others";
 
 interface Event {
   id: string | number;
@@ -155,6 +156,8 @@ export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalPro
         return <DirectionsBikeIcon className="text-primary" style={{ fontSize: 24 }} />;
       case "walking":
         return <DirectionsWalkIcon className="text-warning" style={{ fontSize: 24 }} />;
+      case "others":
+        return <FitnessCenterIcon className="text-secondary" style={{ fontSize: 24 }} />;
     }
   };
 

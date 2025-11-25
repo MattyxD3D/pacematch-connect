@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Avatar } from "@mui/material";
-import { WorkoutPost as WorkoutPostType, getMockUserById } from "@/lib/mockData";
-import { toggleKudos, getKudosForPost } from "@/lib/socialStorage";
+import { WorkoutPost as FirebaseWorkoutPost, toggleKudos } from "@/services/feedService";
+import { getUserData } from "@/services/authService";
 import { ProfileView } from "@/pages/ProfileView";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
@@ -16,17 +16,47 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 interface WorkoutPostProps {
-  post: WorkoutPostType;
-  onCommentClick: (post: WorkoutPostType) => void;
+  post: FirebaseWorkoutPost;
+  onCommentClick: (post: FirebaseWorkoutPost) => void;
   useMetric: boolean;
-  currentUserId: number;
+  currentUserId: string;
 }
 
 export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: WorkoutPostProps) => {
-  const user = getMockUserById(post.userId);
-  const [kudos, setKudos] = useState<number[]>(getKudosForPost(post.id));
+  const [user, setUser] = useState<any>(null);
+  const [kudos, setKudos] = useState<string[]>(post.kudos || []);
   const [showProfile, setShowProfile] = useState(false);
+  const [loading, setLoading] = useState(true);
   const hasKudos = kudos.includes(currentUserId);
+
+  // Fetch user data from Firebase
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const userData = await getUserData(post.userId);
+        if (userData) {
+          setUser({
+            id: post.userId,
+            username: userData.username || userData.name || "User",
+            avatar: userData.photoURL || `https://ui-avatars.com/api/?name=${userData.name || 'User'}`,
+            bio: userData.bio,
+            photos: userData.photos || []
+          });
+        }
+        setLoading(false);
+      } catch (error) {
+        console.error("Error fetching user data:", error);
+        setLoading(false);
+      }
+    };
+
+    fetchUser();
+  }, [post.userId]);
+
+  // Update kudos when post changes
+  useEffect(() => {
+    setKudos(post.kudos || []);
+  }, [post.kudos]);
 
   const activityConfig = {
     running: { icon: DirectionsRunIcon, color: "success", label: "Running" },
@@ -54,17 +84,42 @@ export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: 
     return `${(kmh * 0.621371).toFixed(1)} mph`;
   };
 
-  const handleKudos = () => {
-    const nowHasKudos = toggleKudos(post.id, currentUserId);
-    setKudos(getKudosForPost(post.id));
-    if (nowHasKudos) {
-      toast.success("Kudos given!");
+  const handleKudos = async () => {
+    try {
+      const nowHasKudos = await toggleKudos(post.id, currentUserId);
+      // Update local state optimistically
+      if (nowHasKudos) {
+        setKudos([...kudos, currentUserId]);
+        toast.success("Kudos given!");
+      } else {
+        setKudos(kudos.filter(id => id !== currentUserId));
+        toast.success("Kudos removed");
+      }
+    } catch (error) {
+      console.error("Error toggling kudos:", error);
+      toast.error("Failed to update kudos");
     }
   };
 
   const handleShare = () => {
     toast.success("Share feature coming soon!");
   };
+
+  if (loading) {
+    return (
+      <Card className="p-4">
+        <div className="animate-pulse space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-muted rounded-full" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 bg-muted rounded w-1/4" />
+              <div className="h-3 bg-muted rounded w-1/3" />
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   if (!user) return null;
 
@@ -195,7 +250,7 @@ export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: 
 
       {/* Profile View Modal */}
       <AnimatePresence>
-        {showProfile && (
+        {showProfile && user && (
           <ProfileView
             user={{
               id: user.id,
@@ -203,7 +258,7 @@ export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: 
               distance: "2.5 km",
               activity: post.workout.activity.charAt(0).toUpperCase() + post.workout.activity.slice(1),
               avatar: user.avatar,
-              photos: user.photos,
+              photos: user.photos || [],
               bio: user.bio,
             }}
             friendStatus="not_friends"

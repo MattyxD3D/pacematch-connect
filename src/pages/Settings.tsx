@@ -9,13 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useNavigate } from "react-router-dom";
 import { FitnessLevel, RadiusPreference, VisibilitySettings } from "@/contexts/UserContext";
 import { SearchFilter } from "@/services/matchingService";
-import { useUser } from "@/contexts/UserContext";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import Avatar from "@mui/material/Avatar";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
-import LockIcon from "@mui/icons-material/Lock";
-import EmailIcon from "@mui/icons-material/Email";
 import LogoutIcon from "@mui/icons-material/Logout";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
@@ -27,16 +22,13 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useAuth } from "@/hooks/useAuth";
-import { updateUserVisibility, updateUserLocation } from "@/services/locationService";
+import { updateUserVisibility } from "@/services/locationService";
 import { updateUserProfile, signOut, getUserData } from "@/services/authService";
 
 const Settings = () => {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const [isVisible, setIsVisible] = useState(true);
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [activity, setActivity] = useState<string | null>(null);
   const [fitnessLevel, setFitnessLevel] = useState<FitnessLevel>("intermediate");
   const [pace, setPace] = useState("");
@@ -47,29 +39,6 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
   const [isEditingMatching, setIsEditingMatching] = useState(false);
 
-  // Privacy controls - users who can/cannot see your location
-  const [userPrivacySettings, setUserPrivacySettings] = useState<Record<number, boolean>>({
-    1: true,  // Sarah Johnson - visible
-    2: true,  // Mike Chen - visible
-    3: false, // Emma Davis - hidden
-    4: true,  // James Wilson - visible
-    5: true,  // Lisa Anderson - visible
-  });
-
-  // Mock users list (from conversations/friend requests)
-  const connectedUsers = [
-    { id: 1, name: "Sarah Johnson", avatar: "https://i.pravatar.cc/150?img=1", activity: "Running" },
-    { id: 2, name: "Mike Chen", avatar: "https://i.pravatar.cc/150?img=2", activity: "Cycling" },
-    { id: 3, name: "Emma Davis", avatar: "https://i.pravatar.cc/150?img=3", activity: "Walking" },
-    { id: 4, name: "James Wilson", avatar: "https://i.pravatar.cc/150?img=4", activity: "Running" },
-    { id: 5, name: "Lisa Anderson", avatar: "https://i.pravatar.cc/150?img=5", activity: "Walking" },
-  ];
-
-  const activities = [
-    { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
-    { id: "cycling", label: "Cycling", icon: DirectionsBikeIcon, color: "primary" },
-    { id: "walking", label: "Walking", icon: DirectionsWalkIcon, color: "warning" },
-  ] as const;
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -84,8 +53,6 @@ const Settings = () => {
       if (user) {
         const userData = await getUserData(user.uid);
         if (userData) {
-          setUsername(userData.name || "");
-          setEmail(userData.email || "");
           setActivity(userData.activity || null);
           setIsVisible(userData.visible !== false); // Default to true if not set
           setFitnessLevel(userData.fitnessLevel || "intermediate");
@@ -118,19 +85,6 @@ const Settings = () => {
     }
   };
 
-  const handleUserPrivacyToggle = (userId: number, userName: string) => {
-    setUserPrivacySettings(prev => ({
-      ...prev,
-      [userId]: !prev[userId],
-    }));
-    const isNowVisible = !userPrivacySettings[userId];
-    toast.success(
-      isNowVisible
-        ? `${userName} can now see your location`
-        : `Hidden your location from ${userName}`
-    );
-  };
-
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -140,41 +94,6 @@ const Settings = () => {
       console.error("Error signing out:", error);
       toast.error("Failed to sign out. Please try again.");
     }
-  };
-
-  const handleSaveProfile = async () => {
-    if (!user) return;
-
-    if (!username.trim()) {
-      toast.error("Please enter a username");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await updateUserProfile(user.uid, {
-        name: username.trim()
-      });
-      setIsEditingProfile(false);
-      toast.success("Profile updated successfully!");
-    } catch (error: any) {
-      console.error("Error saving profile:", error);
-      toast.error("Failed to save profile. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCancelEdit = () => {
-    // Reset to original values from user data
-    if (user) {
-      getUserData(user.uid).then(userData => {
-        if (userData) {
-          setUsername(userData.name || "");
-        }
-      });
-    }
-    setIsEditingProfile(false);
   };
 
   const handleSaveMatching = async () => {
@@ -213,10 +132,31 @@ const Settings = () => {
     }
   };
 
-  const fitnessLevelOptions: { value: FitnessLevel; label: string }[] = [
-    { value: "beginner", label: "Beginner" },
-    { value: "intermediate", label: "Intermediate" },
-    { value: "pro", label: "Pro" }
+  const fitnessLevelOptions: { value: FitnessLevel; label: string; description: string; color: string; bgColor: string; borderColor: string }[] = [
+    { 
+      value: "beginner", 
+      label: "Beginner", 
+      description: "Just starting out or getting back into fitness. You're building a foundation and learning the basics.",
+      color: "text-blue-600 dark:text-blue-400",
+      bgColor: "bg-blue-50 dark:bg-blue-950/30",
+      borderColor: "border-blue-200 dark:border-blue-800"
+    },
+    { 
+      value: "intermediate", 
+      label: "Intermediate", 
+      description: "Regular exerciser with a consistent routine. You can handle moderate workouts and are comfortable with your activity.",
+      color: "text-green-600 dark:text-green-400",
+      bgColor: "bg-green-50 dark:bg-green-950/30",
+      borderColor: "border-green-200 dark:border-green-800"
+    },
+    { 
+      value: "pro", 
+      label: "Pro", 
+      description: "Advanced athlete with high performance goals. You train regularly at high intensity and push your limits.",
+      color: "text-purple-600 dark:text-purple-400",
+      bgColor: "bg-purple-50 dark:bg-purple-950/30",
+      borderColor: "border-purple-200 dark:border-purple-800"
+    }
   ];
 
   const radiusOptions: { value: RadiusPreference; label: string }[] = [
@@ -339,130 +279,6 @@ const Settings = () => {
           </Card>
         </motion.div>
 
-        {/* Profile Section */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.2 }}
-        >
-          <Card className="p-6 space-y-6 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">Profile</h2>
-              {!isEditingProfile && (
-                <Button
-                  variant="outline"
-                  onClick={() => setIsEditingProfile(true)}
-                  className="h-10"
-                >
-                  Edit Profile
-                </Button>
-              )}
-            </div>
-
-            {!isEditingProfile ? (
-              // Display Mode
-              <div className="space-y-4">
-                {/* Profile Photo */}
-                <div className="flex items-center gap-4">
-                  <Avatar
-                    src={user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.displayName || user?.email || 'User')}&size=80`}
-                    alt="Profile"
-                    sx={{ width: 80, height: 80 }}
-                  />
-                </div>
-
-                {/* Username */}
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Username</Label>
-                  <p className="text-lg font-semibold">{username || "Not set"}</p>
-                </div>
-
-                {/* Email */}
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Email</Label>
-                  <div className="flex items-center gap-2">
-                    <EmailIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
-                    <span className="text-base">{email}</span>
-                  </div>
-                </div>
-
-                {/* Activity */}
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Activity</Label>
-                  {activity ? (
-                    <div className="flex gap-2 flex-wrap">
-                      {(() => {
-                        const activityData = activities.find(a => a.id === activity);
-                        if (!activityData) return null;
-                        const Icon = activityData.icon;
-                        return (
-                          <div
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
-                              activityData.color === 'success'
-                                ? 'bg-success/10 text-success'
-                                : activityData.color === 'primary'
-                                ? 'bg-primary/10 text-primary'
-                                : 'bg-warning/10 text-warning'
-                            }`}
-                          >
-                            <Icon style={{ fontSize: 18 }} />
-                            <span className="text-sm font-medium">{activityData.label}</span>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  ) : (
-                    <p className="text-base text-muted-foreground">Not set</p>
-                  )}
-                </div>
-
-              </div>
-            ) : (
-              // Edit Mode
-              <div className="space-y-6">
-                {/* Profile Photo */}
-                <div className="flex items-center gap-4">
-                  <Avatar
-                    src={user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.displayName || user?.email || 'User')}&size=80`}
-                    alt="Profile"
-                    sx={{ width: 80, height: 80 }}
-                  />
-                  <Button variant="outline" size="sm" disabled>Change Photo</Button>
-                </div>
-
-                {/* Username */}
-                <div className="space-y-2">
-                  <Label htmlFor="username">Username</Label>
-                  <Input
-                    id="username"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="h-12"
-                  />
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-3 pt-2">
-                  <Button
-                    variant="outline"
-                    onClick={handleCancelEdit}
-                    className="flex-1 h-12"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleSaveProfile}
-                    disabled={saving || authLoading}
-                    className="flex-1 h-12 font-semibold"
-                  >
-                    {saving ? "Saving..." : "Save Changes"}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </Card>
-        </motion.div>
-
         {/* Matching Preferences Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -488,7 +304,23 @@ const Settings = () => {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">Fitness Level</Label>
-                  <p className="text-lg font-semibold capitalize">{fitnessLevel}</p>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-4 h-4 rounded-full ${
+                      fitnessLevel === "beginner" ? "bg-blue-500" :
+                      fitnessLevel === "intermediate" ? "bg-green-500" :
+                      "bg-purple-500"
+                    }`} />
+                    <p className={`text-lg font-semibold capitalize ${
+                      fitnessLevel === "beginner" ? "text-blue-600 dark:text-blue-400" :
+                      fitnessLevel === "intermediate" ? "text-green-600 dark:text-green-400" :
+                      "text-purple-600 dark:text-purple-400"
+                    }`}>
+                      {fitnessLevel}
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {fitnessLevelOptions.find(opt => opt.value === fitnessLevel)?.description}
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -524,16 +356,35 @@ const Settings = () => {
                   <Label>Fitness Level</Label>
                   <Select value={fitnessLevel} onValueChange={(value) => setFitnessLevel(value as FitnessLevel)}>
                     <SelectTrigger className="h-12">
-                      <SelectValue />
+                      <div className="flex items-center gap-2">
+                        {fitnessLevel && (
+                          <div className={`w-3 h-3 rounded-full ${
+                            fitnessLevel === "beginner" ? "bg-blue-500" :
+                            fitnessLevel === "intermediate" ? "bg-green-500" :
+                            "bg-purple-500"
+                          }`} />
+                        )}
+                        <SelectValue />
+                      </div>
                     </SelectTrigger>
                     <SelectContent>
                       {fitnessLevelOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
+                        <SelectItem 
+                          key={option.value} 
+                          value={option.value} 
+                          className="py-3 cursor-pointer focus:bg-transparent"
+                        >
+                          <div className={`flex flex-col gap-1 p-3 rounded-lg border-2 transition-all ${option.bgColor} ${option.borderColor} ${fitnessLevel === option.value ? 'ring-2 ring-offset-2 ring-current' : ''}`}>
+                            <span className={`font-bold text-base ${option.color}`}>{option.label}</span>
+                            <span className="text-xs text-muted-foreground leading-relaxed">{option.description}</span>
+                          </div>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Choose the level that best matches your current fitness and training intensity.
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -573,15 +424,34 @@ const Settings = () => {
                     <div className="space-y-2 pl-6">
                       <Label className="text-sm text-muted-foreground">Select allowed levels:</Label>
                       {fitnessLevelOptions.map((option) => (
-                        <div key={option.value} className="flex items-center space-x-2">
+                        <div 
+                          key={option.value} 
+                          className={`flex items-center space-x-3 p-2 rounded-lg border transition-all ${
+                            allowedLevels.includes(option.value) 
+                              ? `${option.bgColor} ${option.borderColor} border-2` 
+                              : 'border-border/50'
+                          }`}
+                        >
                           <Checkbox
                             id={`level-${option.value}`}
                             checked={allowedLevels.includes(option.value)}
                             onCheckedChange={() => handleLevelToggle(option.value)}
                           />
-                          <Label htmlFor={`level-${option.value}`} className="text-sm font-normal cursor-pointer">
-                            {option.label}
-                          </Label>
+                          <div className="flex items-center gap-2 flex-1">
+                            <div className={`w-2.5 h-2.5 rounded-full ${
+                              option.value === "beginner" ? "bg-blue-500" :
+                              option.value === "intermediate" ? "bg-green-500" :
+                              "bg-purple-500"
+                            }`} />
+                            <Label 
+                              htmlFor={`level-${option.value}`} 
+                              className={`text-sm font-medium cursor-pointer ${
+                                allowedLevels.includes(option.value) ? option.color : ''
+                              }`}
+                            >
+                              {option.label}
+                            </Label>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -662,87 +532,6 @@ const Settings = () => {
                 </div>
               </div>
             )}
-          </Card>
-        </motion.div>
-
-        {/* Privacy Controls Section */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.3 }}
-        >
-          <Card className="p-6 space-y-5 shadow-elevation-2 bg-card/50 backdrop-blur-sm">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-xl bg-primary/10">
-                <LockIcon className="text-primary" style={{ fontSize: 24 }} />
-              </div>
-              <div>
-                <h2 className="text-2xl font-bold">Privacy Controls</h2>
-                <p className="text-sm text-muted-foreground">Manage who can see your location</p>
-              </div>
-            </div>
-
-            {connectedUsers.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <p className="text-sm">No connected users yet</p>
-                <p className="text-xs mt-1">Send messages or add friends to manage privacy</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {connectedUsers.map((user, index) => {
-                  const isVisible = userPrivacySettings[user.id] ?? true;
-
-                  return (
-                    <motion.div
-                      key={user.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex items-center justify-between p-4 rounded-xl border-2 border-border bg-background/50 hover:bg-accent/50 transition-all duration-200"
-                    >
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <Avatar
-                          src={user.avatar}
-                          alt={user.name}
-                          sx={{ width: 48, height: 48 }}
-                          className="flex-shrink-0"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-base truncate">{user.name}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            {user.activity === "Running" && "🏃"}
-                            {user.activity === "Cycling" && "🚴"}
-                            {user.activity === "Walking" && "🚶"}
-                            <span>{user.activity}</span>
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <div className="text-right hidden sm:block">
-                          <p className={`text-xs font-medium ${
-                            isVisible ? "text-success" : "text-muted-foreground"
-                          }`}>
-                            {isVisible ? "Visible" : "Hidden"}
-                          </p>
-                        </div>
-                        <Switch
-                          checked={isVisible}
-                          onCheckedChange={() => handleUserPrivacyToggle(user.id, user.name)}
-                        />
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="pt-2 px-1">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                <LockIcon style={{ fontSize: 14 }} className="inline mr-1 text-muted-foreground/70" />
-                Users you've hidden from won't see your location on the map. They can still send you messages.
-              </p>
-            </div>
           </Card>
         </motion.div>
 

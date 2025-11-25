@@ -2,7 +2,7 @@
 import { ref, set, get, onValue, off, remove, DataSnapshot, query, orderByChild, equalTo } from "firebase/database";
 import { database } from "./firebase";
 
-export type Activity = "running" | "cycling" | "walking";
+export type Activity = "running" | "cycling" | "walking" | "others";
 
 export interface CheckIn {
   userId: string;

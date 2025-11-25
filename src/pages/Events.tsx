@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { EventDetailModal } from "@/components/EventDetailModal";
 import { CreateEventModal } from "@/components/CreateEventModal";
+import { QuickCheckInModal } from "@/components/QuickCheckInModal";
 import BottomNavigation from "@/components/BottomNavigation";
 
 type EventType = "running" | "cycling" | "walking";
@@ -61,6 +62,7 @@ const Events = () => {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -187,6 +189,14 @@ const Events = () => {
 
             {/* View Toggle & My Events */}
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowQuickCheckIn(true)}
+                className="h-10"
+              >
+                <LocationOnIcon className="mr-2" style={{ fontSize: 20 }} />
+                <span className="hidden sm:inline">Quick Check-in</span>
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => navigate("/my-events")}
@@ -437,6 +447,13 @@ const Events = () => {
           onCreateEvent={handleCreateEvent}
         />
       )}
+
+      {/* Quick Check-in Modal */}
+      {showQuickCheckIn && (
+        <QuickCheckInModal
+          onClose={() => setShowQuickCheckIn(false)}
+        />
+      )}
       
       <BottomNavigation />
     </div>
@@ -447,7 +464,7 @@ const Events = () => {
 interface EventCardProps {
   event: Event;
   index: number;
-  onJoin: (id: number) => void;
+  onJoin: (id: string) => void;
   onClick: () => void;
   getActivityIcon: (type: EventType) => JSX.Element;
   getActivityColor: (type: EventType) => string;
@@ -520,7 +537,7 @@ const EventCard = ({ event, index, onJoin, onClick, getActivityIcon, getActivity
           <Button
             onClick={(e) => {
               e.stopPropagation();
-              onJoin(event.id);
+              onJoin(String(event.id));
             }}
             className={`w-full h-11 font-semibold ${
               event.isJoined

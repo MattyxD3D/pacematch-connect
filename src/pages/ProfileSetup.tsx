@@ -163,7 +163,7 @@ const ProfileSetup = () => {
           <Avatar
             sx={{ width: 96, height: 96 }}
             alt="Profile"
-            src={user?.photoURL || "https://via.placeholder.com/96"}
+            src={user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.displayName || user?.email || 'User')}&size=96`}
           />
         </motion.div>
 

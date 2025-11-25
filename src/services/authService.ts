@@ -30,7 +30,12 @@ const isMobileOrCapacitor = (): boolean => {
   // Check screen size (mobile typically < 768px)
   const isSmallScreen = window.innerWidth < 768;
   
-  return isMobile || (isTouchDevice && isSmallScreen);
+  // For Chrome mobile view, check if screen is small (even without touch)
+  // This catches Chrome DevTools mobile view and responsive design mode
+  const isChromeMobileView = isSmallScreen && /chrome/i.test(userAgent);
+  
+  // Return true if: mobile UA, OR (touch device AND small screen), OR Chrome mobile view
+  return isMobile || (isTouchDevice && isSmallScreen) || isChromeMobileView;
 };
 
 /**
@@ -48,12 +53,13 @@ const isStoragePartitioned = (): boolean => {
     // Check for common embedded browser indicators
     const userAgent = navigator.userAgent.toLowerCase();
     const isEmbedded = 
-      (window.navigator as any).standalone === false || // iOS embedded
       window.parent !== window || // In iframe
       userAgent.includes('wv') || // Android WebView
       userAgent.includes('messenger') || // Facebook Messenger
       userAgent.includes('fban') || // Facebook App
       userAgent.includes('fbav'); // Facebook App
+    // Note: navigator.standalone === false is NORMAL for regular Safari browsers,
+    // so we don't check it here to avoid false positives
     
     return isEmbedded;
   } catch (e) {

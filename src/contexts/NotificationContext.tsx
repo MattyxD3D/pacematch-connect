@@ -9,6 +9,7 @@ interface NotificationContextType {
   unreadCount: number;
   unreadMessageCount: number;
   unreadFriendRequestCount: number;
+  unreadPokeCount: number;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);

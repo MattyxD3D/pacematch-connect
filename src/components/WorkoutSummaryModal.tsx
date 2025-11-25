@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -12,7 +13,20 @@ import ShareIcon from "@mui/icons-material/Share";
 import CloseIcon from "@mui/icons-material/Close";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
 import DeleteIcon from "@mui/icons-material/Delete";
+import PeopleIcon from "@mui/icons-material/People";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
 import { toast } from "sonner";
+import { getUserData } from "@/services/authService";
+import { CircularProgress } from "@mui/material";
+
+interface NearbyUser {
+  id: string;
+  name: string;
+  avatar?: string;
+  activity?: string;
+  distance?: string;
+  distanceValue?: number;
+}
 
 interface WorkoutSummaryModalProps {
   isOpen: boolean;
@@ -24,6 +38,8 @@ interface WorkoutSummaryModalProps {
   distance: number; // in km
   avgSpeed: number; // in km/h
   useMetric: boolean;
+  nearbyUsers?: NearbyUser[];
+  pokes?: string[]; // Array of user IDs who poked during workout
 }
 
 export const WorkoutSummaryModal = ({
@@ -36,9 +52,51 @@ export const WorkoutSummaryModal = ({
   distance,
   avgSpeed,
   useMetric,
+  nearbyUsers = [],
+  pokes = [],
 }: WorkoutSummaryModalProps) => {
   const [photos, setPhotos] = useState<string[]>([]);
   const [caption, setCaption] = useState("");
+  const [pokeUsers, setPokeUsers] = useState<Record<string, any>>({});
+  const [loadingPokes, setLoadingPokes] = useState(false);
+
+  // Fetch user data for pokes
+  useEffect(() => {
+    if (!isOpen || pokes.length === 0) {
+      setPokeUsers({});
+      return;
+    }
+
+    const fetchPokeUsers = async () => {
+      setLoadingPokes(true);
+      try {
+        const userDataPromises = pokes.map(async (userId) => {
+          try {
+            const userData = await getUserData(userId);
+            return { userId, userData };
+          } catch (error) {
+            console.error(`Error fetching user data for ${userId}:`, error);
+            return { userId, userData: null };
+          }
+        });
+
+        const results = await Promise.all(userDataPromises);
+        const usersMap: Record<string, any> = {};
+        results.forEach(({ userId, userData }) => {
+          if (userData) {
+            usersMap[userId] = userData;
+          }
+        });
+        setPokeUsers(usersMap);
+      } catch (error) {
+        console.error("Error fetching poke users:", error);
+      } finally {
+        setLoadingPokes(false);
+      }
+    };
+
+    fetchPokeUsers();
+  }, [isOpen, pokes]);
 
   if (!isOpen) return null;
 
@@ -154,50 +212,121 @@ export const WorkoutSummaryModal = ({
             className="text-center py-4"
           >
             <div className="text-6xl mb-2">🎉</div>
-            <p className="text-lg font-semibold">Great workout!</p>
+            <p className="text-lg font-semibold">Workout Complete!</p>
           </motion.div>
 
-          {/* Primary Stats */}
-          <div className="grid grid-cols-3 gap-4">
+          {/* Pokes Received Section */}
+          {pokes.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
-              className="text-center"
+              className="space-y-3"
             >
-              <TimerIcon className="text-primary mx-auto mb-2" style={{ fontSize: 32 }} />
-              <div className="text-2xl font-bold">{formatTime(duration)}</div>
-              <div className="text-xs text-muted-foreground mt-1">Duration</div>
+              <div className="flex items-center gap-2">
+                <TouchAppIcon className="text-primary" style={{ fontSize: 20 }} />
+                <h3 className="font-semibold text-sm">Pokes Received ({pokes.length})</h3>
+              </div>
+              {loadingPokes ? (
+                <div className="flex items-center justify-center py-4">
+                  <CircularProgress size={24} />
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {pokes.map((pokeUserId) => {
+                    const userData = pokeUsers[pokeUserId];
+                    const userName = userData?.name || "Unknown User";
+                    const userAvatar = userData?.photoURL;
+                    
+                    return (
+                      <motion.div
+                        key={pokeUserId}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center gap-3 p-2 bg-muted/50 rounded-lg border border-border"
+                      >
+                        <Avatar className="w-10 h-10">
+                          <AvatarImage src={userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}`} />
+                          <AvatarFallback>{userName.charAt(0).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{userName}</p>
+                          <p className="text-xs text-muted-foreground">Poked you during workout</p>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              )}
             </motion.div>
+          )}
 
+          {/* Nearby People Section */}
+          {nearbyUsers.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4 }}
-              className="text-center"
+              className="space-y-3"
             >
-              <div className="text-4xl mb-2">📍</div>
-              <div className="text-2xl font-bold">
-                {distanceData.value}
-                <span className="text-sm ml-1">{distanceData.unit}</span>
+              <div className="flex items-center gap-2">
+                <PeopleIcon className="text-primary" style={{ fontSize: 20 }} />
+                <h3 className="font-semibold text-sm">Nearby People ({nearbyUsers.length})</h3>
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Distance</div>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {nearbyUsers.map((user) => {
+                  const ActivityIcon = 
+                    user.activity === "running" ? DirectionsRunIcon :
+                    user.activity === "cycling" ? DirectionsBikeIcon :
+                    DirectionsWalkIcon;
+                  
+                  return (
+                    <motion.div
+                      key={user.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="flex items-center gap-3 p-2 bg-muted/50 rounded-lg border border-border"
+                    >
+                      <Avatar className="w-10 h-10">
+                        <AvatarImage src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}`} />
+                        <AvatarFallback>{user.name.charAt(0).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{user.name}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {user.activity && (
+                            <span className="text-xs text-muted-foreground capitalize flex items-center gap-1">
+                              <ActivityIcon style={{ fontSize: 12 }} />
+                              {user.activity}
+                            </span>
+                          )}
+                          {user.distance && (
+                            <>
+                              {user.activity && <span className="text-xs text-muted-foreground">•</span>}
+                              <span className="text-xs text-muted-foreground">{user.distance}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
             </motion.div>
+          )}
 
+          {/* Empty State */}
+          {pokes.length === 0 && nearbyUsers.length === 0 && (
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.5 }}
-              className="text-center"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="text-center py-8"
             >
-              <SpeedIcon className="text-primary mx-auto mb-2" style={{ fontSize: 32 }} />
-              <div className="text-2xl font-bold">
-                {speedData.value}
-                <span className="text-sm ml-1">{speedData.unit}</span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">Avg Speed</div>
+              <PeopleIcon className="text-muted-foreground mx-auto mb-2" style={{ fontSize: 48 }} />
+              <p className="text-sm text-muted-foreground">No nearby people or pokes during this workout</p>
             </motion.div>
-          </div>
+          )}
 
           {/* Photo Upload Section */}
           <motion.div

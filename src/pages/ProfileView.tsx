@@ -9,6 +9,7 @@ import SendIcon from "@mui/icons-material/Send";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
 import { Card } from "@/components/ui/card";
 import { useState } from "react";
 
@@ -31,6 +32,8 @@ interface ProfileViewProps {
   onAddFriend: () => void;
   onAcceptFriend: () => void;
   onDeclineFriend: () => void;
+  onPoke?: () => void;
+  hasPoked?: boolean;
 }
 
 export const ProfileView = ({
@@ -42,6 +45,8 @@ export const ProfileView = ({
   onAddFriend,
   onAcceptFriend,
   onDeclineFriend,
+  onPoke,
+  hasPoked = false,
 }: ProfileViewProps) => {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   
@@ -201,6 +206,28 @@ export const ProfileView = ({
                     Decline
                   </Button>
                 </div>
+              )}
+
+              {/* Poke Button - Show when not friends */}
+              {onPoke && friendStatus === "not_friends" && !hasPoked && (
+                <Button
+                  onClick={onPoke}
+                  className="w-full h-12 font-semibold bg-purple-500 hover:bg-purple-600 text-white"
+                >
+                  <TouchAppIcon className="mr-2" style={{ fontSize: 20 }} />
+                  Poke {user.name}
+                </Button>
+              )}
+
+              {hasPoked && (
+                <Button
+                  disabled
+                  variant="outline"
+                  className="w-full h-12 opacity-50"
+                >
+                  <TouchAppIcon className="mr-2" style={{ fontSize: 20 }} />
+                  Poke Sent
+                </Button>
               )}
 
               {(friendStatus === "not_friends" || friendStatus === "denied") && (

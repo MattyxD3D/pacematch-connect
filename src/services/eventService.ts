@@ -1,6 +1,8 @@
 // Event service for Firebase - manages user-created and sponsored events
 import { ref, set, get, onValue, off, push, remove, DataSnapshot } from "firebase/database";
 import { database } from "./firebase";
+import { checkInToVenue, checkOutFromVenue, getCheckInsAtVenue, CheckIn, UserCheckInData } from "./checkInService";
+import { findVenueForEvent } from "./venueService";
 
 export interface Event {
   id: string;
@@ -221,6 +223,92 @@ export const deleteEvent = async (
   } catch (error) {
     console.error("❌ Error deleting event:", error);
     throw error;
+  }
+};
+
+/**
+ * Check in to an event's location
+ * This will check in to the venue if the event location matches a predefined venue,
+ * otherwise it will create a check-in record for the event location itself
+ */
+export const checkInToEventLocation = async (
+  eventId: string,
+  userId: string,
+  userData: UserCheckInData
+): Promise<void> => {
+  try {
+    const eventRef = ref(database, `events/${eventId}`);
+    const snapshot = await get(eventRef);
+    
+    if (!snapshot.exists()) {
+      throw new Error("Event not found");
+    }
+    
+    const event = snapshot.val() as Event;
+    
+    // Try to find a matching venue
+    const venue = findVenueForEvent(event.lat, event.lng);
+    
+    if (venue) {
+      // Check in to the venue
+      await checkInToVenue(userId, venue.id, { id: venue.id, name: venue.name }, userData);
+    } else {
+      // Create event-specific check-in
+      const eventCheckInRef = ref(database, `eventCheckIns/${eventId}/${userId}`);
+      const checkIn: CheckIn = {
+        userId,
+        venueId: `event-${eventId}`,
+        venueName: event.location,
+        activity: userData.activity,
+        userName: userData.userName,
+        userAvatar: userData.userAvatar || "",
+        timestamp: Date.now()
+      };
+      
+      await set(eventCheckInRef, checkIn);
+      console.log(`✅ User ${userId} checked in to event location ${eventId}`);
+    }
+  } catch (error) {
+    console.error("❌ Error checking in to event location:", error);
+    throw error;
+  }
+};
+
+/**
+ * Get all check-ins at an event's location
+ */
+export const getCheckInsAtEventLocation = async (eventId: string): Promise<CheckIn[]> => {
+  try {
+    const eventRef = ref(database, `events/${eventId}`);
+    const snapshot = await get(eventRef);
+    
+    if (!snapshot.exists()) {
+      return [];
+    }
+    
+    const event = snapshot.val() as Event;
+    
+    // Try to find a matching venue
+    const venue = findVenueForEvent(event.lat, event.lng);
+    
+    if (venue) {
+      // Get check-ins from the venue
+      return await getCheckInsAtVenue(venue.id);
+    } else {
+      // Get event-specific check-ins
+      const eventCheckInsRef = ref(database, `eventCheckIns/${eventId}`);
+      const checkInsSnapshot = await get(eventCheckInsRef);
+      
+      if (!checkInsSnapshot.exists()) {
+        return [];
+      }
+      
+      const checkIns = checkInsSnapshot.val();
+      return Object.values(checkIns) as CheckIn[];
+    }
+  } catch (error) {
+    console.error("❌ Error getting check-ins at event location:", error);
+    return [];
   }
 };
 

@@ -19,15 +19,19 @@ import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import MessageIcon from "@mui/icons-material/Message";
 import PersonIcon from "@mui/icons-material/Person";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
 import SpeedIcon from "@mui/icons-material/Speed";
 import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
+import PeopleIcon from "@mui/icons-material/People";
 
 interface NearbyUsersAccordionProps {
   matches: MatchResult[];
   onViewProfile: (userId: string) => void;
   onAddFriend: (userId: string) => void;
   onSendMessage: (userId: string) => void;
+  onPoke?: (userId: string) => void;
   loading?: boolean;
+  pokes?: string[]; // Array of user IDs who poked the current user
 }
 
 export const NearbyUsersAccordion = ({
@@ -35,7 +39,9 @@ export const NearbyUsersAccordion = ({
   onViewProfile,
   onAddFriend,
   onSendMessage,
-  loading = false
+  onPoke,
+  loading = false,
+  pokes = []
 }: NearbyUsersAccordionProps) => {
   const getActivityIcon = (activity: string) => {
     switch (activity.toLowerCase()) {
@@ -88,6 +94,15 @@ export const NearbyUsersAccordion = ({
     );
   }
 
+  // Sort matches: poked users first
+  const sortedMatches = [...matches].sort((a, b) => {
+    const aPoked = pokes.includes(a.user.uid);
+    const bPoked = pokes.includes(b.user.uid);
+    if (aPoked && !bPoked) return -1;
+    if (!aPoked && bPoked) return 1;
+    return 0;
+  });
+
   return (
     <Card className="overflow-hidden">
       <Accordion type="single" collapsible className="w-full">
@@ -105,27 +120,36 @@ export const NearbyUsersAccordion = ({
           </AccordionTrigger>
           <AccordionContent className="px-0 pb-0">
             <div className="space-y-2 pb-2">
-              {matches.map((match, index) => {
+              {sortedMatches.map((match, index) => {
                 const user = match.user;
                 const distanceKm = match.distance / 1000;
                 const score = match.score;
+                const isPoked = pokes.includes(user.uid);
 
                 return (
                   <motion.div
                     key={user.uid}
+                    data-poked={isPoked}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.05 }}
-                    className="px-4 py-3 border-b border-border/50 last:border-0 hover:bg-muted/50 transition-colors"
+                    className={`px-4 py-3 border-b border-border/50 last:border-0 hover:bg-muted/50 transition-colors relative ${
+                      isPoked ? 'bg-purple-50/50 dark:bg-purple-950/20 border-purple-300/30' : ''
+                    }`}
                   >
-                    <div className="flex items-start gap-3">
-                      {/* Avatar */}
-                      <Avatar className="w-12 h-12 border-2 border-primary">
-                        <AvatarImage src={user.photoURL || `https://ui-avatars.com/api/?name=${user.name || 'User'}`} />
-                        <AvatarFallback>
-                          {user.name?.charAt(0) || "U"}
-                        </AvatarFallback>
-                      </Avatar>
+                    <div className="flex items-center gap-3">
+                      {/* Avatar - Clickable to view profile */}
+                      <button
+                        onClick={() => onViewProfile(user.uid)}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                      >
+                        <Avatar className={`w-12 h-12 border-2 ${isPoked ? 'border-purple-500 ring-2 ring-purple-300' : 'border-primary'}`}>
+                          <AvatarImage src={user.photoURL || `https://ui-avatars.com/api/?name=${user.name || 'User'}`} />
+                          <AvatarFallback>
+                            {user.name?.charAt(0) || "U"}
+                          </AvatarFallback>
+                        </Avatar>
+                      </button>
 
                       {/* User Info */}
                       <div className="flex-1 min-w-0">
@@ -133,32 +157,29 @@ export const NearbyUsersAccordion = ({
                           <h4 className="font-semibold text-sm truncate">
                             {user.name || "Unknown User"}
                           </h4>
-                          <Badge className={`${getScoreColor(score)} text-xs px-1.5 py-0`}>
-                            {Math.round(score * 100)}%
+                          {isPoked && (
+                            <Badge className="bg-purple-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+                              POKED YOU!
+                            </Badge>
+                          )}
+                          <Badge className="bg-primary text-primary-foreground text-xs px-1.5 py-0">
+                            {formatDistance(distanceKm)}
                           </Badge>
                         </div>
 
-                        {/* Activity & Distance */}
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
+                        {/* Activity & Fitness Level */}
+                        <div className="flex items-center gap-2 text-xs mb-2">
                           <div className="flex items-center gap-1">
                             {getActivityIcon(user.activity)}
                             <span className="capitalize">{user.activity}</span>
                           </div>
                           <span>•</span>
-                          <span>{formatDistance(distanceKm)}</span>
-                        </div>
-
-                        {/* Fitness Level & Pace */}
-                        <div className="flex items-center gap-3 text-xs mb-2">
-                          <div className="flex items-center gap-1">
-                            <FitnessCenterIcon style={{ fontSize: 14 }} />
-                            <Badge
-                              variant="outline"
-                              className={`${getFitnessLevelColor(user.fitnessLevel)} text-white border-0 text-xs px-1.5 py-0`}
-                            >
-                              {user.fitnessLevel}
-                            </Badge>
-                          </div>
+                          <Badge
+                            variant="outline"
+                            className={`${getFitnessLevelColor(user.fitnessLevel)} text-white border-0 text-xs px-1.5 py-0`}
+                          >
+                            {user.fitnessLevel}
+                          </Badge>
                           {user.pace > 0 && (
                             <>
                               <span>•</span>
@@ -175,20 +196,21 @@ export const NearbyUsersAccordion = ({
                         </div>
 
                         {/* Actions */}
-                        <div className="flex items-center gap-2 mt-2">
+                        <div className="flex items-center justify-center gap-2 mt-2">
+                          {onPoke && (
+                            <Button
+                              size="sm"
+                              className="flex-1 h-8 text-xs justify-center bg-purple-500 hover:bg-purple-600 text-white"
+                              onClick={() => onPoke(user.uid)}
+                            >
+                              <TouchAppIcon style={{ fontSize: 14 }} className="mr-1" />
+                              Poke
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 text-xs"
-                            onClick={() => onViewProfile(user.uid)}
-                          >
-                            <PersonIcon style={{ fontSize: 14 }} className="mr-1" />
-                            Profile
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs"
+                            className="flex-1 h-8 text-xs justify-center"
                             onClick={() => onAddFriend(user.uid)}
                           >
                             <PersonAddIcon style={{ fontSize: 14 }} className="mr-1" />
@@ -197,7 +219,7 @@ export const NearbyUsersAccordion = ({
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 text-xs"
+                            className="flex-1 h-8 text-xs justify-center"
                             onClick={() => onSendMessage(user.uid)}
                           >
                             <MessageIcon style={{ fontSize: 14 }} className="mr-1" />

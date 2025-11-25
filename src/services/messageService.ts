@@ -1,5 +1,5 @@
 // Message service for Firebase - real-time messaging
-import { ref, set, push, onValue, off, get, query, orderByChild, limitToLast, DataSnapshot } from "firebase/database";
+import { ref, set, push, onValue, off, get, query, orderByChild, DataSnapshot } from "firebase/database";
 import { database } from "./firebase";
 
 export interface Message {
@@ -25,13 +25,14 @@ export const sendMessage = async (
     const messagesRef = ref(database, `messages/${conversationId}`);
     const newMessageRef = push(messagesRef);
     const messageId = newMessageRef.key!;
-    
+    const timestamp = Date.now();
+
     const messageData: Message = {
       id: messageId,
       senderId,
       receiverId,
       content,
-      timestamp: Date.now(),
+      timestamp,
       isRead: false
     };
     
@@ -39,13 +40,21 @@ export const sendMessage = async (
     
     // Update conversation metadata
     const conversationMetaRef = ref(database, `conversations/${conversationId}`);
+    const participantMap: Record<string, boolean> = {
+      [senderId]: true,
+      [receiverId]: true
+    };
     await set(conversationMetaRef, {
-      participants: [senderId, receiverId],
+      participants: participantMap,
+      participantList: Object.keys(participantMap),
       lastMessage: content,
-      lastMessageTime: Date.now(),
+      lastMessageTime: timestamp,
       lastMessageSender: senderId,
-      updatedAt: Date.now()
+      updatedAt: timestamp
     });
+    
+    // Maintain lightweight per-user summaries for fast lookups
+    await updateUserConversationSummaries(conversationId, senderId, receiverId, messageData);
     
     console.log(`✅ Message sent: ${messageId}`);
     return messageId;
@@ -100,8 +109,8 @@ export const getUserConversations = async (userId: string): Promise<Array<{
   unreadCount: number;
 }>> => {
   try {
-    const conversationsRef = ref(database, "conversations");
-    const snapshot = await get(conversationsRef);
+    const userConversationsRef = ref(database, `userConversations/${userId}`);
+    const snapshot = await get(userConversationsRef);
     
     if (!snapshot.exists()) {
       return [];
@@ -117,16 +126,14 @@ export const getUserConversations = async (userId: string): Promise<Array<{
     }> = [];
     
     Object.entries(conversations).forEach(([conversationId, data]: [string, any]) => {
-      if (data.participants && data.participants.includes(userId)) {
-        const otherUserId = data.participants.find((id: string) => id !== userId);
-        userConversations.push({
-          conversationId,
-          otherUserId,
-          lastMessage: data.lastMessage || "",
-          lastMessageTime: data.lastMessageTime || 0,
-          unreadCount: 0 // TODO: Calculate unread count
-        });
-      }
+      const otherUserId = data.otherUserId || "";
+      userConversations.push({
+        conversationId,
+        otherUserId,
+        lastMessage: data.lastMessage || "",
+        lastMessageTime: data.lastMessageTime || 0,
+        unreadCount: data.unreadCount || 0
+      });
     });
     
     // Sort by last message time
@@ -154,23 +161,71 @@ export const markMessagesAsRead = async (
     }
     
     const messages = snapshot.val();
-    const updates: Record<string, any> = {};
+    const unreadMessages = Object.entries(messages).filter(
+      ([, message]: [string, any]) => message.receiverId === userId1 && !message.isRead
+    );
     
-    Object.entries(messages).forEach(([messageId, message]: [string, any]) => {
-      if (message.receiverId === userId1 && !message.isRead) {
-        updates[`${messageId}/isRead`] = true;
-      }
-    });
+    if (unreadMessages.length > 0) {
+      await Promise.all(
+        unreadMessages.map(([messageId, message]: [string, any]) => {
+          const messageRef = ref(database, `messages/${conversationId}/${messageId}`);
+          return set(messageRef, { ...message, isRead: true });
+        })
+      );
+    }
     
-    if (Object.keys(updates).length > 0) {
-      // Update all unread messages
-      Object.entries(updates).forEach(async ([path, value]) => {
-        const messageRef = ref(database, `messages/${conversationId}/${path.split("/")[0]}`);
-        await set(messageRef, { ...messages[path.split("/")[0]], isRead: true });
+    // Reset unread count for the viewer
+    const userConversationRef = ref(database, `userConversations/${userId1}/${conversationId}`);
+    const userConversationSnapshot = await get(userConversationRef);
+    if (userConversationSnapshot.exists()) {
+      await set(userConversationRef, {
+        ...userConversationSnapshot.val(),
+        unreadCount: 0
       });
     }
   } catch (error) {
     console.error("❌ Error marking messages as read:", error);
   }
+};
+
+/**
+ * Update per-user conversation summaries used for fast lookups and rule-friendly reads.
+ */
+const updateUserConversationSummaries = async (
+  conversationId: string,
+  senderId: string,
+  receiverId: string,
+  messageData: Message
+): Promise<void> => {
+  const senderSummaryRef = ref(database, `userConversations/${senderId}/${conversationId}`);
+  const receiverSummaryRef = ref(database, `userConversations/${receiverId}/${conversationId}`);
+  
+  const senderSummary = {
+    conversationId,
+    otherUserId: receiverId,
+    lastMessage: messageData.content,
+    lastMessageTime: messageData.timestamp,
+    lastMessageSender: messageData.senderId,
+    unreadCount: 0
+  };
+  
+  const receiverSnapshot = await get(receiverSummaryRef);
+  const receiverUnreadCount = receiverSnapshot.exists()
+    ? (receiverSnapshot.val().unreadCount || 0) + 1
+    : 1;
+  
+  const receiverSummary = {
+    conversationId,
+    otherUserId: senderId,
+    lastMessage: messageData.content,
+    lastMessageTime: messageData.timestamp,
+    lastMessageSender: messageData.senderId,
+    unreadCount: receiverUnreadCount
+  };
+  
+  await Promise.all([
+    set(senderSummaryRef, senderSummary),
+    set(receiverSummaryRef, receiverSummary)
+  ]);
 };
 

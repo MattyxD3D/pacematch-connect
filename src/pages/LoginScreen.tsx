@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import GoogleIcon from "@mui/icons-material/Google";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import PeopleIcon from "@mui/icons-material/People";
@@ -12,40 +12,81 @@ import { auth } from "@/services/firebase";
 
 const LoginScreen = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasCheckedRedirect = useRef(false);
+  const hasRedirected = useRef(false);
+
+  // Check if mobile device (including Chrome mobile view)
+  const isMobile = () => {
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isMobileUA = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const isSmallScreen = window.innerWidth < 768;
+    const isMobileView = isSmallScreen || (isTouchDevice && window.innerWidth < 1024);
+    
+    // Chrome mobile view often has mobile-like behavior even on desktop
+    const isChromeMobileView = window.innerWidth < 768 && /chrome/i.test(userAgent);
+    
+    return isMobileUA || isMobileView || isChromeMobileView;
+  };
 
   // Redirect if user is already authenticated
   useEffect(() => {
-    if (!authLoading && user) {
-      // User is already logged in, redirect them away from login page
-      const checkUserProfile = async () => {
-        try {
-          const { getUserData } = await import("@/services/authService");
-          const userData = await getUserData(user.uid);
-          
-          if (userData && userData.activity) {
-            navigate("/", { replace: true });
-          } else {
-            navigate("/profile-setup", { replace: true });
-          }
-        } catch (err) {
-          console.error("Error checking user profile:", err);
-        }
-      };
-      checkUserProfile();
+    // Only redirect if we're actually on the login page
+    if (location.pathname !== "/login") {
+      return;
     }
-  }, [user, authLoading, navigate]);
 
-  // Check for redirect result on mount (only once, only if not authenticated)
+    // Prevent multiple redirects
+    if (hasRedirected.current || authLoading || !user) {
+      return;
+    }
+
+    // User is already logged in, redirect them away from login page
+    const checkUserProfile = async () => {
+      try {
+        // Add delay on mobile to ensure authentication state is fully updated
+        const mobileDelay = isMobile() ? 2000 : 0; // 2 seconds on mobile, no delay on desktop
+        if (mobileDelay > 0) {
+          console.log("📱 Mobile detected, waiting", mobileDelay, "ms before redirect...");
+          await new Promise(resolve => setTimeout(resolve, mobileDelay));
+        }
+        
+        // Double-check user is still authenticated after delay
+        if (!user && !auth.currentUser) {
+          console.log("⚠️ User no longer authenticated after delay, aborting redirect");
+          hasRedirected.current = false;
+          return;
+        }
+        
+        hasRedirected.current = true;
+        const { getUserData } = await import("@/services/authService");
+        const userData = await getUserData(user.uid);
+        
+        if (userData && userData.activity) {
+          navigate("/", { replace: true });
+        } else {
+          navigate("/profile-setup", { replace: true });
+        }
+      } catch (err) {
+        console.error("Error checking user profile:", err);
+        hasRedirected.current = false; // Reset on error
+      }
+    };
+    checkUserProfile();
+  }, [user, authLoading, navigate, location.pathname]);
+
+  // Check for redirect result on mount (only once)
   useEffect(() => {
-    // Only check redirect result if:
-    // 1. We haven't checked it yet (useRef flag)
-    // 2. Auth is not loading
-    // 3. User is not authenticated
-    if (hasCheckedRedirect.current || authLoading || user) {
+    if (hasCheckedRedirect.current) {
+      return;
+    }
+
+    // Only handle redirect callback while we're on the login route
+    if (location.pathname !== "/login") {
       return;
     }
 
@@ -94,11 +135,29 @@ const LoginScreen = () => {
           // Wait for auth state to update
           await waitForAuthState();
           
+          // Prevent multiple redirects
+          if (hasRedirected.current) {
+            return;
+          }
+          
+          // Add extra delay on mobile to ensure authentication state is fully updated
+          const mobileDelay = isMobile() ? 2000 : 500; // 2 seconds on mobile, 500ms on desktop
+          console.log("📱 Mobile:", isMobile(), "Adding delay:", mobileDelay, "ms");
+          await new Promise(resolve => setTimeout(resolve, mobileDelay));
+          
+          // Double-check user is still authenticated after delay
+          if (!auth.currentUser) {
+            console.log("⚠️ User no longer authenticated after delay, aborting redirect");
+            hasCheckedRedirect.current = false;
+            return;
+          }
+          
           // Check if user has completed profile setup
           const { getUserData } = await import("@/services/authService");
           const userData = await getUserData(redirectUser.uid);
           console.log("📋 User data from Firebase:", userData);
           
+          hasRedirected.current = true;
           if (userData && userData.activity) {
             console.log("🏠 User has activity, redirecting to home feed");
             navigate("/", { replace: true });
@@ -115,7 +174,7 @@ const LoginScreen = () => {
       }
     };
     checkRedirectResult();
-  }, [authLoading, user, navigate]);
+  }, [navigate, location.pathname]);
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
@@ -135,15 +194,31 @@ const LoginScreen = () => {
 
       console.log("✅ Sign-in successful! User:", user.uid);
       
+      // Prevent multiple redirects
+      if (hasRedirected.current) {
+        setLoading(false);
+        return;
+      }
+      
       // Wait for auth state to update (for popup sign-in, it should be immediate)
-      // But add a small delay to ensure useAuth hook has updated
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Add longer delay on mobile to ensure useAuth hook has updated
+      const delay = isMobile() ? 2000 : 200; // 2 seconds on mobile, 200ms on desktop
+      console.log("📱 Mobile:", isMobile(), "Adding delay:", delay, "ms");
+      await new Promise(resolve => setTimeout(resolve, delay));
+      
+      // Double-check user is still authenticated after delay
+      if (!user && !auth.currentUser) {
+        console.log("⚠️ User no longer authenticated after delay, aborting redirect");
+        setLoading(false);
+        return;
+      }
       
       // Check if user has completed profile setup
       const { getUserData } = await import("@/services/authService");
       const userData = await getUserData(user.uid);
       console.log("📋 User data from Firebase:", userData);
       
+      hasRedirected.current = true;
       if (userData && userData.activity) {
         console.log("🏠 User has activity, redirecting to home feed");
         navigate("/", { replace: true });

@@ -11,6 +11,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import ChatIcon from "@mui/icons-material/Chat";
 import PersonIcon from "@mui/icons-material/Person";
 import BlockIcon from "@mui/icons-material/Block";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -35,6 +36,8 @@ interface MatchActionsModalProps {
   onDecline: () => void;
   onChat: () => void;
   onViewProfile: () => void;
+  onPoke?: () => void;
+  hasPoked?: boolean;
 }
 
 export const MatchActionsModal = ({
@@ -46,7 +49,9 @@ export const MatchActionsModal = ({
   onAddFriend,
   onDecline,
   onChat,
-  onViewProfile
+  onViewProfile,
+  onPoke,
+  hasPoked = false
 }: MatchActionsModalProps) => {
   const getActivityIcon = () => {
     switch (user.activity.toLowerCase()) {
@@ -141,6 +146,31 @@ export const MatchActionsModal = ({
 
               {/* Action Buttons */}
               <div className="space-y-3">
+                {/* Poke Button - Show before Add Friend */}
+                {onPoke && friendStatus === "not_friends" && !hasPoked && (
+                  <Button
+                    onClick={() => {
+                      onPoke();
+                      onClose();
+                    }}
+                    className="w-full h-14 text-base font-semibold bg-purple-500 hover:bg-purple-600 text-white"
+                  >
+                    <TouchAppIcon className="mr-2" />
+                    Poke {user.name}
+                  </Button>
+                )}
+
+                {hasPoked && (
+                  <Button
+                    disabled
+                    variant="outline"
+                    className="w-full h-14 text-base font-semibold opacity-50"
+                  >
+                    <TouchAppIcon className="mr-2" />
+                    Poke Sent
+                  </Button>
+                )}
+
                 {/* Add Friend Button */}
                 {friendStatus === "not_friends" && cooldownDays === 0 && (
                   <Button

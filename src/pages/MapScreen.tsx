@@ -1,5 +1,5 @@
 // Main map screen with Waze-like proximity matching
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import "../styles/animations.css";
 import {
@@ -22,13 +22,24 @@ import {
   ListItemButton,
   ListItemText,
   ListItemAvatar,
-  Avatar,
-  Drawer,
+  Avatar as MuiAvatar,
   IconButton,
   Divider,
   Slider
 } from "@mui/material";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
 import { useLocation } from "@/hooks/useLocation";
@@ -43,18 +54,21 @@ import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
 import { updateUserVisibility } from "@/services/locationService";
 import { saveWorkout } from "@/services/workoutService";
+import { listenToFriendRequests } from "@/services/friendService";
+import { getUserConversations } from "@/services/messageService";
+import { listenToPokes, sendPoke, acceptPoke, dismissPoke, hasPokedUser } from "@/services/pokeService";
+import { PokeModal } from "@/components/PokeModal";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
 import PauseIcon from "@mui/icons-material/Pause";
 import ExploreIcon from "@mui/icons-material/Explore";
-import PeopleIcon from "@mui/icons-material/People";
-import MyLocationIcon from "@mui/icons-material/MyLocation";
 import SettingsIcon from "@mui/icons-material/Settings";
+import PeopleIcon from "@mui/icons-material/People";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
-import MailIcon from "@mui/icons-material/Mail";
 import GroupIcon from "@mui/icons-material/Group";
+import NotificationsIcon from "@mui/icons-material/Notifications";
 import PublicIcon from "@mui/icons-material/Public";
 import TimerIcon from "@mui/icons-material/Timer";
 import SpeedIcon from "@mui/icons-material/Speed";
@@ -85,6 +99,7 @@ import { WorkoutSummaryModal } from "@/components/WorkoutSummaryModal";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
 import BottomNavigation from "@/components/BottomNavigation";
 
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
@@ -190,7 +205,10 @@ const MapScreen = () => {
   // Workout tracking state
   const [isActive, setIsActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [showPeopleDrawer, setShowPeopleDrawer] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true); // Sidebar visibility toggle
+  const [lastViewedMatchesCount, setLastViewedMatchesCount] = useState(0); // Track viewed matches for notification
+  const [showStopConfirmation, setShowStopConfirmation] = useState(false); // Confirmation dialog for stopping session
+  const [showMatchesDrawer, setShowMatchesDrawer] = useState(false); // Matches drawer visibility toggle
   const [pointsTracked, setPointsTracked] = useState(0);
   const [distance, setDistance] = useState(0);
   const [showNotification, setShowNotification] = useState(false);
@@ -203,6 +221,9 @@ const MapScreen = () => {
   const lastDistanceRef = useRef(0);
   const lastTimeRef = useRef(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastLocationRef = useRef<Location | null>(null);
+  const processedUserIdsRef = useRef<Set<string>>(new Set());
+  const nearbyUsersRef = useRef<any[]>([]);
   
   // Get user's enabled activities from profile
   const userActivities = userProfile?.activities || ["running", "cycling", "walking"];
@@ -216,13 +237,28 @@ const MapScreen = () => {
   const [showProfileView, setShowProfileView] = useState(false);
   const [showMatchActionsModal, setShowMatchActionsModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showPokeModal, setShowPokeModal] = useState(false);
   const [searchFilter, setSearchFilter] = useState<SearchFilter>("all");
   const [declinedUsers, setDeclinedUsers] = useState<Record<string, number>>({}); // userId -> cooldownUntil timestamp
   const [visibleToFriendsOnly, setVisibleToFriendsOnly] = useState(false);
-  const [showNearbyList, setShowNearbyList] = useState(false);
   
-  // Activity filter for People Drawer
+  // Poke state
+  const [pokes, setPokes] = useState<string[]>([]); // Array of user IDs who poked the current user (for notifications)
+  const [hasPokedUsers, setHasPokedUsers] = useState<Record<string, boolean>>({}); // Track which users we've poked
+  const [workoutPokes, setWorkoutPokes] = useState<string[]>([]); // Pokes received during current workout session
+  const [workoutNearbyUsers, setWorkoutNearbyUsers] = useState<any[]>([]); // Nearby users during workout
+  const notifiedPokesRef = useRef<Set<string>>(new Set()); // Track which pokes we've already notified
+  
+  // Activity filter for People Sidebar
   const [activityFilter, setActivityFilter] = useState<"all" | "running" | "cycling" | "walking">("all");
+  
+  // Friend requests and messages for sidebar
+  const [friendRequests, setFriendRequests] = useState<{ incoming: string[]; outgoing: string[] }>({ incoming: [], outgoing: [] });
+  const [messageRequests, setMessageRequests] = useState<any[]>([]);
+  const [friendRequestUsers, setFriendRequestUsers] = useState<Record<string, any>>({});
+  const [messageRequestUsers, setMessageRequestUsers] = useState<Record<string, any>>({});
+  const [loadingFriendRequestUsers, setLoadingFriendRequestUsers] = useState(false);
+  const [loadingMessageRequestUsers, setLoadingMessageRequestUsers] = useState(false);
   
   // Load Google Maps API
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -301,6 +337,223 @@ const MapScreen = () => {
     }
   }, []);
 
+  // Restore activity state from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem("activityState");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed.isActive) {
+          setIsActive(true);
+          setIsPaused(parsed.isPaused || false);
+          setSelectedActivity(parsed.selectedActivity || selectedActivity);
+          setDistance(parsed.distance || 0);
+          setCurrentSpeed(parsed.currentSpeed || 0);
+          setAvgSpeed(parsed.avgSpeed || 0);
+          setPointsTracked(parsed.pointsTracked || 0);
+          
+          // Restore startTime and calculate elapsed time
+          if (parsed.startTime) {
+            const savedStartTime = new Date(parsed.startTime);
+            setStartTime(savedStartTime);
+            // Calculate elapsed time based on saved start time
+            const now = new Date();
+            const elapsed = Math.floor((now.getTime() - savedStartTime.getTime()) / 1000);
+            setElapsedTime(parsed.isPaused ? (parsed.elapsedTime || 0) : elapsed);
+          }
+          
+          console.log("✅ Restored activity state from localStorage");
+        }
+      } catch (e) {
+        console.error("Error loading activity state:", e);
+        // Clear corrupted data
+        localStorage.removeItem("activityState");
+      }
+    }
+  }, []); // Only run on mount
+
+  // Save activity state to localStorage whenever it changes
+  useEffect(() => {
+    if (isActive) {
+      const stateToSave = {
+        isActive,
+        isPaused,
+        startTime: startTime?.toISOString() || null,
+        elapsedTime,
+        distance,
+        currentSpeed,
+        avgSpeed,
+        pointsTracked,
+        selectedActivity
+      };
+      localStorage.setItem("activityState", JSON.stringify(stateToSave));
+    } else {
+      // Clear saved state when activity is stopped
+      localStorage.removeItem("activityState");
+    }
+  }, [isActive, isPaused, startTime, elapsedTime, distance, currentSpeed, avgSpeed, pointsTracked, selectedActivity]);
+
+  // Listen to friend requests
+  useEffect(() => {
+    if (!user?.uid) return;
+    
+    const unsubscribe = listenToFriendRequests(user.uid, (requests) => {
+      setFriendRequests(requests);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  // Listen to pokes
+  useEffect(() => {
+    if (!user?.uid) return;
+    
+    const unsubscribe = listenToPokes(user.uid, (pokeUserIds) => {
+      setPokes(pokeUserIds);
+      
+      // Track pokes received during workout
+      if (isActive) {
+        setWorkoutPokes(prev => {
+          const newPokes = pokeUserIds.filter(id => !prev.includes(id));
+          return [...prev, ...newPokes];
+        });
+      }
+      
+      // Create notifications only for NEW pokes (not already notified)
+      if (pokeUserIds.length > 0 && addNotification) {
+        const newPokeUserIds = pokeUserIds.filter(id => !notifiedPokesRef.current.has(id));
+        
+        // Mark all current pokes as notified
+        pokeUserIds.forEach(id => notifiedPokesRef.current.add(id));
+        
+        // Get user data for new pokes and create notifications
+        newPokeUserIds.forEach(async (pokeUserId) => {
+          try {
+            const { getUserData } = await import("@/services/authService");
+            const userData = await getUserData(pokeUserId);
+            if (userData) {
+              addNotification({
+                type: "poke",
+                userId: parseInt(pokeUserId) || 0,
+                userName: userData.name || "Someone",
+                userAvatar: userData.photoURL || ""
+              });
+            }
+          } catch (error) {
+            console.error("Error fetching poke user data:", error);
+          }
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid, isActive]);
+
+  // Fetch user data for friend requests
+  useEffect(() => {
+    if (friendRequests.incoming.length === 0) {
+      setFriendRequestUsers({});
+      return;
+    }
+
+    const fetchFriendRequestUsers = async () => {
+      setLoadingFriendRequestUsers(true);
+      try {
+        const { getUserData } = await import("@/services/authService");
+        const userDataPromises = friendRequests.incoming.map(async (userId) => {
+          try {
+            const userData = await getUserData(userId);
+            return { userId, userData };
+          } catch (error) {
+            console.error(`Error fetching user data for ${userId}:`, error);
+            return { userId, userData: null };
+          }
+        });
+
+        const results = await Promise.all(userDataPromises);
+        const usersMap: Record<string, any> = {};
+        results.forEach(({ userId, userData }) => {
+          if (userData) {
+            usersMap[userId] = userData;
+          }
+        });
+        setFriendRequestUsers(usersMap);
+      } catch (error) {
+        console.error("Error fetching friend request users:", error);
+      } finally {
+        setLoadingFriendRequestUsers(false);
+      }
+    };
+
+    fetchFriendRequestUsers();
+  }, [friendRequests.incoming]);
+
+  // Load message requests (conversations with unread messages from non-friends)
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const loadMessageRequests = async () => {
+      try {
+        const conversations = await getUserConversations(user.uid);
+        // Filter for conversations with unread messages from non-friends
+        const friends = userProfile?.friends || [];
+        const requests = conversations.filter(conv => 
+          conv.unreadCount > 0 && !friends.some((f: any) => String(f) === conv.otherUserId)
+        );
+        setMessageRequests(requests);
+      } catch (error) {
+        console.error("Error loading message requests:", error);
+      }
+    };
+
+    loadMessageRequests();
+    // Refresh every 30 seconds
+    const interval = setInterval(loadMessageRequests, 30000);
+    return () => clearInterval(interval);
+  }, [user?.uid, userProfile?.friends]);
+
+  // Fetch user data for message requests
+  useEffect(() => {
+    if (messageRequests.length === 0) {
+      setMessageRequestUsers({});
+      return;
+    }
+
+    const fetchMessageRequestUsers = async () => {
+      setLoadingMessageRequestUsers(true);
+      try {
+        const { getUserData } = await import("@/services/authService");
+        const uniqueUserIds = [...new Set(messageRequests.map(conv => conv.otherUserId))];
+        const userDataPromises = uniqueUserIds.map(async (userId) => {
+          try {
+            const userData = await getUserData(userId);
+            return { userId, userData };
+          } catch (error) {
+            console.error(`Error fetching user data for ${userId}:`, error);
+            return { userId, userData: null };
+          }
+        });
+
+        const results = await Promise.all(userDataPromises);
+        const usersMap: Record<string, any> = {};
+        results.forEach(({ userId, userData }) => {
+          if (userData) {
+            usersMap[userId] = userData;
+          }
+        });
+        setMessageRequestUsers(usersMap);
+      } catch (error) {
+        console.error("Error fetching message request users:", error);
+      } finally {
+        setLoadingMessageRequestUsers(false);
+      }
+    };
+
+    fetchMessageRequestUsers();
+  }, [messageRequests]);
+
+
+
   // Get matched users using matching algorithm
   const { matches, loading: matchesLoading } = useMatching({
     currentUserId: user?.uid || "",
@@ -315,6 +568,13 @@ const MapScreen = () => {
     searchFilter: searchFilter,
     radiusPreference: userProfile?.radiusPreference || "normal"
   });
+
+  // Update last viewed count when matches change and sidebar is open
+  useEffect(() => {
+    if (showSidebar && matches.length > 0) {
+      setLastViewedMatchesCount(matches.length);
+    }
+  }, [showSidebar, matches.length]);
 
   // Get nearby users from hook (fallback for non-matched display)
   const { nearbyUsers: nearbyUsersFromHook, loading: usersLoading } = useNearbyUsers(
@@ -358,43 +618,115 @@ const MapScreen = () => {
   // Use matched users if available, otherwise fallback to nearby users
   // Filter out declined users (within cooldown period)
   const now = Date.now();
-  const matchedUsersForDisplay = matches
-    .filter((match) => {
-      const userId = match.user.uid;
-      const cooldownUntil = declinedUsers[userId];
-      return !cooldownUntil || cooldownUntil <= now;
-    })
-    .map((match) => ({
-      id: match.user.uid,
-      name: match.user.name || "User",
-      distance: formatDistance(match.distance / 1000),
-      distanceValue: match.distance / 1000,
-      activity: match.user.activity || "Running",
-      avatar: match.user.photoURL || "https://via.placeholder.com/150",
-      lat: match.user.location.lat,
-      lng: match.user.location.lng,
-      matchScore: match.score,
-      fitnessLevel: match.user.fitnessLevel,
-      pace: match.user.pace
-    }));
+  const matchedUsersForDisplay = useMemo(() => {
+    return matches
+      .filter((match) => {
+        const userId = match.user.uid;
+        const cooldownUntil = declinedUsers[userId];
+        return !cooldownUntil || cooldownUntil <= now;
+      })
+      .map((match) => ({
+        id: match.user.uid,
+        name: match.user.name || "User",
+        distance: formatDistance(match.distance / 1000),
+        distanceValue: match.distance / 1000,
+        activity: match.user.activity || "Running",
+        avatar: match.user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(match.user.name || 'User')}&size=150`,
+        lat: match.user.location.lat,
+        lng: match.user.location.lng,
+        matchScore: match.score,
+        fitnessLevel: match.user.fitnessLevel,
+        pace: match.user.pace
+      }));
+  }, [matches, declinedUsers, now]);
 
   // Use nearby users from hook, or fallback to mock data for UI features
-  const nearbyUsers = matchedUsersForDisplay.length > 0 
-    ? matchedUsersForDisplay
-    : (nearbyUsersFromHook.length > 0 
-        ? nearbyUsersFromHook.map((userData: any) => ({
-            id: userData.id,
-            name: userData.name || "User",
-            distance: formatDistance(userData.distance),
-            distanceValue: userData.distance,
-            activity: userData.activity || "Running",
-            avatar: userData.photoURL || "https://via.placeholder.com/150",
-            lat: userData.lat,
-            lng: userData.lng,
-            photos: [],
-            bio: ""
-          }))
-        : []);
+  const nearbyUsers = useMemo(() => {
+    let result;
+    if (matchedUsersForDisplay.length > 0) {
+      result = matchedUsersForDisplay;
+    } else if (nearbyUsersFromHook.length > 0) {
+      result = nearbyUsersFromHook.map((userData: any) => ({
+        id: userData.id,
+        name: userData.name || "User",
+        distance: formatDistance(userData.distance),
+        distanceValue: userData.distance,
+        activity: userData.activity || "Running",
+        avatar: userData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&size=150`,
+        lat: userData.lat,
+        lng: userData.lng,
+        photos: [],
+        bio: ""
+      }));
+    } else {
+      result = [];
+    }
+    
+    // Update ref with latest value
+    nearbyUsersRef.current = result;
+    return result;
+  }, [matchedUsersForDisplay, nearbyUsersFromHook]);
+
+  // Track nearby users during workout - using ref to prevent infinite loops
+  const nearbyUserIdsString = useMemo(() => 
+    nearbyUsers.map(u => u.id).sort().join(','),
+    [nearbyUsers]
+  );
+  
+  const previousUserIdsRef = useRef<string>('');
+  
+  useEffect(() => {
+    if (!isActive) {
+      // Reset tracking when workout stops
+      processedUserIdsRef.current.clear();
+      previousUserIdsRef.current = '';
+      return;
+    }
+    
+    // Check if user IDs have actually changed
+    if (nearbyUserIdsString === previousUserIdsRef.current) {
+      return; // No change, skip update
+    }
+    
+    // Update the ref to current state
+    previousUserIdsRef.current = nearbyUserIdsString;
+    
+    // Get current nearby users from ref (always has latest value)
+    const currentNearbyUsers = nearbyUsersRef.current;
+    if (currentNearbyUsers.length === 0) return;
+    
+    // Create a set of current user IDs
+    const currentUserIds = new Set(currentNearbyUsers.map(u => u.id));
+    
+    // Find users that haven't been processed yet
+    const newUserIds = Array.from(currentUserIds).filter((id: string) => !processedUserIdsRef.current.has(id));
+    
+    if (newUserIds.length === 0) return;
+    
+    // Mark these users as processed
+    newUserIds.forEach((id: string) => processedUserIdsRef.current.add(id));
+    
+    // Update workout nearby users state
+    setWorkoutNearbyUsers(prev => {
+      const existingIds = new Set(prev.map(u => u.id));
+      const newUsers = currentNearbyUsers
+        .filter(user => newUserIds.includes(user.id) && !existingIds.has(user.id))
+        .map(user => ({
+          id: user.id,
+          name: user.name,
+          avatar: user.avatar,
+          activity: user.activity,
+          distance: user.distance,
+          distanceValue: user.distanceValue
+        }));
+      
+      if (newUsers.length === 0) {
+        return prev;
+      }
+      
+      return [...prev, ...newUsers];
+    });
+  }, [isActive, nearbyUserIdsString]);
 
   // Filter users by activity
   const filteredUsers = activityFilter === "all" 
@@ -407,38 +739,72 @@ const MapScreen = () => {
   // Track location history for trail when activity is active
   useEffect(() => {
     if (isActive && location) {
-      setLocationHistory((prev) => {
-        const newHistory = [...prev, { lat: location.lat, lng: location.lng }];
+      const lastPoint = lastLocationRef.current;
+      
+      // Check if location actually changed (avoid duplicate processing)
+      if (lastPoint && 
+          Math.abs(lastPoint.lat - location.lat) < 0.00001 && 
+          Math.abs(lastPoint.lng - location.lng) < 0.00001) {
+        return; // Location hasn't changed significantly, skip update
+      }
+      
+      // Calculate heading before updating history (only if we have a previous point)
+      let newHeading: number | null = null;
+      if (lastPoint) {
+        const distance = Math.sqrt(
+          Math.pow(lastPoint.lat - location.lat, 2) + 
+          Math.pow(lastPoint.lng - location.lng, 2)
+        );
         
-        if (prev.length > 0) {
-          const lastPoint = prev[prev.length - 1];
-          const heading = calculateBearing(
+        // Only calculate heading if moved significantly
+        if (distance > 0.00001) {
+          newHeading = calculateBearing(
             lastPoint.lat,
             lastPoint.lng,
             location.lat,
             location.lng
           );
-          setUserHeading(heading);
-          
-          if (isWazeMode && mapRef && isLoaded && window.google) {
-            mapRef.setHeading(heading);
-            setMapHeading(heading);
-          }
         }
-        
+      }
+      
+      // Update location history
+      setLocationHistory((prev) => {
+        const newHistory = [...prev, { lat: location.lat, lng: location.lng }];
         return newHistory.slice(-100);
       });
+      
+      // Update ref to track last location
+      lastLocationRef.current = { lat: location.lat, lng: location.lng };
+      
+      // Update heading if calculated
+      if (newHeading !== null) {
+        setUserHeading((prevHeading) => {
+          if (prevHeading === null || Math.abs(prevHeading - newHeading!) > 1) {
+            return newHeading!;
+          }
+          return prevHeading;
+        });
+        
+        if (isWazeMode && mapRef && isLoaded && window.google) {
+          mapRef.setHeading(newHeading);
+          setMapHeading(newHeading);
+        }
+      }
     } else if (!isActive) {
       setLocationHistory([]);
       setUserHeading(null);
+      lastLocationRef.current = null;
     }
   }, [location, isActive, isWazeMode, mapRef, isLoaded]);
 
   // Enhanced tracking interval for workout stats
   useEffect(() => {
-    if (isActive && !isPaused && location) {
+    if (isActive && !isPaused && location && startTime) {
       intervalRef.current = setInterval(() => {
-        setElapsedTime(prev => prev + 1);
+        // Calculate elapsed time from startTime for accuracy (handles page reloads)
+        const now = new Date();
+        const elapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+        setElapsedTime(elapsed);
         setPointsTracked(prev => prev + 1);
         
         // Calculate distance from location history
@@ -488,7 +854,7 @@ const MapScreen = () => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [isActive, isPaused, selectedActivity, location, locationHistory]);
+  }, [isActive, isPaused, selectedActivity, location, locationHistory, startTime]);
   
   // Calculate average speed
   useEffect(() => {
@@ -513,13 +879,22 @@ const MapScreen = () => {
       lastDistanceRef.current = 0;
       lastTimeRef.current = 0;
       setShowNotification(false);
+      // Reset workout tracking
+      setWorkoutPokes([]);
+      setWorkoutNearbyUsers([]);
     } else {
-      // Stop activity - show summary
-      setIsActive(false);
-      setIsPaused(false);
-      if (distance > 0) {
-        setShowSummary(true);
-      }
+      // Show confirmation dialog before stopping
+      setShowStopConfirmation(true);
+    }
+  };
+
+  const handleConfirmStop = () => {
+    // Stop activity - show summary
+    setIsActive(false);
+    setIsPaused(false);
+    setShowStopConfirmation(false);
+    if (distance > 0) {
+      setShowSummary(true);
     }
   };
   
@@ -587,6 +962,8 @@ const MapScreen = () => {
     setCurrentSpeed(0);
     setAvgSpeed(0);
     setStartTime(null);
+    setWorkoutPokes([]);
+    setWorkoutNearbyUsers([]);
   };
   
   const formatTime = (seconds: number) => {
@@ -708,9 +1085,15 @@ const MapScreen = () => {
 
   // Track other users' movement trails
   useEffect(() => {
-    nearbyUsers.forEach((userData: any) => {
-      if (userData.lat && userData.lng) {
-        setUserTrails((prev) => {
+    if (nearbyUsers.length === 0) return;
+    
+    // Batch all trail updates into a single state update
+    setUserTrails((prev) => {
+      const updated = { ...prev };
+      let hasChanges = false;
+      
+      nearbyUsers.forEach((userData: any) => {
+        if (userData.lat && userData.lng) {
           const userId = userData.id;
           const currentTrail = prev[userId] || [];
           const lastPoint = currentTrail[currentTrail.length - 1];
@@ -719,41 +1102,67 @@ const MapScreen = () => {
               (Math.abs(lastPoint.lat - userData.lat) > 0.0001 || 
                Math.abs(lastPoint.lng - userData.lng) > 0.0001)) {
             const newTrail = [...currentTrail, { lat: userData.lat, lng: userData.lng }];
-            return { ...prev, [userId]: newTrail.slice(-50) };
+            updated[userId] = newTrail.slice(-50);
+            hasChanges = true;
           }
-          return prev;
-        });
-      }
+        }
+      });
+      
+      // Only return new object if there were actual changes
+      return hasChanges ? updated : prev;
     });
   }, [nearbyUsers]);
 
   // Update map center when location changes
   // When activity is selected, always keep map centered on user (locked perspective)
   useEffect(() => {
-    if (location && location.lat && location.lng) {
+    if (!location || !location.lat || !location.lng || !mapRef || !isLoaded || !window.google) {
+      return;
+    }
+    
+    // Debounce map updates to prevent excessive re-renders
+    const updateTimer = setTimeout(() => {
       if (!isNavigationStyle) {
-        setMapCenter({ lat: location.lat, lng: location.lng });
-        // Center map on user when location is first obtained or when activity is selected
-        if (mapRef && isLoaded && window.google) {
-          // Force center when activity is selected (locked perspective)
-          if (selectedActivity) {
-            mapRef.panTo({ lat: location.lat, lng: location.lng });
-            // Also set center directly to prevent any drift
-            mapRef.setCenter({ lat: location.lat, lng: location.lng });
-          } else {
-            mapRef.panTo({ lat: location.lat, lng: location.lng });
+        // Only update if center changed significantly (avoid tiny updates)
+        setMapCenter((prev) => {
+          const distance = Math.sqrt(
+            Math.pow(prev.lat - location.lat, 2) + 
+            Math.pow(prev.lng - location.lng, 2)
+          );
+          // Only update if moved more than ~10 meters
+          if (distance > 0.0001) {
+            return { lat: location.lat, lng: location.lng };
           }
+          return prev;
+        });
+        
+        // Center map on user when location is first obtained or when activity is selected
+        if (selectedActivity) {
+          mapRef.panTo({ lat: location.lat, lng: location.lng });
+          mapRef.setCenter({ lat: location.lat, lng: location.lng });
+        } else {
+          mapRef.panTo({ lat: location.lat, lng: location.lng });
         }
-      } else if (isNavigationStyle && mapRef && isLoaded && window.google) {
+      } else if (isNavigationStyle) {
         const cameraCenter = calculateCameraOffset(location.lat, location.lng, userHeading || 0);
-        setMapCenter(cameraCenter);
+        setMapCenter((prev) => {
+          const distance = Math.sqrt(
+            Math.pow(prev.lat - cameraCenter.lat, 2) + 
+            Math.pow(prev.lng - cameraCenter.lng, 2)
+          );
+          if (distance > 0.0001) {
+            return cameraCenter;
+          }
+          return prev;
+        });
         mapRef.panTo(cameraCenter);
-        // Force center when activity is selected
         if (selectedActivity) {
           mapRef.setCenter(cameraCenter);
         }
       }
-    }
+    }, 100); // Small delay to batch updates
+    
+    return () => clearTimeout(updateTimer);
   }, [location, isNavigationStyle, userHeading, mapRef, isLoaded, selectedActivity]);
 
   // Get fixed radius for selected activity
@@ -852,6 +1261,49 @@ const MapScreen = () => {
     setSelectedUser(null);
   };
 
+  // Poke handlers
+  const handlePoke = async (userId: string) => {
+    if (!user?.uid) {
+      toast.error("You must be logged in to poke someone");
+      return;
+    }
+
+    try {
+      await sendPoke(user.uid, userId);
+      setHasPokedUsers(prev => ({ ...prev, [userId]: true }));
+      toast.success("Poke sent! They'll be notified.");
+    } catch (error) {
+      console.error("Error sending poke:", error);
+      toast.error("Failed to send poke. Please try again.");
+    }
+  };
+
+  const handleAcceptPoke = async (fromUserId: string) => {
+    if (!user?.uid) return;
+
+    try {
+      await acceptPoke(user.uid, fromUserId);
+      toast.success("Poke accepted!");
+      setShowPokeModal(false);
+    } catch (error) {
+      console.error("Error accepting poke:", error);
+      toast.error("Failed to accept poke.");
+    }
+  };
+
+  const handleDismissPoke = async (fromUserId: string) => {
+    if (!user?.uid) return;
+
+    try {
+      await dismissPoke(user.uid, fromUserId);
+      toast("Poke dismissed");
+      setShowPokeModal(false);
+    } catch (error) {
+      console.error("Error dismissing poke:", error);
+      toast.error("Failed to dismiss poke.");
+    }
+  };
+
   const getCooldownDays = (userId: string): number => {
     const cooldownUntil = declinedUsers[userId];
     if (!cooldownUntil) return 0;
@@ -879,17 +1331,6 @@ const MapScreen = () => {
     }
   };
 
-  const handleCenterOnMyLocation = () => {
-    if (mapRef && location) {
-      const newCenter = { lat: location.lat, lng: location.lng };
-      mapRef.panTo(newCenter);
-      mapRef.setZoom(15);
-      setTimeout(() => {
-        setMapCenter(newCenter);
-        setMapZoom(15);
-      }, 100);
-    }
-  };
 
   if (!googleMapsApiKey) {
     return (
@@ -921,8 +1362,199 @@ const MapScreen = () => {
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-muted pb-20">
+      {/* People Sidebar - Toggleable */}
+      <AnimatePresence>
+        {showSidebar && (
+          <>
+            {/* Overlay - Click outside to close */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowSidebar(false)}
+              className="fixed inset-0 bg-black/20 z-20"
+            />
+            <motion.div
+              initial={{ x: -320 }}
+              animate={{ x: 0 }}
+              exit={{ x: -320 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="fixed left-0 top-0 bottom-0 w-80 bg-card border-r border-border shadow-elevation-3 z-30 flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6 space-y-5 flex-1 overflow-y-auto min-h-0 flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-foreground">Activity Feed</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Matches, requests & messages
+              </p>
+            </div>
+          </div>
+
+          {/* Friend Requests Section */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-foreground">Friend Requests</h3>
+              <BadgeCounter count={friendRequests.incoming.length} variant="default" size="sm" />
+            </div>
+            {loadingFriendRequestUsers ? (
+              <div className="flex items-center justify-center py-4">
+                <CircularProgress size={24} />
+              </div>
+            ) : friendRequests.incoming.length > 0 ? (
+              <div className="space-y-2">
+                {friendRequests.incoming.slice(0, 3).map((userId) => {
+                  const userData = friendRequestUsers[userId];
+                  const userName = userData?.name || "Unknown User";
+                  const userAvatar = userData?.photoURL;
+                  const userActivity = userData?.activity;
+                  const userFitnessLevel = userData?.fitnessLevel;
+                  
+                  return (
+                    <motion.div
+                      key={userId}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="p-3 bg-muted/50 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer relative"
+                      onClick={() => {
+                        if (userData) {
+                          setSelectedUser({
+                            id: userId,
+                            name: userData.name,
+                            avatar: userData.photoURL,
+                            activity: userData.activity
+                          });
+                          setShowFriendRequestModal(true);
+                        }
+                      }}
+                    >
+                      {/* New badge */}
+                      <span className="absolute top-2 right-2 bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                        NEW
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <Avatar className="w-10 h-10">
+                          <AvatarImage src={userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}`} />
+                          <AvatarFallback>{userName.charAt(0).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0 pr-8">
+                          <p className="text-sm font-medium truncate">
+                            {userName} wants to be friends
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {userActivity && (
+                              <span className="text-xs text-muted-foreground capitalize">
+                                {userActivity}
+                              </span>
+                            )}
+                            {userFitnessLevel && (
+                              <>
+                                {userActivity && <span className="text-xs text-muted-foreground">•</span>}
+                                <span className="text-xs text-muted-foreground capitalize">
+                                  {userFitnessLevel}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-4 text-center">
+                <p className="text-sm text-muted-foreground">No friend requests</p>
+              </div>
+            )}
+          </div>
+
+          {/* Message Requests Section */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-foreground">Message Requests</h3>
+              <BadgeCounter count={messageRequests.length} variant="default" size="sm" />
+            </div>
+            {loadingMessageRequestUsers ? (
+              <div className="flex items-center justify-center py-4">
+                <CircularProgress size={24} />
+              </div>
+            ) : messageRequests.length > 0 ? (
+              <div className="space-y-2">
+                {messageRequests.slice(0, 3).map((conv) => {
+                  const userData = messageRequestUsers[conv.otherUserId];
+                  const userName = userData?.name || "Unknown User";
+                  const userAvatar = userData?.photoURL;
+                  
+                  return (
+                    <motion.div
+                      key={conv.conversationId}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="p-3 bg-muted/50 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer relative"
+                      onClick={() => {
+                        if (userData) {
+                          navigate("/chat", {
+                            state: {
+                              user: {
+                                id: conv.otherUserId,
+                                name: userData.name || "Unknown",
+                                avatar: userData.photoURL || ""
+                              }
+                            }
+                          });
+                        }
+                      }}
+                    >
+                      {/* New badge */}
+                      <span className="absolute top-2 right-2 bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                        NEW
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <Avatar className="w-10 h-10">
+                          <AvatarImage src={userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}`} />
+                          <AvatarFallback>{userName.charAt(0).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0 pr-8">
+                          <p className="text-sm font-medium truncate">
+                            Message from {userName}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">
+                            {conv.lastMessage || "No message preview"}
+                          </p>
+                        </div>
+                        {conv.unreadCount > 0 && (
+                          <BadgeCounter count={conv.unreadCount} variant="default" size="sm" />
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-4 text-center">
+                <p className="text-sm text-muted-foreground">No message requests</p>
+              </div>
+            )}
+          </div>
+
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Google Maps */}
-      <div className="absolute inset-0">
+      <motion.div 
+        className="absolute inset-0" 
+        style={{ 
+          left: showSidebar ? '320px' : '0',
+          width: showSidebar ? 'calc(100% - 320px)' : '100%',
+          transition: 'left 0.3s ease-in-out, width 0.3s ease-in-out'
+        }}
+      >
         <GoogleMap
           mapContainerStyle={mapContainerStyle}
           center={mapCenter}
@@ -997,8 +1629,8 @@ const MapScreen = () => {
                 zIndex={1000}
                 icon={{
                   url: isActive 
-                    ? "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
-                    : "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+                    ? "https://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+                    : "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
                   scaledSize: isActive 
                     ? new window.google.maps.Size(48, 48) 
                     : new window.google.maps.Size(40, 40),
@@ -1038,7 +1670,7 @@ const MapScreen = () => {
                   title={`${userData.name || "User"}${hasTrail ? " (Moving)" : ""}${scorePercent ? ` - ${scorePercent}% match` : ""}`}
                   onClick={() => onMarkerClick(userData)}
                   icon={{
-                    url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png",
+                    url: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
                     scaledSize: hasTrail 
                       ? new window.google.maps.Size(36, 36) 
                       : new window.google.maps.Size(32, 32)
@@ -1081,7 +1713,7 @@ const MapScreen = () => {
             </InfoWindow>
           )}
         </GoogleMap>
-      </div>
+      </motion.div>
 
       {/* Notification Banner */}
       <NotificationBanner
@@ -1101,82 +1733,65 @@ const MapScreen = () => {
         distance={distance}
         avgSpeed={avgSpeed}
         useMetric={useMetric}
+        nearbyUsers={workoutNearbyUsers}
+        pokes={workoutPokes}
       />
 
       {/* Top Bar - Right Side Controls */}
       <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
-        {/* People List */}
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setShowPeopleDrawer(true)}
-          className="relative touch-target bg-primary text-primary-foreground rounded-full shadow-elevation-3"
-          style={{ width: 56, height: 56 }}
-        >
-          <PeopleIcon style={{ fontSize: 28 }} />
-          <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
-            {sortedUsers.length}
-          </span>
-        </motion.button>
-
-        {/* Show/Hide Nearby People List */}
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setShowNearbyList(!showNearbyList)}
-          className={`relative touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
-            showNearbyList
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-card text-foreground border-border hover:border-primary"
-          }`}
-          style={{ width: 56, height: 56 }}
-          title={showNearbyList ? "Hide nearby people" : "Show nearby people"}
-        >
-          <GroupIcon style={{ fontSize: 28 }} />
-          {sortedUsers.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
-              {sortedUsers.length}
-            </span>
-          )}
-        </motion.button>
-
-        {/* Messages */}
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => navigate("/messages")}
-          className="relative touch-target bg-card text-foreground rounded-full shadow-elevation-3 border border-border"
-          style={{ width: 56, height: 56 }}
-        >
-          <MailIcon style={{ fontSize: 28 }} />
-          {unreadMessageCount > 0 && (
-            <div className="absolute -top-1 -right-1">
-              <BadgeCounter count={unreadMessageCount} variant="default" size="md" />
-            </div>
-          )}
-        </motion.button>
-
         {/* Filter Button */}
         <motion.button
           whileTap={{ scale: 0.95 }}
           onClick={() => setShowFilterModal(true)}
-          className={`touch-target rounded-full shadow-elevation-3 border-2 ${
+          className={`relative touch-target rounded-full shadow-elevation-3 border-2 ${
             searchFilter !== "all"
               ? "bg-primary text-primary-foreground border-primary"
               : "bg-card text-foreground border-border"
           }`}
           style={{ width: 56, height: 56 }}
-          title={`Filter: ${searchFilter === "all" ? "All Levels" : searchFilter}`}
+          title={`Filter: ${searchFilter === "all" ? "All Levels" : searchFilter.charAt(0).toUpperCase() + searchFilter.slice(1)}`}
         >
           <FilterListIcon style={{ fontSize: 28 }} />
+          {searchFilter !== "all" && (
+            <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background">
+              {searchFilter === "beginner" ? "B" : searchFilter === "intermediate" ? "I" : "P"}
+            </span>
+          )}
         </motion.button>
 
-        {/* My Location */}
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={handleCenterOnMyLocation}
-          className="touch-target bg-card text-primary rounded-full shadow-elevation-3 border-2 border-primary"
-          style={{ width: 56, height: 56 }}
-        >
-          <MyLocationIcon style={{ fontSize: 28 }} />
-        </motion.button>
+        {/* Poke Notification Button - Only visible when workout is active */}
+        {isActive && (
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              setShowMatchesDrawer(true);
+              // Scroll to poked users when opened via poke button
+              setTimeout(() => {
+                const firstPokedElement = document.querySelector('[data-poked="true"]');
+                if (firstPokedElement) {
+                  firstPokedElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }, 300);
+            }}
+            className={`relative touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
+              showMatchesDrawer && pokes.length > 0
+                ? "bg-primary/20 border-primary"
+                : "bg-card border-border hover:border-primary"
+            }`}
+            style={{ width: 56, height: 56 }}
+            title={pokes.length > 0 ? `${pokes.length} poke${pokes.length > 1 ? 's' : ''} received` : "No pokes"}
+          >
+            <NotificationsIcon 
+              style={{ fontSize: 28 }} 
+              className="text-foreground"
+            />
+            {pokes.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-purple-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background animate-pulse">
+                {pokes.length > 9 ? '9+' : pokes.length}
+              </span>
+            )}
+          </motion.button>
+        )}
 
         {/* Settings */}
         <motion.button
@@ -1186,6 +1801,34 @@ const MapScreen = () => {
           style={{ width: 56, height: 56 }}
         >
           <SettingsIcon style={{ fontSize: 28 }} />
+        </motion.button>
+
+        {/* People Sidebar Toggle */}
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={() => {
+            const newState = !showSidebar;
+            setShowSidebar(newState);
+            // Mark matches as viewed when sidebar is opened
+            if (newState) {
+              setLastViewedMatchesCount(matches.length);
+            }
+          }}
+          className={`relative touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
+            showSidebar
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-card text-foreground border-border hover:border-primary"
+          }`}
+          style={{ width: 56, height: 56 }}
+          title={showSidebar ? "Hide sidebar" : "Show sidebar"}
+        >
+          <PeopleIcon style={{ fontSize: 28 }} />
+          {/* Red notification badge when there are new matches */}
+          {!showSidebar && matches.length > lastViewedMatchesCount && (
+            <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background animate-pulse">
+              {matches.length - lastViewedMatchesCount > 9 ? '9+' : matches.length - lastViewedMatchesCount}
+            </span>
+          )}
         </motion.button>
       </div>
 
@@ -1207,6 +1850,8 @@ const MapScreen = () => {
             onAddFriend={() => handleAddFriend(selectedUser.id)}
             onAcceptFriend={() => handleAcceptFriend(selectedUser.id)}
             onDeclineFriend={() => handleDeclineFriend(selectedUser.id)}
+            onPoke={() => handlePoke(selectedUser.id)}
+            hasPoked={hasPokedUsers[selectedUser.id] || false}
           />
         )}
       </AnimatePresence>
@@ -1227,15 +1872,60 @@ const MapScreen = () => {
         onAccept={() => selectedUser && handleAcceptFriend(selectedUser.id)}
         onDecline={() => selectedUser && handleDeclineFriend(selectedUser.id)}
       />
-      {/* Enhanced Stats Display */}
+
+      {/* Poke Modal */}
+      {selectedUser && (
+        <PokeModal
+          isOpen={showPokeModal}
+          onClose={() => {
+            setShowPokeModal(false);
+            setSelectedUser(null);
+          }}
+          userName={selectedUser.name || "User"}
+          userAvatar={selectedUser.avatar}
+          userId={selectedUser.id}
+          onAccept={() => selectedUser && handleAcceptPoke(selectedUser.id)}
+          onDismiss={() => selectedUser && handleDismissPoke(selectedUser.id)}
+          onChat={() => {
+            handleSendMessage();
+            setShowPokeModal(false);
+          }}
+          onAddFriend={() => {
+            handleAddFriend(selectedUser.id);
+            setShowPokeModal(false);
+          }}
+        />
+      )}
+
+      {/* Stop Activity Confirmation Dialog */}
+      <AlertDialog open={showStopConfirmation} onOpenChange={setShowStopConfirmation}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop Activity?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to stop your {selectedActivity} session? Your workout will be saved and you can review it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmStop}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Stop Activity
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {/* Enhanced Stats Display - Above Pause Button */}
       <AnimatePresence>
         {isActive && (
           <motion.div
-            initial={{ opacity: 0, y: -30, scale: 0.95 }}
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -30, scale: 0.95 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 200, damping: 20 }}
-            className="absolute top-4 left-4 right-4 z-10"
+            className="absolute bottom-[calc(5rem+1.5rem)] left-0 right-0 px-6 z-10"
           >
             <div
               className={`
@@ -1315,7 +2005,7 @@ const MapScreen = () => {
       </AnimatePresence>
 
       {/* Bottom Controls */}
-      <div className="absolute bottom-20 left-0 right-0 p-6 z-10">
+      <div className={`absolute ${isActive ? 'bottom-0' : 'bottom-20'} left-0 right-0 p-6 z-10`}>
         {/* Activity Selector (when not active) */}
         <AnimatePresence>
           {!isActive && (
@@ -1408,7 +2098,7 @@ const MapScreen = () => {
             </motion.div>
             <motion.div whileTap={{ scale: 0.97 }} className="flex-1">
               <Button
-                onClick={handleStartStop}
+                onClick={() => setShowStopConfirmation(true)}
                 className="w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl bg-gradient-to-r from-destructive to-destructive/90 text-destructive-foreground hover:from-destructive/90 hover:to-destructive"
               >
                 <StopIcon className="mr-2" style={{ fontSize: 28 }} />
@@ -1442,62 +2132,6 @@ const MapScreen = () => {
         )}
       </div>
 
-      {/* People Drawer with Matching Accordion */}
-      <Drawer
-        anchor="bottom"
-        open={showPeopleDrawer}
-        onClose={() => setShowPeopleDrawer(false)}
-        PaperProps={{
-          style: {
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            maxHeight: "80vh",
-          },
-        }}
-      >
-        <div className="p-6 space-y-5">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold">Nearby Matches</h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                {matches.length} {matches.length === 1 ? "match" : "matches"} found
-              </p>
-            </div>
-            <button
-              onClick={() => setShowPeopleDrawer(false)}
-              className="p-2 hover:bg-accent rounded-full transition-colors touch-target"
-            >
-              <CloseIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
-            </button>
-          </div>
-
-          {/* Matching Accordion */}
-          <NearbyUsersAccordion
-            matches={matches}
-            loading={matchesLoading}
-            onViewProfile={(userId) => {
-              const user = nearbyUsers.find((u: any) => u.id === userId);
-              if (user) {
-                setSelectedUser(user);
-                setShowProfileView(true);
-                setShowPeopleDrawer(false);
-              }
-            }}
-            onAddFriend={(userId) => {
-              handleAddFriend(userId);
-            }}
-            onSendMessage={(userId) => {
-              const user = nearbyUsers.find((u: any) => u.id === userId);
-              if (user) {
-                setSelectedUser(user);
-                handleSendMessage();
-                setShowPeopleDrawer(false);
-              }
-            }}
-          />
-        </div>
-      </Drawer>
 
       {/* Match Actions Modal */}
       {selectedUser && (
@@ -1530,8 +2164,209 @@ const MapScreen = () => {
             setShowProfileView(true);
             setShowMatchActionsModal(false);
           }}
+          onPoke={() => handlePoke(selectedUser.id)}
+          hasPoked={hasPokedUsers[selectedUser.id] || false}
         />
       )}
+
+      {/* Nearby Matches Drawer */}
+      <AnimatePresence>
+        {showMatchesDrawer && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMatchesDrawer(false)}
+              className="fixed inset-0 z-40 backdrop-blur-sm"
+              style={{ 
+                pointerEvents: 'auto',
+                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                zIndex: 40
+              }}
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl shadow-elevation-4 p-6 ${
+                isActive ? 'pb-6' : 'pb-24'
+              } border-t border-border`}
+              style={{ 
+                pointerEvents: 'auto',
+                maxHeight: '85vh',
+                minHeight: '200px',
+                overflowY: 'auto'
+              }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-2xl font-bold text-foreground">Nearby Matches</h2>
+                  {matches.length > 0 && (
+                    <BadgeCounter count={matches.length} variant="default" size="sm" />
+                  )}
+                  {pokes.length > 0 && (
+                    <span className="bg-purple-500 text-white text-xs font-bold rounded-full px-2 py-0.5">
+                      {pokes.length} poke{pokes.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowMatchesDrawer(false)}
+                  className="rounded-full"
+                >
+                  <CloseIcon />
+                </Button>
+              </div>
+
+              {/* Matches List */}
+              {matchesLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <CircularProgress />
+                </div>
+              ) : matches.length > 0 ? (
+                <div className="space-y-2">
+                  {matches
+                    .sort((a, b) => {
+                      const aPoked = pokes.includes(a.user.uid);
+                      const bPoked = pokes.includes(b.user.uid);
+                      if (aPoked && !bPoked) return -1;
+                      if (!aPoked && bPoked) return 1;
+                      return 0;
+                    })
+                    .map((match, index) => {
+                      const user = match.user;
+                      const distanceKm = match.distance / 1000;
+                      const isPoked = pokes.includes(user.uid);
+                      const userData = nearbyUsers.find((u: any) => u.id === user.uid);
+
+                      return (
+                        <motion.div
+                          key={user.uid}
+                          data-poked={isPoked}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className={`p-4 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors relative ${
+                            isPoked ? 'bg-purple-50/50 dark:bg-purple-950/20 border-purple-300/30' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            {/* Avatar */}
+                            <button
+                              onClick={() => {
+                                if (userData) {
+                                  setSelectedUser(userData);
+                                  setShowProfileView(true);
+                                  setShowMatchesDrawer(false);
+                                }
+                              }}
+                              className="cursor-pointer hover:opacity-80 transition-opacity"
+                            >
+                              <Avatar className={`w-12 h-12 border-2 ${isPoked ? 'border-purple-500 ring-2 ring-purple-300' : 'border-primary'}`}>
+                                <AvatarImage src={user.photoURL || `https://ui-avatars.com/api/?name=${user.name || 'User'}`} />
+                                <AvatarFallback>
+                                  {user.name?.charAt(0) || "U"}
+                                </AvatarFallback>
+                              </Avatar>
+                            </button>
+
+                            {/* User Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h4 className="font-semibold text-sm truncate">
+                                  {user.name || "Unknown User"}
+                                </h4>
+                                {isPoked && (
+                                  <Badge className="bg-purple-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+                                    POKED YOU!
+                                  </Badge>
+                                )}
+                                <Badge className="bg-primary text-primary-foreground text-xs px-1.5 py-0">
+                                  {formatDistance(distanceKm)}
+                                </Badge>
+                              </div>
+
+                              {/* Activity & Fitness Level */}
+                              <div className="flex items-center gap-2 text-xs mb-2">
+                                <div className="flex items-center gap-1">
+                                  {user.activity === "running" ? (
+                                    <DirectionsRunIcon className="text-success" style={{ fontSize: 14 }} />
+                                  ) : user.activity === "cycling" ? (
+                                    <DirectionsBikeIcon className="text-primary" style={{ fontSize: 14 }} />
+                                  ) : (
+                                    <DirectionsWalkIcon className="text-warning" style={{ fontSize: 14 }} />
+                                  )}
+                                  <span className="capitalize">{user.activity}</span>
+                                </div>
+                                <span>•</span>
+                                <Badge
+                                  variant="outline"
+                                  className={`${
+                                    user.fitnessLevel === "beginner" ? "bg-blue-500" :
+                                    user.fitnessLevel === "intermediate" ? "bg-yellow-500" :
+                                    "bg-red-500"
+                                  } text-white border-0 text-xs px-1.5 py-0`}
+                                >
+                                  {user.fitnessLevel}
+                                </Badge>
+                              </div>
+
+                              {/* Actions */}
+                              <div className="flex items-center gap-2 mt-2">
+                                <Button
+                                  size="sm"
+                                  className="flex-1 h-8 text-xs justify-center bg-purple-500 hover:bg-purple-600 text-white"
+                                  onClick={() => handlePoke(user.uid)}
+                                >
+                                  <TouchAppIcon style={{ fontSize: 14 }} className="mr-1" />
+                                  Poke
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex-1 h-8 text-xs justify-center"
+                                  onClick={() => handleAddFriend(user.uid)}
+                                >
+                                  <PersonAddIcon style={{ fontSize: 14 }} className="mr-1" />
+                                  Add
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex-1 h-8 text-xs justify-center"
+                                  onClick={() => {
+                                    if (userData) {
+                                      setSelectedUser(userData);
+                                      handleSendMessage();
+                                      setShowMatchesDrawer(false);
+                                    }
+                                  }}
+                                >
+                                  <SendIcon style={{ fontSize: 14 }} className="mr-1" />
+                                  Message
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="py-12 text-center">
+                  <p className="text-sm text-muted-foreground">No nearby matches found</p>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Filter Modal */}
       <AnimatePresence>
@@ -1549,41 +2384,110 @@ const MapScreen = () => {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed bottom-20 left-0 right-0 z-50 bg-background rounded-t-3xl shadow-elevation-4 p-6 space-y-4 max-h-[70vh] overflow-y-auto"
+              className="fixed bottom-20 left-0 right-0 z-50 bg-background rounded-t-3xl shadow-elevation-4 p-6 max-h-[70vh] overflow-y-auto"
             >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-2xl font-bold">Who do you want to find?</h2>
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground">Who do you want to find?</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Filter nearby users by fitness level
+                  </p>
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => setShowFilterModal(false)}
+                  className="rounded-full"
                 >
                   <CloseIcon />
                 </Button>
               </div>
-              <div className="space-y-2">
+
+              {/* Filter Options */}
+              <div className="space-y-3">
                 {[
-                  { value: "all" as SearchFilter, label: "All Levels" },
-                  { value: "beginner" as SearchFilter, label: "Beginner" },
-                  { value: "intermediate" as SearchFilter, label: "Intermediate" },
-                  { value: "pro" as SearchFilter, label: "Pro" }
-                ].map((option) => (
-                  <Button
-                    key={option.value}
-                    onClick={() => handleUpdateSearchFilter(option.value)}
-                    variant={searchFilter === option.value ? "default" : "outline"}
-                    className="w-full h-14 text-base font-semibold"
-                  >
-                    {option.label}
-                  </Button>
-                ))}
+                  { 
+                    value: "all" as SearchFilter, 
+                    label: "All Levels", 
+                    description: "Show everyone nearby",
+                    color: "bg-muted text-muted-foreground",
+                    selectedColor: "bg-primary text-primary-foreground"
+                  },
+                  { 
+                    value: "beginner" as SearchFilter, 
+                    label: "Beginner", 
+                    description: "Just starting out",
+                    color: "bg-blue-100 text-blue-800 border-blue-300",
+                    selectedColor: "bg-blue-600 text-white border-blue-600"
+                  },
+                  { 
+                    value: "intermediate" as SearchFilter, 
+                    label: "Intermediate", 
+                    description: "Regular fitness routine",
+                    color: "bg-green-100 text-green-800 border-green-300",
+                    selectedColor: "bg-green-600 text-white border-green-600"
+                  },
+                  { 
+                    value: "pro" as SearchFilter, 
+                    label: "Pro", 
+                    description: "Advanced athletes",
+                    color: "bg-purple-100 text-purple-800 border-purple-300",
+                    selectedColor: "bg-purple-600 text-white border-purple-600"
+                  }
+                ].map((option) => {
+                  const isSelected = searchFilter === option.value;
+                  return (
+                    <motion.button
+                      key={option.value}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => handleUpdateSearchFilter(option.value)}
+                      className={`
+                        w-full p-4 rounded-xl border-2 transition-all duration-200
+                        ${isSelected 
+                          ? option.selectedColor + " shadow-elevation-2" 
+                          : option.color + " hover:shadow-md"
+                        }
+                        flex items-center justify-between
+                      `}
+                    >
+                      <div className="flex items-center gap-3">
+                        {/* Visual Indicator */}
+                        <div className={`
+                          w-3 h-3 rounded-full
+                          ${isSelected 
+                            ? "bg-white/30 ring-2 ring-white/50" 
+                            : option.value === "all" 
+                            ? "bg-muted-foreground/30"
+                            : option.value === "beginner"
+                            ? "bg-blue-600"
+                            : option.value === "intermediate"
+                            ? "bg-green-600"
+                            : "bg-purple-600"
+                          }
+                        `} />
+                        <div className="text-left">
+                          <div className={`font-semibold text-base ${isSelected ? "text-white" : ""}`}>
+                            {option.label}
+                          </div>
+                          <div className={`text-xs mt-0.5 ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
+                            {option.description}
+                          </div>
+                        </div>
+                      </div>
+                      {isSelected && (
+                        <CheckCircleIcon className="text-white" style={{ fontSize: 20 }} />
+                      )}
+                    </motion.button>
+                  );
+                })}
               </div>
             </motion.div>
           </>
         )}
       </AnimatePresence>
 
-      <BottomNavigation />
+      {!isActive && <BottomNavigation />}
     </div>
   );
 };

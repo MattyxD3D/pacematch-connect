@@ -5,8 +5,9 @@ import Avatar from "@mui/material/Avatar";
 import MailIcon from "@mui/icons-material/Mail";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CloseIcon from "@mui/icons-material/Close";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
 
-export type NotificationType = "message" | "friend_request" | "friend_accepted";
+export type NotificationType = "message" | "friend_request" | "friend_accepted" | "poke";
 
 export interface Notification {
   id: string;
@@ -77,6 +78,8 @@ export const NotificationSystem = ({
                     ? "bg-primary"
                     : notification.type === "friend_request"
                     ? "bg-warning"
+                    : notification.type === "poke"
+                    ? "bg-purple-500"
                     : "bg-success"
                 }`}>
                   {notification.type === "message" && (
@@ -84,6 +87,9 @@ export const NotificationSystem = ({
                   )}
                   {notification.type === "friend_request" && (
                     <PersonAddIcon style={{ fontSize: 14 }} className="text-white" />
+                  )}
+                  {notification.type === "poke" && (
+                    <TouchAppIcon style={{ fontSize: 14 }} className="text-white" />
                   )}
                   {notification.type === "friend_accepted" && (
                     <span className="text-white text-xs font-bold">✓</span>
@@ -101,6 +107,7 @@ export const NotificationSystem = ({
                     notification.message || "Sent you a message"
                   )}
                   {notification.type === "friend_request" && "wants to add you as a friend"}
+                  {notification.type === "poke" && "poked you! They're interested in matching"}
                   {notification.type === "friend_accepted" && "accepted your friend request"}
                 </p>
               </div>
@@ -127,6 +134,8 @@ export const NotificationSystem = ({
                   ? "bg-primary"
                   : notification.type === "friend_request"
                   ? "bg-warning"
+                  : notification.type === "poke"
+                  ? "bg-purple-500"
                   : "bg-success"
               }`}
             />
@@ -219,6 +228,9 @@ export const useNotifications = () => {
     } else if (notification.type === "friend_request") {
       // Open friend request modal or navigate to a requests page
       console.log("Open friend request:", notification);
+    } else if (notification.type === "poke") {
+      // Navigate to map to see the user who poked
+      navigate("/map");
     } else if (notification.type === "friend_accepted") {
       navigate("/map");
     }
@@ -231,6 +243,9 @@ export const useNotifications = () => {
   const unreadFriendRequestCount = notifications.filter(
     n => !n.read && n.type === "friend_request"
   ).length;
+  const unreadPokeCount = notifications.filter(
+    n => !n.read && n.type === "poke"
+  ).length;
 
   return {
     notifications,
@@ -240,5 +255,6 @@ export const useNotifications = () => {
     unreadCount,
     unreadMessageCount,
     unreadFriendRequestCount,
+    unreadPokeCount,
   };
 };

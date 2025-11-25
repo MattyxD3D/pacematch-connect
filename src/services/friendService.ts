@@ -1,5 +1,5 @@
 // Friend service for Firebase - manages friend requests and friendships
-import { ref, set, get, onValue, off, push, remove, DataSnapshot } from "firebase/database";
+import { ref, set, get, onValue, off, remove, DataSnapshot } from "firebase/database";
 import { database } from "./firebase";
 
 /**
@@ -11,7 +11,14 @@ export const sendFriendRequest = async (
 ): Promise<void> => {
   try {
     const requestRef = ref(database, `friendRequests/${toUserId}/${fromUserId}`);
+    const outgoingRef = ref(database, `friendRequestsOutgoing/${fromUserId}/${toUserId}`);
     await set(requestRef, {
+      fromUserId,
+      toUserId,
+      status: "pending",
+      createdAt: Date.now()
+    });
+    await set(outgoingRef, {
       fromUserId,
       toUserId,
       status: "pending",
@@ -50,6 +57,10 @@ export const acceptFriendRequest = async (
       createdAt: Date.now()
     });
     
+    // Remove outgoing record for sender
+    const outgoingRef = ref(database, `friendRequestsOutgoing/${fromUserId}/${userId}`);
+    await remove(outgoingRef);
+    
     console.log(`✅ Friend request accepted: ${userId} and ${fromUserId} are now friends`);
   } catch (error) {
     console.error("❌ Error accepting friend request:", error);
@@ -67,6 +78,10 @@ export const declineFriendRequest = async (
   try {
     const requestRef = ref(database, `friendRequests/${userId}/${fromUserId}`);
     await remove(requestRef);
+    
+    // Remove outgoing record for sender
+    const outgoingRef = ref(database, `friendRequestsOutgoing/${fromUserId}/${userId}`);
+    await remove(outgoingRef);
     console.log(`✅ Friend request declined: ${fromUserId} -> ${userId}`);
   } catch (error) {
     console.error("❌ Error declining friend request:", error);
@@ -84,6 +99,8 @@ export const cancelFriendRequest = async (
   try {
     const requestRef = ref(database, `friendRequests/${toUserId}/${fromUserId}`);
     await remove(requestRef);
+    const outgoingRef = ref(database, `friendRequestsOutgoing/${fromUserId}/${toUserId}`);
+    await remove(outgoingRef);
     console.log(`✅ Friend request cancelled: ${fromUserId} -> ${toUserId}`);
   } catch (error) {
     console.error("❌ Error cancelling friend request:", error);
@@ -104,20 +121,10 @@ export const getPendingRequests = async (userId: string): Promise<{
     const incomingSnapshot = await get(incomingRef);
     const incoming = incomingSnapshot.exists() ? Object.keys(incomingSnapshot.val()) : [];
     
-    // Get outgoing requests (check all users' friendRequests for this userId)
-    // This is less efficient but necessary for outgoing requests
-    const outgoing: string[] = [];
-    const allRequestsRef = ref(database, "friendRequests");
-    const allRequestsSnapshot = await get(allRequestsRef);
-    
-    if (allRequestsSnapshot.exists()) {
-      const allRequests = allRequestsSnapshot.val();
-      Object.keys(allRequests).forEach((toUserId) => {
-        if (toUserId !== userId && allRequests[toUserId][userId]) {
-          outgoing.push(toUserId);
-        }
-      });
-    }
+    // Get outgoing requests from dedicated node
+    const outgoingRef = ref(database, `friendRequestsOutgoing/${userId}`);
+    const outgoingSnapshot = await get(outgoingRef);
+    const outgoing = outgoingSnapshot.exists() ? Object.keys(outgoingSnapshot.val()) : [];
     
     return { incoming, outgoing };
   } catch (error) {
@@ -133,37 +140,40 @@ export const listenToFriendRequests = (
   userId: string,
   callback: (requests: { incoming: string[]; outgoing: string[] }) => void
 ): (() => void) => {
-  const requestsRef = ref(database, `friendRequests/${userId}`);
-  
-  const unsubscribe = onValue(
-    requestsRef,
-    async (snapshot: DataSnapshot) => {
-      const incoming = snapshot.exists() ? Object.keys(snapshot.val()) : [];
-      
-      // Get outgoing requests
-      const allRequestsRef = ref(database, "friendRequests");
-      const allRequestsSnapshot = await get(allRequestsRef);
-      const outgoing: string[] = [];
-      
-      if (allRequestsSnapshot.exists()) {
-        const allRequests = allRequestsSnapshot.val();
-        Object.keys(allRequests).forEach((toUserId) => {
-          if (toUserId !== userId && allRequests[toUserId][userId]) {
-            outgoing.push(toUserId);
-          }
-        });
-      }
-      
-      callback({ incoming, outgoing });
+  const incomingRef = ref(database, `friendRequests/${userId}`);
+  const outgoingRef = ref(database, `friendRequestsOutgoing/${userId}`);
+  let currentIncoming: string[] = [];
+  let currentOutgoing: string[] = [];
+
+  const emit = () => callback({ incoming: currentIncoming, outgoing: currentOutgoing });
+  const handleError = (error: Error) => {
+    console.error("❌ Error listening to friend requests:", error);
+    currentIncoming = [];
+    currentOutgoing = [];
+    callback({ incoming: [], outgoing: [] });
+  };
+
+  const unsubscribeIncoming = onValue(
+    incomingRef,
+    (snapshot: DataSnapshot) => {
+      currentIncoming = snapshot.exists() ? Object.keys(snapshot.val()) : [];
+      emit();
     },
-    (error) => {
-      console.error("❌ Error listening to friend requests:", error);
-      callback({ incoming: [], outgoing: [] });
-    }
+    handleError
+  );
+
+  const unsubscribeOutgoing = onValue(
+    outgoingRef,
+    (snapshot: DataSnapshot) => {
+      currentOutgoing = snapshot.exists() ? Object.keys(snapshot.val()) : [];
+      emit();
+    },
+    handleError
   );
   
   return () => {
-    off(requestsRef);
+    unsubscribeIncoming();
+    unsubscribeOutgoing();
   };
 };
 

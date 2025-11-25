@@ -365,7 +365,7 @@ const Settings = () => {
                 {/* Profile Photo */}
                 <div className="flex items-center gap-4">
                   <Avatar
-                    src={user?.photoURL || "https://via.placeholder.com/80"}
+                    src={user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.displayName || user?.email || 'User')}&size=80`}
                     alt="Profile"
                     sx={{ width: 80, height: 80 }}
                   />
@@ -423,7 +423,7 @@ const Settings = () => {
                 {/* Profile Photo */}
                 <div className="flex items-center gap-4">
                   <Avatar
-                    src={user?.photoURL || "https://via.placeholder.com/80"}
+                    src={user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.displayName || user?.email || 'User')}&size=80`}
                     alt="Profile"
                     sx={{ width: 80, height: 80 }}
                   />

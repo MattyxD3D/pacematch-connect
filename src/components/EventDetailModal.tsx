@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,12 +19,18 @@ import ShareIcon from "@mui/icons-material/Share";
 import SendIcon from "@mui/icons-material/Send";
 import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutline";
 import LinkIcon from "@mui/icons-material/Link";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import { toast } from "sonner";
+import { useVenueCheckIns } from "@/hooks/useVenueCheckIns";
+import { findVenueForEvent } from "@/services/venueService";
+import { checkInToEventLocation, getCheckInsAtEventLocation } from "@/services/eventService";
+import { useAuth } from "@/hooks/useAuth";
+import { getUserData } from "@/services/authService";
 
 type EventType = "running" | "cycling" | "walking";
 
 interface Event {
-  id: number;
+  id: string | number;
   title: string;
   description: string;
   type: EventType;
@@ -34,7 +40,7 @@ interface Event {
   location: string;
   distance: string;
   distanceValue: number;
-  participants: number;
+  participants: string[] | number;
   maxParticipants?: number;
   hostName?: string;
   hostAvatar?: string;
@@ -63,19 +69,83 @@ interface Comment {
 interface EventDetailModalProps {
   event: Event | null;
   onClose: () => void;
-  onJoin: (eventId: number) => void;
+  onJoin: (eventId: string | number) => void;
 }
 
 export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalProps) => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("details");
   const [commentText, setCommentText] = useState("");
   const [comments, setComments] = useState<Comment[]>([]);
+  const [eventCheckIns, setEventCheckIns] = useState<any[]>([]);
+  const [isCheckingIn, setIsCheckingIn] = useState(false);
+
+  // Find venue for event location
+  const venue = event ? findVenueForEvent(event.lat, event.lng) : null;
+  const venueId = venue?.id;
+
+  // Get check-ins for this venue/event
+  const { checkIns, userCheckIn, checkIn, checkOut, isCheckedIn } = useVenueCheckIns({
+    venueId: venueId,
+    autoLoad: true
+  });
+
+  // Load check-ins at event location
+  useEffect(() => {
+    if (!event?.id) return;
+
+    const loadCheckIns = async () => {
+      try {
+        const checkInsData = await getCheckInsAtEventLocation(String(event.id));
+        setEventCheckIns(checkInsData);
+      } catch (error) {
+        console.error("Error loading event check-ins:", error);
+      }
+    };
+
+    loadCheckIns();
+  }, [event?.id]);
 
   // Participants will be fetched from Firebase event data
   // Use event.participants array to fetch user data
   const participants: Participant[] = [];
+  const participantsCount = Array.isArray(event?.participants) 
+    ? event.participants.length 
+    : (event?.participants || 0);
 
   if (!event) return null;
+
+  const handleEventCheckIn = async () => {
+    if (!user?.uid || !event) return;
+
+    try {
+      setIsCheckingIn(true);
+      const userData = await getUserData(user.uid);
+      if (!userData) {
+        throw new Error("User data not found");
+      }
+
+      await checkInToEventLocation(
+        String(event.id),
+        user.uid,
+        {
+          userName: userData.name || "Unknown User",
+          userAvatar: userData.photoURL || "",
+          activity: event.type
+        }
+      );
+
+      toast.success("Checked in to event location!");
+      
+      // Reload check-ins
+      const checkInsData = await getCheckInsAtEventLocation(String(event.id));
+      setEventCheckIns(checkInsData);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to check in");
+    } finally {
+      setIsCheckingIn(false);
+    }
+  };
 
   const getActivityIcon = () => {
     switch (event.type) {
@@ -213,14 +283,18 @@ export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalPro
 
             {/* Tabs Content */}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="w-full grid grid-cols-3 rounded-none border-b border-border h-auto">
+              <TabsList className="w-full grid grid-cols-4 rounded-none border-b border-border h-auto">
                 <TabsTrigger value="details" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
                   <EventIcon className="mr-2" style={{ fontSize: 18 }} />
                   Details
                 </TabsTrigger>
+                <TabsTrigger value="checkins" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
+                  <CheckCircleIcon className="mr-2" style={{ fontSize: 18 }} />
+                  Check-ins ({checkIns.length + eventCheckIns.length})
+                </TabsTrigger>
                 <TabsTrigger value="participants" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
                   <PeopleIcon className="mr-2" style={{ fontSize: 18 }} />
-                  Participants ({participants.length})
+                  Participants ({participantsCount})
                 </TabsTrigger>
                 <TabsTrigger value="comments" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
                   <ChatBubbleOutlineIcon className="mr-2" style={{ fontSize: 18 }} />
@@ -262,11 +336,136 @@ export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalPro
                     <div className="bg-muted rounded-xl p-4">
                       <p className="text-sm text-muted-foreground">Participants</p>
                       <p className="font-semibold mt-1">
-                        {event.participants}
+                        {participantsCount}
                         {event.maxParticipants ? ` / ${event.maxParticipants}` : ""}
                       </p>
                     </div>
                   </div>
+                </div>
+              </TabsContent>
+
+              {/* Check-ins Tab */}
+              <TabsContent value="checkins" className="p-6 space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      <CheckCircleIcon style={{ fontSize: 20 }} />
+                      Currently Here
+                    </h3>
+                    {(checkIns.length > 0 || eventCheckIns.length > 0) && (
+                      <Badge className="bg-primary/20 text-primary border-primary/30">
+                        {checkIns.length + eventCheckIns.length} checked in
+                      </Badge>
+                    )}
+                  </div>
+                  
+                  {venue && (
+                    <div className="bg-muted rounded-xl p-4 space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        This event is at <span className="font-semibold">{venue.name}</span>
+                      </p>
+                      
+                      {checkIns.length > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold">People checked in at this venue:</p>
+                          <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                            {checkIns.map((checkIn) => (
+                              <div
+                                key={checkIn.userId}
+                                className="flex items-center gap-3 p-2 bg-background rounded-lg"
+                              >
+                                <Avatar
+                                  src={checkIn.userAvatar}
+                                  alt={checkIn.userName}
+                                  sx={{ width: 32, height: 32 }}
+                                />
+                                <div className="flex-1">
+                                  <p className="text-sm font-semibold">{checkIn.userName}</p>
+                                  <p className="text-xs text-muted-foreground capitalize">
+                                    {checkIn.activity}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No one checked in yet</p>
+                      )}
+
+                      {user && (
+                        <Button
+                          onClick={isCheckedIn ? checkOut : () => {
+                            if (venue) {
+                              checkIn(venue.id, { id: venue.id, name: venue.name }, event.type)
+                                .then(() => toast.success("Checked in!"))
+                                .catch((err) => toast.error(err.message));
+                            }
+                          }}
+                          variant={isCheckedIn ? "outline" : "default"}
+                          className="w-full mt-3"
+                          disabled={isCheckingIn}
+                        >
+                          {isCheckedIn ? (
+                            <>
+                              <CheckCircleIcon className="mr-2" style={{ fontSize: 18 }} />
+                              Checked In - Check Out
+                            </>
+                          ) : (
+                            <>
+                              <LocationOnIcon className="mr-2" style={{ fontSize: 18 }} />
+                              Check In Here
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  {eventCheckIns.length > 0 && (
+                    <div className="bg-muted rounded-xl p-4 space-y-3">
+                      <p className="text-sm font-semibold">People checked in at event location:</p>
+                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                        {eventCheckIns.map((checkIn: any) => (
+                          <div
+                            key={checkIn.userId}
+                            className="flex items-center gap-3 p-2 bg-background rounded-lg"
+                          >
+                            <Avatar
+                              src={checkIn.userAvatar}
+                              alt={checkIn.userName}
+                              sx={{ width: 32, height: 32 }}
+                            />
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold">{checkIn.userName}</p>
+                              <p className="text-xs text-muted-foreground capitalize">
+                                {checkIn.activity}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!venue && eventCheckIns.length === 0 && (
+                    <div className="bg-muted rounded-xl p-4 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        No check-ins yet. Be the first to check in!
+                      </p>
+                      {user && (
+                        <Button
+                          onClick={handleEventCheckIn}
+                          variant="outline"
+                          className="w-full mt-3"
+                          disabled={isCheckingIn}
+                        >
+                          <LocationOnIcon className="mr-2" style={{ fontSize: 18 }} />
+                          {isCheckingIn ? "Checking in..." : "Check In Here"}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Host/Sponsor */}

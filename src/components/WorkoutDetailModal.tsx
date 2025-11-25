@@ -196,76 +196,74 @@ export const WorkoutDetailModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] p-0">
-        <ScrollArea className="max-h-[90vh]">
-          <div className="p-6 space-y-6">
+      <DialogContent className="max-w-2xl w-full mx-4 max-h-[95vh] sm:max-h-[90vh] p-0 overflow-hidden">
+        <ScrollArea className="max-h-[95vh] sm:max-h-[90vh]">
+          <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
             {/* Header */}
             <DialogHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`p-3 rounded-xl ${config.bgClass}`}>
-                    <Icon className={config.textClass} style={{ fontSize: 32 }} />
-                  </div>
-                  <div>
-                    <DialogTitle className="text-2xl">{config.label} Session</DialogTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {format(new Date(workout.date), "EEEE, MMMM d, yyyy 'at' h:mm a")}
-                    </p>
-                  </div>
+              <div className="flex items-start gap-2 sm:gap-3">
+                <div className={`p-2 sm:p-3 rounded-xl ${config.bgClass} flex-shrink-0`}>
+                  <Icon className={config.textClass} style={{ fontSize: 24 }} sx={{ fontSize: { xs: 24, sm: 32 } }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <DialogTitle className="text-lg sm:text-2xl leading-tight">{config.label} Session</DialogTitle>
+                  <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-words">
+                    {format(new Date(workout.date), "EEEE, MMMM d, yyyy 'at' h:mm a")}
+                  </p>
                 </div>
               </div>
             </DialogHeader>
 
             {/* Caption */}
             {(workout as any).caption && (
-              <div className="p-4 bg-muted/30 rounded-lg border border-border">
-                <p className="text-sm leading-relaxed">{(workout as any).caption}</p>
+              <div className="p-3 sm:p-4 bg-muted/30 rounded-lg border border-border">
+                <p className="text-xs sm:text-sm leading-relaxed">{(workout as any).caption}</p>
               </div>
             )}
 
             {/* Location */}
             {workout.location && (
               <div className="flex items-center gap-2 text-muted-foreground">
-                <LocationOnIcon style={{ fontSize: 20 }} />
-                <span className="text-sm">{workout.location}</span>
+                <LocationOnIcon style={{ fontSize: 18 }} sx={{ fontSize: { xs: 18, sm: 20 } }} className="flex-shrink-0" />
+                <span className="text-xs sm:text-sm truncate">{workout.location}</span>
               </div>
             )}
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
               <Card className={`${config.bgClass} border-2 ${config.borderClass}`}>
-                <CardContent className="p-4 text-center">
-                  <TimerIcon className={config.textClass} style={{ fontSize: 28 }} />
-                  <div className="text-2xl font-bold mt-2">{formatTime(workout.duration)}</div>
-                  <div className="text-xs text-muted-foreground mt-1">Duration</div>
+                <CardContent className="p-3 sm:p-4 text-center">
+                  <TimerIcon className={config.textClass} sx={{ fontSize: { xs: 20, sm: 28 } }} />
+                  <div className="text-lg sm:text-2xl font-bold mt-1 sm:mt-2">{formatTime(workout.duration)}</div>
+                  <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">Duration</div>
                 </CardContent>
               </Card>
 
               <Card className={`${config.bgClass} border-2 ${config.borderClass}`}>
-                <CardContent className="p-4 text-center">
-                  <div className="text-3xl">📍</div>
-                  <div className="text-2xl font-bold mt-2">
+                <CardContent className="p-3 sm:p-4 text-center">
+                  <div className="text-2xl sm:text-3xl">📍</div>
+                  <div className="text-lg sm:text-2xl font-bold mt-1 sm:mt-2">
                     {distanceData.value}
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">{distanceData.unit}</div>
+                  <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">{distanceData.unit}</div>
                 </CardContent>
               </Card>
 
               <Card className={`${config.bgClass} border-2 ${config.borderClass}`}>
-                <CardContent className="p-4 text-center">
-                  <SpeedIcon className={config.textClass} style={{ fontSize: 28 }} />
-                  <div className="text-2xl font-bold mt-2">
+                <CardContent className="p-3 sm:p-4 text-center">
+                  <SpeedIcon className={config.textClass} sx={{ fontSize: { xs: 20, sm: 28 } }} />
+                  <div className="text-lg sm:text-2xl font-bold mt-1 sm:mt-2">
                     {speedData.value}
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">{speedData.unit}</div>
+                  <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">{speedData.unit}</div>
                 </CardContent>
               </Card>
 
               <Card className={`${config.bgClass} border-2 ${config.borderClass}`}>
-                <CardContent className="p-4 text-center">
-                  <LocalFireDepartmentIcon className="text-warning" style={{ fontSize: 28 }} />
-                  <div className="text-2xl font-bold mt-2">{workout.calories}</div>
-                  <div className="text-xs text-muted-foreground mt-1">Calories</div>
+                <CardContent className="p-3 sm:p-4 text-center">
+                  <LocalFireDepartmentIcon className="text-warning" sx={{ fontSize: { xs: 20, sm: 28 } }} />
+                  <div className="text-lg sm:text-2xl font-bold mt-1 sm:mt-2">{workout.calories}</div>
+                  <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">Calories</div>
                 </CardContent>
               </Card>
             </div>
@@ -292,11 +290,11 @@ export const WorkoutDetailModal = ({
             {/* Route Map Placeholder */}
             <Card>
               <CardContent className="p-0">
-                <div className="bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 rounded-lg h-48 flex items-center justify-center border border-border">
-                  <div className="text-center">
-                    <LocationOnIcon className="text-muted-foreground mx-auto mb-2" style={{ fontSize: 48 }} />
-                    <p className="text-sm text-muted-foreground">Route map preview</p>
-                    <p className="text-xs text-muted-foreground mt-1">GPS tracking feature coming soon</p>
+                <div className="bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 rounded-lg h-32 sm:h-48 flex items-center justify-center border border-border">
+                  <div className="text-center px-2">
+                    <LocationOnIcon className="text-muted-foreground mx-auto mb-1 sm:mb-2" sx={{ fontSize: { xs: 32, sm: 48 } }} />
+                    <p className="text-xs sm:text-sm text-muted-foreground">Route map preview</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">GPS tracking feature coming soon</p>
                   </div>
                 </div>
               </CardContent>
@@ -305,18 +303,18 @@ export const WorkoutDetailModal = ({
             {/* Nearby Users During Workout */}
             {workout.nearbyUsers && workout.nearbyUsers.length > 0 && (
               <Card>
-                <CardContent className="p-6 space-y-4">
+                <CardContent className="p-4 sm:p-6 space-y-3 sm:space-y-4">
                   <div className="flex items-center gap-2">
-                    <PeopleIcon className="text-primary" style={{ fontSize: 24 }} />
-                    <h3 className="text-lg font-bold">
+                    <PeopleIcon className="text-primary flex-shrink-0" sx={{ fontSize: { xs: 20, sm: 24 } }} />
+                    <h3 className="text-base sm:text-lg font-bold">
                       People Nearby During Workout
                     </h3>
                   </div>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs sm:text-sm text-muted-foreground">
                     {workout.nearbyUsers.length} {workout.nearbyUsers.length === 1 ? "person was" : "people were"} active nearby during your workout
                   </p>
 
-                  <div className="space-y-3">
+                  <div className="space-y-2 sm:space-y-3">
                     {workout.nearbyUsers.map((user, index) => {
                       const friendStatus = getFriendStatus(user.id);
                       const cooldownDays = getCooldownDays(user.id);
@@ -327,7 +325,7 @@ export const WorkoutDetailModal = ({
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: index * 0.05 }}
-                          className="flex items-center gap-3 p-4 rounded-xl bg-muted/50 hover:bg-muted transition-colors border border-border"
+                          className="flex items-center gap-2 sm:gap-3 p-3 sm:p-4 rounded-xl bg-muted/50 hover:bg-muted transition-colors border border-border"
                         >
                           <button
                             onClick={() => handleViewProfile(user)}
@@ -336,30 +334,31 @@ export const WorkoutDetailModal = ({
                             <Avatar
                               src={user.avatar}
                               alt={user.name}
-                              sx={{ width: 56, height: 56, cursor: "pointer" }}
+                              sx={{ width: 48, height: 48, cursor: "pointer" }}
+                              className="sm:w-[56px] sm:h-[56px]"
                             />
                           </button>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
+                            <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1 flex-wrap">
                               <button
                                 onClick={() => handleViewProfile(user)}
-                                className="font-semibold hover:underline text-left"
+                                className="font-semibold hover:underline text-left text-sm sm:text-base truncate max-w-[120px] sm:max-w-none"
                               >
                                 {user.name}
                               </button>
                               {friendStatus === "friends" && (
-                                <div className="flex items-center gap-1 px-2 py-0.5 bg-success/10 border border-success rounded-full">
-                                  <CheckCircleIcon style={{ fontSize: 14 }} className="text-success" />
-                                  <span className="text-xs text-success font-medium">Friends</span>
+                                <div className="flex items-center gap-1 px-1.5 sm:px-2 py-0.5 bg-success/10 border border-success rounded-full flex-shrink-0">
+                                  <CheckCircleIcon className="text-success" sx={{ fontSize: { xs: 12, sm: 14 } }} />
+                                  <span className="text-[10px] sm:text-xs text-success font-medium">Friends</span>
                                 </div>
                               )}
                               {friendStatus === "request_pending" && (
-                                <div className="px-2 py-0.5 bg-warning/10 border border-warning rounded-full">
-                                  <span className="text-xs text-warning font-medium">Request Sent</span>
+                                <div className="px-1.5 sm:px-2 py-0.5 bg-warning/10 border border-warning rounded-full flex-shrink-0">
+                                  <span className="text-[10px] sm:text-xs text-warning font-medium">Request Sent</span>
                                 </div>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground flex-wrap">
                               <span>
                                 {user.activity === "Running" && "🏃"}
                                 {user.activity === "Cycling" && "🚴"}
@@ -367,12 +366,12 @@ export const WorkoutDetailModal = ({
                               </span>
                               <span className="capitalize">{user.activity?.toLowerCase()}</span>
                               <span>•</span>
-                              <span>{user.distance} away</span>
+                              <span className="truncate">{user.distance} away</span>
                             </div>
                           </div>
 
                           {/* Action Buttons */}
-                          <div className="flex gap-2 flex-shrink-0">
+                          <div className="flex gap-1 sm:gap-2 flex-shrink-0">
                             <Button
                               size="sm"
                               variant="outline"
@@ -380,10 +379,10 @@ export const WorkoutDetailModal = ({
                                 e.stopPropagation();
                                 handleViewProfile(user);
                               }}
-                              className="h-9 px-3"
+                              className="h-8 sm:h-9 px-2 sm:px-3"
                               title="View Profile"
                             >
-                              <PersonIcon style={{ fontSize: 18 }} />
+                              <PersonIcon sx={{ fontSize: { xs: 16, sm: 18 } }} />
                             </Button>
                             {friendStatus === "not_friends" && (
                               <Button
@@ -394,11 +393,11 @@ export const WorkoutDetailModal = ({
                                   handleAddFriend(user);
                                 }}
                                 disabled={cooldownDays > 0}
-                                className="h-9 px-3"
+                                className="h-8 sm:h-9 px-2 sm:px-3 text-xs"
                                 title={cooldownDays > 0 ? `Try again in ${cooldownDays} day${cooldownDays !== 1 ? 's' : ''}` : "Add Friend"}
                               >
-                                <PersonAddIcon style={{ fontSize: 18 }} className="mr-1" />
-                                Add
+                                <PersonAddIcon sx={{ fontSize: { xs: 16, sm: 18 } }} className="mr-0.5 sm:mr-1" />
+                                <span className="hidden sm:inline">Add</span>
                               </Button>
                             )}
                             {friendStatus === "request_pending" && (
@@ -406,9 +405,10 @@ export const WorkoutDetailModal = ({
                                 size="sm"
                                 variant="outline"
                                 disabled
-                                className="h-9 px-3"
+                                className="h-8 sm:h-9 px-2 sm:px-3 text-xs"
                               >
-                                Pending
+                                <span className="hidden sm:inline">Pending</span>
+                                <span className="sm:hidden">...</span>
                               </Button>
                             )}
                             <Button
@@ -417,10 +417,10 @@ export const WorkoutDetailModal = ({
                                 e.stopPropagation();
                                 handleSendMessage(user);
                               }}
-                              className="h-9 px-3"
+                              className="h-8 sm:h-9 px-2 sm:px-3"
                               title="Send Message"
                             >
-                              <SendIcon style={{ fontSize: 18 }} />
+                              <SendIcon sx={{ fontSize: { xs: 16, sm: 18 } }} />
                             </Button>
                           </div>
                         </motion.div>
@@ -428,16 +428,16 @@ export const WorkoutDetailModal = ({
                     })}
                   </div>
 
-                  <div className="mt-4 p-4 bg-primary/5 rounded-lg border border-primary/20">
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-                        <PeopleIcon style={{ fontSize: 18 }} />
+                  <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-primary/5 rounded-lg border border-primary/20">
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <p className="text-xs sm:text-sm font-semibold text-foreground flex items-center gap-1.5 sm:gap-2">
+                        <PeopleIcon className="flex-shrink-0" sx={{ fontSize: { xs: 16, sm: 18 } }} />
                         Social Workout Feature
                       </p>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
+                      <p className="text-[10px] sm:text-xs text-muted-foreground leading-relaxed">
                         Connect with people who were active nearby during your workout. Send friend requests to stay motivated together or message them to plan future workouts!
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">
                         <span className="font-semibold text-foreground">Privacy:</span> These users could also see your activity in their nearby workouts during this time.
                       </p>
                     </div>
@@ -449,13 +449,13 @@ export const WorkoutDetailModal = ({
             {/* No nearby users message */}
             {(!workout.nearbyUsers || workout.nearbyUsers.length === 0) && (
               <Card>
-                <CardContent className="p-8 text-center">
-                  <PeopleIcon className="text-muted-foreground/30 mx-auto mb-3" style={{ fontSize: 56 }} />
-                  <h3 className="font-semibold text-lg mb-2">No One Nearby</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
+                <CardContent className="p-6 sm:p-8 text-center">
+                  <PeopleIcon className="text-muted-foreground/30 mx-auto mb-2 sm:mb-3" sx={{ fontSize: { xs: 40, sm: 56 } }} />
+                  <h3 className="font-semibold text-base sm:text-lg mb-1.5 sm:mb-2">No One Nearby</h3>
+                  <p className="text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4">
                     No other users were active within 2km during this workout
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">
                     Try working out in popular areas or during peak times to connect with other fitness enthusiasts!
                   </p>
                 </CardContent>
@@ -463,7 +463,7 @@ export const WorkoutDetailModal = ({
             )}
 
             {/* Close Button */}
-            <Button onClick={onClose} className="w-full" size="lg">
+            <Button onClick={onClose} className="w-full h-11 sm:h-12" size="lg">
               Close
             </Button>
           </div>

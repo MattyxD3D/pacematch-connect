@@ -36,6 +36,10 @@ import { useNearbyUsers } from "@/hooks/useNearbyUsers";
 import { useMatching } from "@/hooks/useMatching";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDistance } from "@/utils/distance";
+import { SearchFilter } from "@/services/matchingService";
+import { MatchActionsModal } from "@/components/MatchActionsModal";
+import { updateUserProfile } from "@/services/authService";
+import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
 import { updateUserVisibility } from "@/services/locationService";
 import { saveWorkout } from "@/services/workoutService";
@@ -50,10 +54,10 @@ import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import MailIcon from "@mui/icons-material/Mail";
-import EventIcon from "@mui/icons-material/Event";
+import GroupIcon from "@mui/icons-material/Group";
+import PublicIcon from "@mui/icons-material/Public";
 import TimerIcon from "@mui/icons-material/Timer";
 import SpeedIcon from "@mui/icons-material/Speed";
-import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import FavoriteIcon from "@mui/icons-material/Favorite";
 import {
   Settings as SettingsIconMui,
@@ -152,6 +156,8 @@ interface MapRef {
   setZoom: (zoom: number) => void;
   setTilt: (tilt: number) => void;
   setHeading: (heading: number) => void;
+  setCenter: (center: { lat: number; lng: number }) => void;
+  setOptions: (options: any) => void;
 }
 
 /**
@@ -191,7 +197,6 @@ const MapScreen = () => {
   const [elapsedTime, setElapsedTime] = useState(0); // in seconds
   const [currentSpeed, setCurrentSpeed] = useState(0); // km/h
   const [avgSpeed, setAvgSpeed] = useState(0); // km/h
-  const [calories, setCalories] = useState(0);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [showSummary, setShowSummary] = useState(false);
   const [showSpeedNotPace, setShowSpeedNotPace] = useState(true);
@@ -209,6 +214,12 @@ const MapScreen = () => {
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [showFriendRequestModal, setShowFriendRequestModal] = useState(false);
   const [showProfileView, setShowProfileView] = useState(false);
+  const [showMatchActionsModal, setShowMatchActionsModal] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [searchFilter, setSearchFilter] = useState<SearchFilter>("all");
+  const [declinedUsers, setDeclinedUsers] = useState<Record<string, number>>({}); // userId -> cooldownUntil timestamp
+  const [visibleToFriendsOnly, setVisibleToFriendsOnly] = useState(false);
+  const [showNearbyList, setShowNearbyList] = useState(false);
   
   // Activity filter for People Drawer
   const [activityFilter, setActivityFilter] = useState<"all" | "running" | "cycling" | "walking">("all");
@@ -250,6 +261,46 @@ const MapScreen = () => {
     return { lat: offsetLat, lng: offsetLng };
   };
 
+  // Load searchFilter and friendsOnly visibility from user profile
+  useEffect(() => {
+    if (user) {
+      import("@/services/authService").then(({ getUserData }) => {
+        getUserData(user.uid).then((userData) => {
+          if (userData?.searchFilter) {
+            setSearchFilter(userData.searchFilter);
+          }
+          if (userData?.visibleToFriendsOnly !== undefined) {
+            setVisibleToFriendsOnly(userData.visibleToFriendsOnly);
+          }
+        });
+      });
+    } else if (userProfile && (userProfile as any).searchFilter) {
+      setSearchFilter((userProfile as any).searchFilter);
+    }
+  }, [user, userProfile]);
+
+  // Load declined users from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem("declinedUsers");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        // Filter out expired cooldowns
+        const now = Date.now();
+        const active = Object.entries(parsed).reduce((acc, [userId, cooldownUntil]) => {
+          if (typeof cooldownUntil === "number" && cooldownUntil > now) {
+            acc[userId] = cooldownUntil;
+          }
+          return acc;
+        }, {} as Record<string, number>);
+        setDeclinedUsers(active);
+        localStorage.setItem("declinedUsers", JSON.stringify(active));
+      } catch (e) {
+        console.error("Error loading declined users:", e);
+      }
+    }
+  }, []);
+
   // Get matched users using matching algorithm
   const { matches, loading: matchesLoading } = useMatching({
     currentUserId: user?.uid || "",
@@ -261,6 +312,7 @@ const MapScreen = () => {
       visibleToAllLevels: true,
       allowedLevels: ["beginner", "intermediate", "pro"]
     },
+    searchFilter: searchFilter,
     radiusPreference: userProfile?.radiusPreference || "normal"
   });
 
@@ -275,21 +327,20 @@ const MapScreen = () => {
 
   
   // Friend status tracking (mock data - replace with backend later)
-  const [friendStatuses, setFriendStatuses] = useState<Record<number, { status: FriendStatus; cooldownUntil?: number }>>({
-    1: { status: "not_friends" },
-    2: { status: "friends" }, // Mike Chen is already a friend
-    3: { status: "not_friends" },
-  });
+  const [friendStatuses, setFriendStatuses] = useState<Record<string, { status: FriendStatus; cooldownUntil?: number }>>({});
   
-  const getFriendStatus = (userId: number): FriendStatus => {
-    return friendStatuses[userId]?.status || "not_friends";
+  const getFriendStatus = (userId: string | number): FriendStatus => {
+    const id = typeof userId === "number" ? userId.toString() : userId;
+    return friendStatuses[id]?.status || "not_friends";
   };
   
-  const getCooldownDays = (userId: number): number => {
-    const cooldownUntil = friendStatuses[userId]?.cooldownUntil;
+  const getCooldownDaysForFriend = (userId: string | number): number => {
+    const id = typeof userId === "number" ? userId.toString() : userId;
+    const cooldownUntil = friendStatuses[id]?.cooldownUntil;
     if (!cooldownUntil) return 0;
     const now = Date.now();
     const diff = cooldownUntil - now;
+    if (diff <= 0) return 0;
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
   };
 
@@ -305,19 +356,27 @@ const MapScreen = () => {
   );
 
   // Use matched users if available, otherwise fallback to nearby users
-  const matchedUsersForDisplay = matches.map((match) => ({
-    id: match.user.uid,
-    name: match.user.name || "User",
-    distance: formatDistance(match.distance / 1000),
-    distanceValue: match.distance / 1000,
-    activity: match.user.activity || "Running",
-    avatar: match.user.photoURL || "https://via.placeholder.com/150",
-    lat: match.user.location.lat,
-    lng: match.user.location.lng,
-    matchScore: match.score,
-    fitnessLevel: match.user.fitnessLevel,
-    pace: match.user.pace
-  }));
+  // Filter out declined users (within cooldown period)
+  const now = Date.now();
+  const matchedUsersForDisplay = matches
+    .filter((match) => {
+      const userId = match.user.uid;
+      const cooldownUntil = declinedUsers[userId];
+      return !cooldownUntil || cooldownUntil <= now;
+    })
+    .map((match) => ({
+      id: match.user.uid,
+      name: match.user.name || "User",
+      distance: formatDistance(match.distance / 1000),
+      distanceValue: match.distance / 1000,
+      activity: match.user.activity || "Running",
+      avatar: match.user.photoURL || "https://via.placeholder.com/150",
+      lat: match.user.location.lat,
+      lng: match.user.location.lng,
+      matchScore: match.score,
+      fitnessLevel: match.user.fitnessLevel,
+      pace: match.user.pace
+    }));
 
   // Use nearby users from hook, or fallback to mock data for UI features
   const nearbyUsers = matchedUsersForDisplay.length > 0 
@@ -431,25 +490,13 @@ const MapScreen = () => {
     };
   }, [isActive, isPaused, selectedActivity, location, locationHistory]);
   
-  // Calculate average speed and calories
+  // Calculate average speed
   useEffect(() => {
     if (elapsedTime > 0 && distance > 0) {
       const avgSpeedValue = (distance / elapsedTime) * 3600; // km/h
       setAvgSpeed(avgSpeedValue);
-      
-      // Calculate calories based on activity type
-      let caloriesPerKm = 0;
-      if (selectedActivity === "running") {
-        caloriesPerKm = 100; // ~100 cal/km
-      } else if (selectedActivity === "cycling") {
-        caloriesPerKm = 50; // ~50 cal/km
-      } else {
-        caloriesPerKm = 60; // ~60 cal/km
-      }
-      
-      setCalories(Math.round(distance * caloriesPerKm));
     }
-  }, [elapsedTime, distance, selectedActivity]);
+  }, [elapsedTime, distance]);
 
   const handleStartStop = () => {
     if (!isActive) {
@@ -462,7 +509,6 @@ const MapScreen = () => {
       setDistance(0);
       setCurrentSpeed(0);
       setAvgSpeed(0);
-      setCalories(0);
       setPointsTracked(0);
       lastDistanceRef.current = 0;
       lastTimeRef.current = 0;
@@ -506,7 +552,7 @@ const MapScreen = () => {
       duration: elapsedTime,
       distance,
       avgSpeed,
-      calories,
+      calories: 0, // Calories removed from UI but still required in data structure
       nearbyUsers: activeNearbyUsers,
       location: "Central Park, New York", // This would come from GPS in real app
     };
@@ -525,7 +571,6 @@ const MapScreen = () => {
       setElapsedTime(0);
       setCurrentSpeed(0);
       setAvgSpeed(0);
-      setCalories(0);
       setStartTime(null);
     } catch (error) {
       console.error("Error saving workout:", error);
@@ -541,7 +586,6 @@ const MapScreen = () => {
     setElapsedTime(0);
     setCurrentSpeed(0);
     setAvgSpeed(0);
-    setCalories(0);
     setStartTime(null);
   };
   
@@ -592,31 +636,34 @@ const MapScreen = () => {
     }
   };
 
-  const handleAddFriend = (userId: number) => {
+  const handleAddFriend = (userId: string | number) => {
+    const id = typeof userId === "number" ? userId.toString() : userId;
     if (selectedUser) {
       setFriendStatuses(prev => ({
         ...prev,
-        [userId]: { status: "request_pending" }
+        [id]: { status: "request_pending" }
       }));
       toast.success(`Friend request sent to ${selectedUser.name}`);
     }
   };
 
-  const handleAcceptFriend = (userId: number) => {
+  const handleAcceptFriend = (userId: string | number) => {
+    const id = typeof userId === "number" ? userId.toString() : userId;
     setFriendStatuses(prev => ({
       ...prev,
-      [userId]: { status: "friends" }
+      [id]: { status: "friends" }
     }));
     setShowFriendRequestModal(false);
     toast.success("Friend request accepted!");
   };
 
-  const handleDeclineFriend = (userId: number) => {
+  const handleDeclineFriend = (userId: string | number) => {
+    const id = typeof userId === "number" ? userId.toString() : userId;
     // Set 7-day cooldown
     const cooldownUntil = Date.now() + (7 * 24 * 60 * 60 * 1000);
     setFriendStatuses(prev => ({
       ...prev,
-      [userId]: { status: "denied", cooldownUntil }
+      [id]: { status: "denied", cooldownUntil }
     }));
     setShowFriendRequestModal(false);
     toast("Friend request declined. The user won't be notified.");
@@ -681,33 +728,79 @@ const MapScreen = () => {
   }, [nearbyUsers]);
 
   // Update map center when location changes
+  // When activity is selected, always keep map centered on user (locked perspective)
   useEffect(() => {
     if (location && location.lat && location.lng) {
       if (!isNavigationStyle) {
         setMapCenter({ lat: location.lat, lng: location.lng });
-        // Center map on user when location is first obtained
+        // Center map on user when location is first obtained or when activity is selected
         if (mapRef && isLoaded && window.google) {
-          mapRef.panTo({ lat: location.lat, lng: location.lng });
+          // Force center when activity is selected (locked perspective)
+          if (selectedActivity) {
+            mapRef.panTo({ lat: location.lat, lng: location.lng });
+            // Also set center directly to prevent any drift
+            mapRef.setCenter({ lat: location.lat, lng: location.lng });
+          } else {
+            mapRef.panTo({ lat: location.lat, lng: location.lng });
+          }
         }
       } else if (isNavigationStyle && mapRef && isLoaded && window.google) {
         const cameraCenter = calculateCameraOffset(location.lat, location.lng, userHeading || 0);
         setMapCenter(cameraCenter);
         mapRef.panTo(cameraCenter);
+        // Force center when activity is selected
+        if (selectedActivity) {
+          mapRef.setCenter(cameraCenter);
+        }
       }
     }
-  }, [location, isNavigationStyle, userHeading, mapRef, isLoaded]);
+  }, [location, isNavigationStyle, userHeading, mapRef, isLoaded, selectedActivity]);
 
-  // Update zoom level based on view distance
+  // Get fixed radius for selected activity
+  const getFixedRadiusForActivity = (activity: "running" | "cycling" | "walking"): number => {
+    switch (activity) {
+      case "cycling":
+        return 10000; // 10km
+      case "running":
+        return 2000;  // 2km
+      case "walking":
+        return 1000;  // 1km
+      default:
+        return 2000;  // Default to running radius
+    }
+  };
+
+  // Update zoom level based on fixed radius for selected activity
   useEffect(() => {
-    if (location && mapRef && isLoaded && window.google) {
-      const zoomLevel = calculateZoomFromMeters(viewDistanceMeters);
+    if (location && mapRef && isLoaded && window.google && selectedActivity) {
+      const fixedRadius = getFixedRadiusForActivity(selectedActivity);
+      const zoomLevel = calculateZoomFromMeters(fixedRadius);
       setMapZoom(zoomLevel);
       mapRef.setZoom(zoomLevel);
       if (!isNavigationStyle) {
         mapRef.panTo({ lat: location.lat, lng: location.lng });
       }
     }
-  }, [viewDistanceMeters, location, mapRef, isLoaded, isNavigationStyle]);
+  }, [selectedActivity, location, mapRef, isLoaded, isNavigationStyle]);
+
+  // Lock/unlock map when activity selection changes
+  useEffect(() => {
+    if (mapRef && isLoaded && window.google) {
+      // Lock map when activity is selected (running, cycling, or walking)
+      // But allow zoom controls so user can zoom in/out on their location
+      mapRef.setOptions({
+        draggable: !selectedActivity, // Disable dragging/panning
+        scrollwheel: true, // Allow scroll zoom
+        disableDoubleClickZoom: !!selectedActivity, // Disable double-click zoom
+        gestureHandling: selectedActivity ? "cooperative" : "auto" // Allow zoom but not pan when activity is selected
+      });
+      
+      // Force center on user when activity is selected
+      if (selectedActivity && location) {
+        mapRef.setCenter({ lat: location.lat, lng: location.lng });
+      }
+    }
+  }, [selectedActivity, mapRef, isLoaded, location]);
 
   const onMapLoad = useCallback((map: any) => {
     setMapRef(map);
@@ -715,12 +808,57 @@ const MapScreen = () => {
       map.setOptions({
         mapTypeId: window.google.maps.MapTypeId.ROADMAP
       });
+      
+      // Lock map when activity is selected (disable dragging but allow zoom)
+      if (selectedActivity) {
+        map.setOptions({
+          draggable: false, // Disable dragging/panning
+          scrollwheel: true, // Allow scroll zoom
+          disableDoubleClickZoom: true, // Disable double-click zoom
+          gestureHandling: "cooperative" // Allow zoom gestures but not pan
+        });
+      }
     }
-  }, []);
+  }, [selectedActivity]);
 
   const onMarkerClick = (userData: any) => {
     setSelectedUser(userData);
-    setShowProfileView(true);
+    setShowMatchActionsModal(true);
+  };
+
+  const handleUpdateSearchFilter = async (newFilter: SearchFilter) => {
+    setSearchFilter(newFilter);
+    setShowFilterModal(false);
+    
+    // Save to Firebase
+    if (user) {
+      try {
+        await updateUserProfile(user.uid, { searchFilter: newFilter });
+        toast.success(`Now finding: ${newFilter === "all" ? "All Levels" : newFilter}`);
+      } catch (error) {
+        console.error("Error updating search filter:", error);
+        toast.error("Failed to update filter");
+      }
+    }
+  };
+
+  const handleDeclineMatch = (userId: string) => {
+    // Set 3-day cooldown
+    const cooldownUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
+    const updated = { ...declinedUsers, [userId]: cooldownUntil };
+    setDeclinedUsers(updated);
+    localStorage.setItem("declinedUsers", JSON.stringify(updated));
+    setShowMatchActionsModal(false);
+    setSelectedUser(null);
+  };
+
+  const getCooldownDays = (userId: string): number => {
+    const cooldownUntil = declinedUsers[userId];
+    if (!cooldownUntil) return 0;
+    const now = Date.now();
+    const diff = cooldownUntil - now;
+    if (diff <= 0) return 0;
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
   };
 
   const onInfoWindowClose = () => {
@@ -794,7 +932,10 @@ const MapScreen = () => {
           onLoad={onMapLoad}
           options={{
             disableDefaultUI: false,
-            zoomControl: true,
+            zoomControl: true, // Always show zoom controls
+            zoomControlOptions: isLoaded && window.google?.maps ? {
+              position: window.google.maps.ControlPosition.RIGHT_CENTER
+            } : undefined,
             streetViewControl: false,
             mapTypeControl: true,
             mapTypeControlOptions: isLoaded && window.google?.maps ? {
@@ -807,7 +948,12 @@ const MapScreen = () => {
               ]
             } : undefined,
             fullscreenControl: true,
-            mapTypeId: isLoaded && window.google?.maps ? window.google.maps.MapTypeId.ROADMAP : undefined
+            mapTypeId: isLoaded && window.google?.maps ? window.google.maps.MapTypeId.ROADMAP : undefined,
+            // Lock map when activity is selected (running, cycling, or walking)
+            draggable: !selectedActivity, // Disable dragging when activity is selected
+            scrollwheel: true, // Allow scroll zoom even when activity is selected
+            disableDoubleClickZoom: !!selectedActivity, // Disable double-click zoom when activity is selected
+            gestureHandling: (selectedActivity ? "cooperative" : "auto") as "cooperative" | "auto" | "greedy" | "none" // Allow zoom gestures but not pan when activity is selected
           }}
         >
           {/* Current user's activity trail */}
@@ -954,7 +1100,6 @@ const MapScreen = () => {
         duration={elapsedTime}
         distance={distance}
         avgSpeed={avgSpeed}
-        calories={calories}
         useMetric={useMetric}
       />
 
@@ -973,14 +1118,24 @@ const MapScreen = () => {
           </span>
         </motion.button>
 
-        {/* Events */}
+        {/* Show/Hide Nearby People List */}
         <motion.button
           whileTap={{ scale: 0.95 }}
-          onClick={() => navigate("/events")}
-          className="relative touch-target bg-card text-foreground rounded-full shadow-elevation-3 border border-border hover:border-primary transition-all"
+          onClick={() => setShowNearbyList(!showNearbyList)}
+          className={`relative touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
+            showNearbyList
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-card text-foreground border-border hover:border-primary"
+          }`}
           style={{ width: 56, height: 56 }}
+          title={showNearbyList ? "Hide nearby people" : "Show nearby people"}
         >
-          <EventIcon style={{ fontSize: 28 }} />
+          <GroupIcon style={{ fontSize: 28 }} />
+          {sortedUsers.length > 0 && (
+            <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
+              {sortedUsers.length}
+            </span>
+          )}
         </motion.button>
 
         {/* Messages */}
@@ -998,9 +1153,25 @@ const MapScreen = () => {
           )}
         </motion.button>
 
+        {/* Filter Button */}
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setShowFilterModal(true)}
+          className={`touch-target rounded-full shadow-elevation-3 border-2 ${
+            searchFilter !== "all"
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-card text-foreground border-border"
+          }`}
+          style={{ width: 56, height: 56 }}
+          title={`Filter: ${searchFilter === "all" ? "All Levels" : searchFilter}`}
+        >
+          <FilterListIcon style={{ fontSize: 28 }} />
+        </motion.button>
+
         {/* My Location */}
         <motion.button
           whileTap={{ scale: 0.95 }}
+          onClick={handleCenterOnMyLocation}
           className="touch-target bg-card text-primary rounded-full shadow-elevation-3 border-2 border-primary"
           style={{ width: 56, height: 56 }}
         >
@@ -1024,7 +1195,7 @@ const MapScreen = () => {
           <ProfileView
             user={selectedUser}
             friendStatus={getFriendStatus(selectedUser.id)}
-            cooldownDays={getCooldownDays(selectedUser.id)}
+            cooldownDays={getCooldownDays(selectedUser.id) || getCooldownDaysForFriend(selectedUser.id)}
             onClose={() => {
               setShowProfileView(false);
               setSelectedUser(null);
@@ -1068,7 +1239,7 @@ const MapScreen = () => {
           >
             <div
               className={`
-              bg-card/95 backdrop-blur-md rounded-3xl shadow-elevation-4 border-2 overflow-hidden
+              bg-card/90 backdrop-blur-sm rounded-lg shadow-elevation-2 border border-border/30 overflow-hidden
               ${
                 selectedActivity === "running"
                   ? "border-success/30"
@@ -1078,114 +1249,66 @@ const MapScreen = () => {
               }
             `}
             >
-              {/* Top Section - Primary Stats */}
-              <div className="p-6 space-y-4">
-                {/* Activity Header with Pulsing Heart */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+              {/* Minimal Stats Card */}
+              <div className="px-2.5 py-1.5">
+                {/* Compact Header */}
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5">
                     {selectedActivity === "running" && (
-                      <DirectionsRunIcon className="text-success" style={{ fontSize: 32 }} />
+                      <DirectionsRunIcon className="text-success" style={{ fontSize: 14 }} />
                     )}
                     {selectedActivity === "cycling" && (
-                      <DirectionsBikeIcon className="text-primary" style={{ fontSize: 32 }} />
+                      <DirectionsBikeIcon className="text-primary" style={{ fontSize: 14 }} />
                     )}
                     {selectedActivity === "walking" && (
-                      <DirectionsWalkIcon className="text-warning" style={{ fontSize: 32 }} />
+                      <DirectionsWalkIcon className="text-warning" style={{ fontSize: 14 }} />
                     )}
-                    <div>
-                      <h3 className="text-sm font-bold text-foreground">
-                        {selectedActivity.charAt(0).toUpperCase() + selectedActivity.slice(1)}
-                      </h3>
-                      <p className="text-xs text-muted-foreground">
-                        {isPaused ? "Paused" : "Active"}
-                      </p>
-                    </div>
+                    <span className="text-[10px] font-medium text-foreground capitalize">
+                      {selectedActivity}
+                    </span>
+                    <span className={`text-[9px] px-1 py-0.5 rounded ${
+                      isPaused ? "bg-muted/50 text-muted-foreground" : "bg-success/15 text-success"
+                    }`}>
+                      {isPaused ? "Paused" : "Active"}
+                    </span>
                   </div>
-                  <motion.div
-                    animate={{ scale: isPaused ? 1 : [1, 1.2, 1] }}
-                    transition={{ duration: 1, repeat: isPaused ? 0 : Infinity }}
-                  >
-                    <FavoriteIcon
-                      className={
-                        selectedActivity === "running"
-                          ? "text-success"
-                          : selectedActivity === "cycling"
-                          ? "text-primary"
-                          : "text-warning"
-                      }
-                      style={{ fontSize: 32 }}
-                    />
-                  </motion.div>
                 </div>
 
-                {/* Large Primary Stats */}
-                <div className="grid grid-cols-3 gap-4">
+                {/* Minimal Stats - Distance, Time, Avg Speed */}
+                <div className="grid grid-cols-3 gap-1.5">
                   {/* Time */}
                   <div className="text-center">
-                    <TimerIcon className="text-muted-foreground mx-auto mb-1" style={{ fontSize: 24 }} />
-                    <div className="text-3xl font-bold text-foreground tabular-nums">
+                    <TimerIcon className="text-muted-foreground mx-auto mb-0.5" style={{ fontSize: 12 }} />
+                    <div className="text-sm font-semibold text-foreground tabular-nums leading-tight">
                       {formatTime(elapsedTime)}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">Duration</div>
+                    <div className="text-[9px] text-muted-foreground">Time</div>
                   </div>
 
                   {/* Distance */}
                   <div className="text-center">
-                    <div className="text-2xl mb-1">📍</div>
-                    <div className="text-3xl font-bold text-foreground tabular-nums">
+                    <div className="text-xs mb-0.5">📍</div>
+                    <div className="text-sm font-semibold text-foreground tabular-nums leading-tight">
                       {convertDistance(distance).value}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">
+                    <div className="text-[9px] text-muted-foreground">
                       {convertDistance(distance).unit}
                     </div>
                   </div>
 
-                  {/* Speed/Pace */}
-                  <button
-                    onClick={() => setShowSpeedNotPace(!showSpeedNotPace)}
-                    className="text-center active:scale-95 transition-transform"
-                  >
-                    <SpeedIcon className="text-muted-foreground mx-auto mb-1" style={{ fontSize: 24 }} />
-                    <div className="text-3xl font-bold text-foreground tabular-nums">
-                      {showSpeedNotPace
-                        ? convertSpeed(currentSpeed).value
-                        : formatPace(currentSpeed)}
+                  {/* Average Speed */}
+                  <div className="text-center">
+                    <SpeedIcon className="text-muted-foreground mx-auto mb-0.5" style={{ fontSize: 12 }} />
+                    <div className="text-sm font-semibold text-foreground tabular-nums leading-tight">
+                      {convertSpeed(avgSpeed).value}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {showSpeedNotPace ? convertSpeed(currentSpeed).unit : "min/km"}
+                    <div className="text-[9px] text-muted-foreground">
+                      {convertSpeed(avgSpeed).unit}
                     </div>
-                  </button>
+                  </div>
                 </div>
               </div>
 
-              {/* Bottom Section - Secondary Stats */}
-              <div
-                className={`
-                grid grid-cols-2 gap-px
-                ${
-                  selectedActivity === "running"
-                    ? "bg-success/10"
-                    : selectedActivity === "cycling"
-                    ? "bg-primary/10"
-                    : "bg-warning/10"
-                }
-              `}
-              >
-                <div className="bg-card p-4 text-center">
-                  <div className="text-xs text-muted-foreground mb-1">Avg Speed</div>
-                  <div className="text-lg font-bold text-foreground tabular-nums">
-                    {convertSpeed(avgSpeed).value}{" "}
-                    <span className="text-xs font-normal">{convertSpeed(avgSpeed).unit}</span>
-                  </div>
-                </div>
-                <div className="bg-card p-4 text-center">
-                  <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">
-                    <LocalFireDepartmentIcon style={{ fontSize: 14 }} className="text-warning" />
-                    Calories
-                  </div>
-                  <div className="text-lg font-bold text-foreground tabular-nums">{calories}</div>
-                </div>
-              </div>
             </div>
           </motion.div>
         )}
@@ -1375,6 +1498,90 @@ const MapScreen = () => {
           />
         </div>
       </Drawer>
+
+      {/* Match Actions Modal */}
+      {selectedUser && (
+        <MatchActionsModal
+          isOpen={showMatchActionsModal}
+          onClose={() => {
+            setShowMatchActionsModal(false);
+            setSelectedUser(null);
+          }}
+          user={{
+            id: selectedUser.id,
+            name: selectedUser.name,
+            avatar: selectedUser.avatar,
+            activity: selectedUser.activity,
+            distance: selectedUser.distance,
+            fitnessLevel: selectedUser.fitnessLevel
+          }}
+          friendStatus={getFriendStatus(selectedUser.id)}
+          cooldownDays={getCooldownDays(selectedUser.id) || getCooldownDaysForFriend(selectedUser.id)}
+          onAddFriend={() => {
+            handleAddFriend(selectedUser.id);
+            setShowMatchActionsModal(false);
+          }}
+          onDecline={() => handleDeclineMatch(selectedUser.id)}
+          onChat={() => {
+            handleSendMessage();
+            setShowMatchActionsModal(false);
+          }}
+          onViewProfile={() => {
+            setShowProfileView(true);
+            setShowMatchActionsModal(false);
+          }}
+        />
+      )}
+
+      {/* Filter Modal */}
+      <AnimatePresence>
+        {showFilterModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowFilterModal(false)}
+              className="fixed inset-0 bg-black/50 z-40"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="fixed bottom-20 left-0 right-0 z-50 bg-background rounded-t-3xl shadow-elevation-4 p-6 space-y-4 max-h-[70vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold">Who do you want to find?</h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowFilterModal(false)}
+                >
+                  <CloseIcon />
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {[
+                  { value: "all" as SearchFilter, label: "All Levels" },
+                  { value: "beginner" as SearchFilter, label: "Beginner" },
+                  { value: "intermediate" as SearchFilter, label: "Intermediate" },
+                  { value: "pro" as SearchFilter, label: "Pro" }
+                ].map((option) => (
+                  <Button
+                    key={option.value}
+                    onClick={() => handleUpdateSearchFilter(option.value)}
+                    variant={searchFilter === option.value ? "default" : "outline"}
+                    className="w-full h-14 text-base font-semibold"
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <BottomNavigation />
     </div>

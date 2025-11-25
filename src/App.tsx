@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,7 +21,7 @@ import EditProfile from "./pages/EditProfile";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { useAuth } from "./hooks/useAuth";
-import { handleRedirectResult } from "./services/authService";
+import { auth } from "./services/firebase";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +29,7 @@ const queryClient = new QueryClient();
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
 
+  // Show loading spinner while checking auth state
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -38,7 +38,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  if (!user) {
+  // Check both hook state and Firebase auth directly as fallback
+  // This prevents race conditions where hook hasn't updated yet but user is authenticated
+  const isAuthenticated = user || auth.currentUser;
+
+  if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
@@ -153,19 +157,17 @@ const AppContent = () => {
 };
 
 const App = () => {
-  // Check for redirect result on mount (handles Google Sign-In redirects)
-  useEffect(() => {
-    handleRedirectResult().catch((err) => {
-      console.error("Error handling redirect result:", err);
-    });
-  }, []);
-
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
           <UserProvider>
             <NotificationProvider>
               <AppContent />

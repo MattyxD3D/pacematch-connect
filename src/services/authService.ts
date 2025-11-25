@@ -226,6 +226,7 @@ const saveUserToDatabase = async (user: User): Promise<void> => {
           visibleToAllLevels: true,
           allowedLevels: ["beginner", "intermediate", "pro"]
         },
+        searchFilter: "all", // Who do I want to find? (Beginner/Intermediate/Pro/All)
         radiusPreference: "normal"
       });
     } else {
@@ -242,6 +243,7 @@ const saveUserToDatabase = async (user: User): Promise<void> => {
           visibleToAllLevels: true,
           allowedLevels: ["beginner", "intermediate", "pro"]
         },
+        searchFilter: existingData.searchFilter || "all",
         radiusPreference: existingData.radiusPreference || "normal"
       });
     }

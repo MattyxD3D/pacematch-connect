@@ -11,6 +11,8 @@ export interface VisibilitySettings {
   allowedLevels: FitnessLevel[];
 }
 
+export type SearchFilter = FitnessLevel | "all";
+
 export interface MatchingUser {
   uid: string;
   location: { lat: number; lng: number };
@@ -18,6 +20,7 @@ export interface MatchingUser {
   fitnessLevel: FitnessLevel;
   pace: number; // min/km for running/walking, km/h for cycling
   visibility: VisibilitySettings;
+  searchFilter?: SearchFilter; // Who do I want to find? (Beginner/Intermediate/Pro/All)
   radiusPreference?: RadiusPreference;
   [key: string]: any; // Allow other user properties
 }
@@ -28,56 +31,23 @@ export interface MatchResult {
   distance: number; // in meters
 }
 
-// Base radius in meters
-const BASE_RADIUS: Record<Activity, number> = {
-  walk: 400,
-  running: 1000,
-  cycling: 5000,
-  walking: 400
-};
-
-const MIN_RADIUS: Record<Activity, number> = {
-  walk: 200,
-  running: 500,
-  cycling: 3000,
-  walking: 200
-};
-
-const MAX_RADIUS: Record<Activity, number> = {
-  walk: 800,
-  running: 2000,
-  cycling: 10000,
-  walking: 800
+// Fixed radius in meters for each activity type
+const FIXED_RADIUS: Record<Activity, number> = {
+  cycling: 10000,  // 10km for cycling
+  running: 2000,   // 2km for running
+  walking: 1000    // 1km for walking
 };
 
 /**
- * Compute dynamic radius based on activity, density, and user preference
+ * Get fixed radius based on activity type
+ * Cycling: 10km, Running: 2km, Walking: 1km
  */
 export function computeRadius(
   user: MatchingUser,
-  nearbyCount: number
+  nearbyCount?: number
 ): number {
-  // Normalize activity name (walking -> walk)
-  const activityKey = user.activity === "walking" ? "walk" : user.activity;
-  let base = BASE_RADIUS[activityKey] || BASE_RADIUS.running;
-
-  // Density factor
-  let densityFactor =
-    nearbyCount > 20 ? 0.5 :
-    nearbyCount === 0 ? 2 : 1;
-
-  // User preference factor
-  let prefFactor =
-    user.radiusPreference === "nearby" ? 0.5 :
-    user.radiusPreference === "wide" ? 2 : 1;
-
-  let rawRadius = base * densityFactor * prefFactor;
-
-  // Clamp to min/max
-  const min = MIN_RADIUS[activityKey] || MIN_RADIUS.running;
-  const max = MAX_RADIUS[activityKey] || MAX_RADIUS.running;
-  
-  return Math.max(min, Math.min(max, rawRadius));
+  // Return fixed radius based on activity type
+  return FIXED_RADIUS[user.activity] || FIXED_RADIUS.running;
 }
 
 /**
@@ -163,9 +133,8 @@ export function matchUsers(
   allUsers: Record<string, any>,
   nearbyCount?: number
 ): MatchResult[] {
-  // Compute radius
-  const count = nearbyCount ?? Object.keys(allUsers).length;
-  const radius = computeRadius(user, count);
+  // Get fixed radius based on activity type
+  const radius = computeRadius(user, nearbyCount);
   const radiusKm = radius / 1000; // Convert to km for filterUsersByDistance
 
   // Get nearby users within radius
@@ -184,14 +153,24 @@ export function matchUsers(
       const candidateFitnessLevel = candidate.fitnessLevel || "intermediate";
       const candidatePace = candidate.pace || null;
       const candidateActivity = candidate.activity || user.activity;
+      const candidateVisibility = candidate.visibility || {
+        visibleToAllLevels: true,
+        allowedLevels: ["beginner", "intermediate", "pro"]
+      };
 
       // Only match users with same activity
       if (candidateActivity !== user.activity) {
         return null;
       }
 
-      // Check fitness level compatibility
-      if (!fitnessAllowed(user.fitnessLevel, candidateFitnessLevel, user.visibility)) {
+      // Check if user's search filter matches candidate's fitness level
+      const userSearchFilter = user.searchFilter || "all";
+      if (userSearchFilter !== "all" && candidateFitnessLevel !== userSearchFilter) {
+        return null;
+      }
+
+      // Check if candidate's visibility filter allows user's fitness level
+      if (!fitnessAllowed(user.fitnessLevel, candidateFitnessLevel, candidateVisibility)) {
         return null;
       }
 
@@ -204,7 +183,8 @@ export function matchUsers(
         ...candidate,
         fitnessLevel: candidateFitnessLevel,
         pace: candidatePace,
-        activity: candidateActivity
+        activity: candidateActivity,
+        visibility: candidateVisibility
       };
     })
     .filter((c): c is MatchingUser & { id: string; distance: number } => c !== null);

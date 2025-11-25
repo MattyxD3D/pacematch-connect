@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
@@ -7,24 +7,96 @@ import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import PeopleIcon from "@mui/icons-material/People";
 import { signInWithGoogle, handleRedirectResult } from "@/services/authService";
 import { toast } from "sonner";
-import { useEffect } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { auth } from "@/services/firebase";
 
 const LoginScreen = () => {
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasCheckedRedirect = useRef(false);
 
-  // Check for redirect result on mount
+  // Redirect if user is already authenticated
   useEffect(() => {
-    const checkRedirectResult = async () => {
-      try {
-        console.log("🔄 Checking for redirect result...");
-        const user = await handleRedirectResult();
-        if (user) {
-          console.log("✅ Redirect result found! User:", user.uid);
-          // Check if user has completed profile setup
+    if (!authLoading && user) {
+      // User is already logged in, redirect them away from login page
+      const checkUserProfile = async () => {
+        try {
           const { getUserData } = await import("@/services/authService");
           const userData = await getUserData(user.uid);
+          
+          if (userData && userData.activity) {
+            navigate("/", { replace: true });
+          } else {
+            navigate("/profile-setup", { replace: true });
+          }
+        } catch (err) {
+          console.error("Error checking user profile:", err);
+        }
+      };
+      checkUserProfile();
+    }
+  }, [user, authLoading, navigate]);
+
+  // Check for redirect result on mount (only once, only if not authenticated)
+  useEffect(() => {
+    // Only check redirect result if:
+    // 1. We haven't checked it yet (useRef flag)
+    // 2. Auth is not loading
+    // 3. User is not authenticated
+    if (hasCheckedRedirect.current || authLoading || user) {
+      return;
+    }
+
+    const checkRedirectResult = async () => {
+      hasCheckedRedirect.current = true;
+      try {
+        console.log("🔄 Checking for redirect result...");
+        const redirectUser = await handleRedirectResult();
+        if (redirectUser) {
+          console.log("✅ Redirect result found! User:", redirectUser.uid);
+          
+          // Wait for Firebase auth state to update before navigating
+          // This prevents race condition where ProtectedRoute doesn't see the user yet
+          // After getRedirectResult, auth.currentUser should be set, but we need to wait
+          // for onAuthStateChanged to fire and React to re-render with the new state
+          const waitForAuthState = (): Promise<void> => {
+            return new Promise((resolve) => {
+              // Check if auth.currentUser is already set (should be after getRedirectResult)
+              if (auth.currentUser && auth.currentUser.uid === redirectUser.uid) {
+                console.log("✅ Auth state already updated");
+                // Give React time to process the state update from onAuthStateChanged
+                setTimeout(resolve, 300);
+                return;
+              }
+              
+              // Wait for auth state to update (max 2 seconds)
+              const timeout = setTimeout(() => {
+                console.warn("⚠️ Auth state update timeout, proceeding anyway");
+                unsubscribe();
+                resolve();
+              }, 2000);
+              
+              // Listen for auth state change
+              const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+                if (firebaseUser && firebaseUser.uid === redirectUser.uid) {
+                  console.log("✅ Auth state updated, user:", firebaseUser.uid);
+                  clearTimeout(timeout);
+                  unsubscribe();
+                  // Give React time to process the state update
+                  setTimeout(resolve, 300);
+                }
+              });
+            });
+          };
+          
+          // Wait for auth state to update
+          await waitForAuthState();
+          
+          // Check if user has completed profile setup
+          const { getUserData } = await import("@/services/authService");
+          const userData = await getUserData(redirectUser.uid);
           console.log("📋 User data from Firebase:", userData);
           
           if (userData && userData.activity) {
@@ -39,10 +111,11 @@ const LoginScreen = () => {
         }
       } catch (err: any) {
         console.error("❌ Error handling redirect:", err);
+        hasCheckedRedirect.current = false; // Reset on error so user can try again
       }
     };
     checkRedirectResult();
-  }, [navigate]);
+  }, [authLoading, user, navigate]);
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
@@ -61,6 +134,10 @@ const LoginScreen = () => {
       }
 
       console.log("✅ Sign-in successful! User:", user.uid);
+      
+      // Wait for auth state to update (for popup sign-in, it should be immediate)
+      // But add a small delay to ensure useAuth hook has updated
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check if user has completed profile setup
       const { getUserData } = await import("@/services/authService");

@@ -1,7 +1,7 @@
 // Custom hook for matching users using PACE-MATCH algorithm
 import { useState, useEffect, useRef, useMemo } from "react";
 import { listenToAllUsers } from "@/services/locationService";
-import { matchUsers, MatchingUser, MatchResult, Activity, FitnessLevel, RadiusPreference, VisibilitySettings } from "@/services/matchingService";
+import { matchUsers, MatchingUser, MatchResult, Activity, FitnessLevel, RadiusPreference, VisibilitySettings, SearchFilter } from "@/services/matchingService";
 import { getUserData } from "@/services/authService";
 
 export interface UseMatchingOptions {
@@ -11,6 +11,7 @@ export interface UseMatchingOptions {
   fitnessLevel?: FitnessLevel;
   pace?: number;
   visibility?: VisibilitySettings;
+  searchFilter?: SearchFilter; // Who do I want to find?
   radiusPreference?: RadiusPreference;
 }
 
@@ -31,6 +32,7 @@ export const useMatching = (options: UseMatchingOptions): UseMatchingResult => {
     fitnessLevel = "intermediate",
     pace,
     visibility = { visibleToAllLevels: true, allowedLevels: ["beginner", "intermediate", "pro"] },
+    searchFilter = "all",
     radiusPreference = "normal"
   } = options;
 
@@ -86,6 +88,7 @@ export const useMatching = (options: UseMatchingOptions): UseMatchingResult => {
     const effectiveFitnessLevel = userData?.fitnessLevel || fitnessLevel;
     const effectivePace = userData?.pace || pace || null;
     const effectiveVisibility = userData?.visibility || stableVisibility;
+    const effectiveSearchFilter = userData?.searchFilter || searchFilter;
     const effectiveRadiusPreference = userData?.radiusPreference || radiusPreference;
     const effectiveActivity = userData?.activity || activity;
 
@@ -97,6 +100,7 @@ export const useMatching = (options: UseMatchingOptions): UseMatchingResult => {
       fitnessLevel: effectiveFitnessLevel,
       pace: effectivePace || 0,
       visibility: effectiveVisibility,
+      searchFilter: effectiveSearchFilter,
       radiusPreference: effectiveRadiusPreference
     };
 
@@ -126,6 +130,7 @@ export const useMatching = (options: UseMatchingOptions): UseMatchingResult => {
     fitnessLevel,
     pace,
     stableVisibility,
+    searchFilter,
     radiusPreference,
     userData
   ]);

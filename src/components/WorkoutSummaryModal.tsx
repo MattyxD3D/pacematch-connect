@@ -8,7 +8,6 @@ import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import TimerIcon from "@mui/icons-material/Timer";
 import SpeedIcon from "@mui/icons-material/Speed";
-import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import ShareIcon from "@mui/icons-material/Share";
 import CloseIcon from "@mui/icons-material/Close";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
@@ -24,7 +23,6 @@ interface WorkoutSummaryModalProps {
   duration: number; // in seconds
   distance: number; // in km
   avgSpeed: number; // in km/h
-  calories: number;
   useMetric: boolean;
 }
 
@@ -37,7 +35,6 @@ export const WorkoutSummaryModal = ({
   duration,
   distance,
   avgSpeed,
-  calories,
   useMetric,
 }: WorkoutSummaryModalProps) => {
   const [photos, setPhotos] = useState<string[]>([]);
@@ -201,20 +198,6 @@ export const WorkoutSummaryModal = ({
               <div className="text-xs text-muted-foreground mt-1">Avg Speed</div>
             </motion.div>
           </div>
-
-          {/* Secondary Stats */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.6 }}
-            className="bg-muted/50 rounded-lg p-4"
-          >
-            <div className="flex items-center justify-center gap-2">
-              <LocalFireDepartmentIcon className="text-warning" style={{ fontSize: 24 }} />
-              <span className="text-lg font-bold">{calories}</span>
-              <span className="text-sm text-muted-foreground">calories burned</span>
-            </div>
-          </motion.div>
 
           {/* Photo Upload Section */}
           <motion.div

@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { FitnessLevel, RadiusPreference, VisibilitySettings } from "@/contexts/UserContext";
+import { SearchFilter } from "@/services/matchingService";
 import { useUser } from "@/contexts/UserContext";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Avatar from "@mui/material/Avatar";
@@ -41,6 +42,7 @@ const Settings = () => {
   const [pace, setPace] = useState("");
   const [visibleToAllLevels, setVisibleToAllLevels] = useState(true);
   const [allowedLevels, setAllowedLevels] = useState<FitnessLevel[]>(["beginner", "intermediate", "pro"]);
+  const [searchFilter, setSearchFilter] = useState<SearchFilter>("all");
   const [radiusPreference, setRadiusPreference] = useState<RadiusPreference>("normal");
   const [saving, setSaving] = useState(false);
   const [isEditingMatching, setIsEditingMatching] = useState(false);
@@ -92,6 +94,7 @@ const Settings = () => {
             setVisibleToAllLevels(userData.visibility.visibleToAllLevels ?? true);
             setAllowedLevels(userData.visibility.allowedLevels || ["beginner", "intermediate", "pro"]);
           }
+          setSearchFilter(userData.searchFilter || "all");
           setRadiusPreference(userData.radiusPreference || "normal");
         }
       }
@@ -189,6 +192,7 @@ const Settings = () => {
         fitnessLevel: fitnessLevel,
         pace: paceValue,
         visibility: visibility,
+        searchFilter: searchFilter,
         radiusPreference: radiusPreference
       });
       setIsEditingMatching(false);
@@ -219,6 +223,13 @@ const Settings = () => {
     { value: "nearby", label: "Nearby" },
     { value: "normal", label: "Normal" },
     { value: "wide", label: "Wide" }
+  ];
+
+  const searchFilterOptions: { value: SearchFilter; label: string }[] = [
+    { value: "all", label: "All Levels" },
+    { value: "beginner", label: "Beginner" },
+    { value: "intermediate", label: "Intermediate" },
+    { value: "pro", label: "Pro" }
   ];
 
   const getPaceUnit = () => {
@@ -495,6 +506,13 @@ const Settings = () => {
                 </div>
 
                 <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Search Filter</Label>
+                  <p className="text-lg font-semibold capitalize">
+                    {searchFilter === "all" ? "All Levels" : searchFilter}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">Search Radius</Label>
                   <p className="text-lg font-semibold capitalize">{radiusPreference}</p>
                 </div>
@@ -571,6 +589,25 @@ const Settings = () => {
                 </div>
 
                 <div className="space-y-2">
+                  <Label>Who do you want to find?</Label>
+                  <Select value={searchFilter} onValueChange={(value) => setSearchFilter(value as SearchFilter)}>
+                    <SelectTrigger className="h-12">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {searchFilterOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Filter matches by fitness level. You can change this anytime on the map.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
                   <Label>Search Radius Preference</Label>
                   <Select value={radiusPreference} onValueChange={(value) => setRadiusPreference(value as RadiusPreference)}>
                     <SelectTrigger className="h-12">
@@ -605,6 +642,7 @@ const Settings = () => {
                               setVisibleToAllLevels(userData.visibility.visibleToAllLevels ?? true);
                               setAllowedLevels(userData.visibility.allowedLevels || ["beginner", "intermediate", "pro"]);
                             }
+                            setSearchFilter(userData.searchFilter || "all");
                             setRadiusPreference(userData.radiusPreference || "normal");
                           }
                         });

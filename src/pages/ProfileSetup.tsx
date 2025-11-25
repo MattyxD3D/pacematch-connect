@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { updateUserProfile } from "@/services/authService";
 import { FitnessLevel, RadiusPreference, VisibilitySettings } from "@/contexts/UserContext";
+import { SearchFilter } from "@/services/matchingService";
 
 const ProfileSetup = () => {
   const navigate = useNavigate();
@@ -25,6 +26,7 @@ const ProfileSetup = () => {
   const [pace, setPace] = useState("");
   const [visibleToAllLevels, setVisibleToAllLevels] = useState(true);
   const [allowedLevels, setAllowedLevels] = useState<FitnessLevel[]>(["beginner", "intermediate", "pro"]);
+  const [searchFilter, setSearchFilter] = useState<SearchFilter>("all");
   const [radiusPreference, setRadiusPreference] = useState<RadiusPreference>("normal");
   const [saving, setSaving] = useState(false);
 
@@ -51,6 +53,7 @@ const ProfileSetup = () => {
             setVisibleToAllLevels(userData.visibility.visibleToAllLevels ?? true);
             setAllowedLevels(userData.visibility.allowedLevels || ["beginner", "intermediate", "pro"]);
           }
+          if (userData.searchFilter) setSearchFilter(userData.searchFilter);
           if (userData.radiusPreference) setRadiusPreference(userData.radiusPreference);
         }
       }
@@ -85,6 +88,7 @@ const ProfileSetup = () => {
         fitnessLevel: fitnessLevel,
         pace: paceValue,
         visibility: visibility,
+        searchFilter: searchFilter,
         radiusPreference: radiusPreference
       });
       toast.success("Profile created successfully!");
@@ -113,6 +117,13 @@ const ProfileSetup = () => {
     { value: "nearby", label: "Nearby" },
     { value: "normal", label: "Normal" },
     { value: "wide", label: "Wide" }
+  ];
+
+  const searchFilterOptions: { value: SearchFilter; label: string }[] = [
+    { value: "all", label: "All Levels" },
+    { value: "beginner", label: "Beginner" },
+    { value: "intermediate", label: "Intermediate" },
+    { value: "pro", label: "Pro" }
   ];
 
   const handleLevelToggle = (level: FitnessLevel) => {
@@ -330,11 +341,36 @@ const ProfileSetup = () => {
           )}
         </motion.div>
 
-        {/* Radius Preference */}
+        {/* Search Filter - Who do you want to find? */}
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.3, delay: 0.8 }}
+          className="space-y-2"
+        >
+          <Label className="text-base">Who do you want to find?</Label>
+          <Select value={searchFilter} onValueChange={(value) => setSearchFilter(value as SearchFilter)}>
+            <SelectTrigger className="h-12">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {searchFilterOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Filter matches by fitness level. You can change this anytime on the map.
+          </p>
+        </motion.div>
+
+        {/* Radius Preference */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.3, delay: 0.9 }}
           className="space-y-2"
         >
           <Label className="text-base">Search Radius Preference</Label>
@@ -359,7 +395,7 @@ const ProfileSetup = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.9 }}
+          transition={{ duration: 0.3, delay: 1.0 }}
         >
           <Button
             onClick={handleComplete}

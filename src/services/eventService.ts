@@ -38,8 +38,16 @@ export const createEvent = async (
     const newEventRef = push(eventsRef);
     const eventId = newEventRef.key!;
     
+    // Filter out undefined values to avoid Firebase errors
+    const cleanEventData: any = {};
+    Object.entries(eventData).forEach(([key, value]) => {
+      if (value !== undefined) {
+        cleanEventData[key] = value;
+      }
+    });
+    
     const event: Event = {
-      ...eventData,
+      ...cleanEventData,
       id: eventId,
       hostId,
       participants: [hostId], // Host is automatically a participant

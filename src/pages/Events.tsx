@@ -153,6 +153,10 @@ const Events = () => {
   const [mapRef, setMapRef] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   
+  // Pin drop state for event creation
+  const [pendingEventLocation, setPendingEventLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [tempMarkerPosition, setTempMarkerPosition] = useState<{ lat: number; lng: number } | null>(null);
+  
   // Google Maps API loader
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const { isLoaded, loadError } = useJsApiLoader({
@@ -370,8 +374,8 @@ const Events = () => {
       const eventDate = new Date(eventData.date);
       const formattedDate = eventDate.toISOString().split('T')[0];
       
-      // Create event in Firebase
-      const eventId = await createEvent(currentUser.uid, {
+      // Prepare event data, only include maxParticipants if it's defined
+      const eventPayload: any = {
         title: eventData.title,
         description: eventData.description,
         type: eventData.activityType,
@@ -385,11 +389,21 @@ const Events = () => {
         lng: eventLng,
         hostName: userData?.name || currentUser.displayName || "User",
         hostAvatar: userData?.photoURL || currentUser.photoURL || "",
-        maxParticipants: eventData.maxParticipants,
-      });
+      };
+      
+      // Only add maxParticipants if it's defined and greater than 0
+      if (eventData.maxParticipants && eventData.maxParticipants > 0) {
+        eventPayload.maxParticipants = eventData.maxParticipants;
+      }
+      
+      // Create event in Firebase
+      const eventId = await createEvent(currentUser.uid, eventPayload);
       
       toast.success("Event created successfully!");
       setShowCreateEvent(false);
+      // Clear temp marker after successful creation
+      setTempMarkerPosition(null);
+      setPendingEventLocation(null);
       // The real-time listener will update the events automatically
     } catch (error: any) {
       console.error("Error creating event:", error);
@@ -641,6 +655,18 @@ const Events = () => {
                         map.panTo({ lat: userLocation.lat, lng: userLocation.lng });
                       }
                     }}
+                    onClick={(e) => {
+                      // Allow clicking anywhere on the map to drop a pin for event creation
+                      // Don't handle clicks if clicking on markers (they have their own handlers)
+                      if (e.latLng && !e.placeId) {
+                        const lat = e.latLng.lat();
+                        const lng = e.latLng.lng();
+                        setTempMarkerPosition({ lat, lng });
+                        setPendingEventLocation({ lat, lng });
+                        // Clear any selected event marker when placing new pin
+                        setSelectedMarkerEvent(null);
+                      }
+                    }}
                     options={{
                       disableDefaultUI: false,
                       zoomControl: true,
@@ -661,6 +687,24 @@ const Events = () => {
                       />
                     )}
 
+                    {/* Temporary Marker for Create Mode */}
+                    {tempMarkerPosition && (
+                      <Marker
+                        position={{ lat: tempMarkerPosition.lat, lng: tempMarkerPosition.lng }}
+                        icon={{
+                          url: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+                          scaledSize: new window.google.maps.Size(48, 48),
+                        }}
+                        title="Event location"
+                        onClick={(e) => {
+                          // Prevent map click from firing when clicking marker
+                          if (e && (e as any).stopPropagation) {
+                            (e as any).stopPropagation();
+                          }
+                        }}
+                      />
+                    )}
+
                     {/* Event Markers */}
                     {sortedEvents.map((event) => {
                       const checkInCount = checkInCounts[event.id] || 0;
@@ -673,18 +717,73 @@ const Events = () => {
                           position={{ lat: event.lat, lng: event.lng }}
                           mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
                         >
-                          <EventMarker
-                            event={event}
-                            checkInCount={checkInCount}
-                            countdown={countdown}
-                            onClick={() => setSelectedMarkerEvent(event)}
-                          />
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <EventMarker
+                              event={event}
+                              checkInCount={checkInCount}
+                              countdown={countdown}
+                              onClick={() => {
+                                setSelectedMarkerEvent(event);
+                                // Clear temp marker if clicking on existing event while in create mode
+                                if (tempMarkerPosition) {
+                                  setTempMarkerPosition(null);
+                                  setPendingEventLocation(null);
+                                }
+                              }}
+                            />
+                          </div>
                         </OverlayView>
                       );
                     })}
 
+                    {/* InfoWindow for temporary marker (Create Mode) */}
+                    {tempMarkerPosition && !showCreateEvent && (
+                      <InfoWindow
+                        position={{ lat: tempMarkerPosition.lat, lng: tempMarkerPosition.lng }}
+                        onCloseClick={() => {
+                          setTempMarkerPosition(null);
+                          setPendingEventLocation(null);
+                        }}
+                      >
+                        <div className="p-3 min-w-[200px]">
+                          <h3 className="font-bold text-base mb-2">Create Event Here</h3>
+                          <div className="space-y-2 text-sm">
+                            <div className="text-muted-foreground">
+                              <p>Location selected:</p>
+                              <p className="font-mono text-xs">
+                                {tempMarkerPosition.lat.toFixed(6)}, {tempMarkerPosition.lng.toFixed(6)}
+                              </p>
+                            </div>
+                            <div className="flex gap-2 mt-3">
+                              <Button
+                                onClick={() => {
+                                  // Remove the pin
+                                  setTempMarkerPosition(null);
+                                  setPendingEventLocation(null);
+                                }}
+                                variant="outline"
+                                className="flex-1 h-8 text-xs"
+                                size="sm"
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  setShowCreateEvent(true);
+                                }}
+                                className="flex-1 h-8 text-xs"
+                                size="sm"
+                              >
+                                Create Event Here
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </InfoWindow>
+                    )}
+
                     {/* InfoWindow for selected marker */}
-                    {selectedMarkerEvent && (
+                    {selectedMarkerEvent && !tempMarkerPosition && (
                       <InfoWindow
                         position={{ lat: selectedMarkerEvent.lat, lng: selectedMarkerEvent.lng }}
                         onCloseClick={() => setSelectedMarkerEvent(null)}
@@ -925,9 +1024,14 @@ const Events = () => {
       {/* Create Event Modal */}
       {showCreateEvent && (
         <CreateEventModal
-          onClose={() => setShowCreateEvent(false)}
+          onClose={() => {
+            setShowCreateEvent(false);
+            // Clear temp marker when modal closes
+            setTempMarkerPosition(null);
+            setPendingEventLocation(null);
+          }}
           onCreateEvent={handleCreateEvent}
-          userLocation={userLocation}
+          initialLocation={pendingEventLocation}
         />
       )}
 

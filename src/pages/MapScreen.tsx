@@ -48,6 +48,7 @@ import { useMatching } from "@/hooks/useMatching";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDistance } from "@/utils/distance";
 import { SearchFilter } from "@/services/matchingService";
+import { isWorkoutActive } from "@/utils/workoutState";
 import { updateUserProfile } from "@/services/authService";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
@@ -100,6 +101,8 @@ import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
+import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import MailIcon from "@mui/icons-material/Mail";
 import BottomNavigation from "@/components/BottomNavigation";
 
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
@@ -184,7 +187,7 @@ const MapScreen = () => {
   const routerLocation = useRouterLocation();
   const { user } = useAuth();
   const { userProfile, hasActivity, useMetric, addWorkout, setUserProfile } = useUser();
-  const { addNotification, unreadMessageCount, unreadFriendRequestCount } = useNotificationContext();
+  const { addNotification, unreadMessageCount, unreadFriendRequestCount, notifications, unreadCount, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
   
   // Get focusFriend from navigation state (when coming from Index page)
   const focusFriend = routerLocation.state?.focusFriend;
@@ -226,6 +229,7 @@ const MapScreen = () => {
   const [totalPausedTime, setTotalPausedTime] = useState(0); // Total paused duration in seconds
   const [showSummary, setShowSummary] = useState(false);
   const [showSpeedNotPace, setShowSpeedNotPace] = useState(true);
+  const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
   const lastDistanceRef = useRef(0);
   const lastTimeRef = useRef(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -450,38 +454,39 @@ const MapScreen = () => {
     const unsubscribe = listenToPokes(user.uid, (pokeUserIds) => {
       setPokes(pokeUserIds);
       
-      // Track pokes received during workout
+      // Only process pokes and create notifications when workout is active
       if (isActive) {
+        // Track pokes received during workout
         setWorkoutPokes(prev => {
           const newPokes = pokeUserIds.filter(id => !prev.includes(id));
           return [...prev, ...newPokes];
         });
-      }
-      
-      // Create notifications only for NEW pokes (not already notified)
-      if (pokeUserIds.length > 0 && addNotification) {
-        const newPokeUserIds = pokeUserIds.filter(id => !notifiedPokesRef.current.has(id));
         
-        // Mark all current pokes as notified
-        pokeUserIds.forEach(id => notifiedPokesRef.current.add(id));
-        
-        // Get user data for new pokes and create notifications
-        newPokeUserIds.forEach(async (pokeUserId) => {
-          try {
-            const { getUserData } = await import("@/services/authService");
-            const userData = await getUserData(pokeUserId);
-            if (userData) {
-              addNotification({
-                type: "poke",
-                userId: parseInt(pokeUserId) || 0,
-                userName: userData.name || "Someone",
-                userAvatar: userData.photoURL || ""
-              });
+        // Create notifications only for NEW pokes (not already notified) during active workout
+        if (pokeUserIds.length > 0 && addNotification) {
+          const newPokeUserIds = pokeUserIds.filter(id => !notifiedPokesRef.current.has(id));
+          
+          // Mark all current pokes as notified
+          pokeUserIds.forEach(id => notifiedPokesRef.current.add(id));
+          
+          // Get user data for new pokes and create notifications
+          newPokeUserIds.forEach(async (pokeUserId) => {
+            try {
+              const { getUserData } = await import("@/services/authService");
+              const userData = await getUserData(pokeUserId);
+              if (userData) {
+                addNotification({
+                  type: "poke",
+                  userId: parseInt(pokeUserId) || 0,
+                  userName: userData.name || "Someone",
+                  userAvatar: userData.photoURL || ""
+                });
+              }
+            } catch (error) {
+              console.error("Error fetching poke user data:", error);
             }
-          } catch (error) {
-            console.error("Error fetching poke user data:", error);
-          }
-        });
+          });
+        }
       }
     });
 
@@ -600,7 +605,15 @@ const MapScreen = () => {
     fetchMessageRequestUsers();
   }, [messageRequests]);
 
-
+  // Mark all notifications as read when notification drawer opens
+  // This makes the red indicator disappear when user views notifications
+  useEffect(() => {
+    if (showNotificationDrawer && unreadCount > 0) {
+      // Mark all notifications as read when user opens the drawer to view them
+      // This removes the red indicator from the notification bell
+      markAllAsRead();
+    }
+  }, [showNotificationDrawer]);
 
   // Get matched users using matching algorithm
   const { matches, loading: matchesLoading } = useMatching({
@@ -1002,10 +1015,10 @@ const MapScreen = () => {
     }
     
     // Always show summary when stopping activity (to show nearby people and stats)
-    // Use a small delay to ensure state updates are complete
+    // Use a delay to ensure the stop confirmation dialog is fully closed first
     setTimeout(() => {
       setShowSummary(true);
-    }, 100);
+    }, 300);
   };
   
   const handlePause = () => {
@@ -1146,13 +1159,26 @@ const MapScreen = () => {
     try {
       // Save to Firebase Realtime Database
       console.log("💾 Saving workout to Firebase:", workoutData);
-      await saveWorkout(user.uid, workoutData);
+      const workoutId = await saveWorkout(user.uid, workoutData);
       console.log("✅ Workout saved successfully to Firebase");
       
       // Also save to localStorage via context (for offline/fallback)
       addWorkout(workoutData);
       
-      toast.success(`Workout saved! ${distance.toFixed(2)} km tracked.`);
+      // Add workout completion notification with workout ID
+      addNotification({
+        type: "workout_complete",
+        userId: parseInt(user.uid) || 0,
+        userName: "Workout Complete",
+        userAvatar: "",
+        message: `Great job! You completed ${distance.toFixed(2)} km of ${selectedActivity}`,
+        workoutId: workoutId
+      });
+      console.log("✅ Workout completion notification added. Unread count should update.");
+      
+      toast.success(`Workout saved! ${distance.toFixed(2)} km tracked.`, {
+        position: "bottom-center"
+      });
       setShowSummary(false);
       setPointsTracked(0);
       setDistance(0);
@@ -1209,7 +1235,7 @@ const MapScreen = () => {
     return { value: (kmh * 0.621371).toFixed(1), unit: "mph" };
   };
 
-  const handleNotificationTap = () => {
+  const handleNotificationBannerTap = () => {
     setShowNotification(false);
     handleStartStop();
   };
@@ -1388,7 +1414,7 @@ const MapScreen = () => {
   }, [focusFriend, mapRef, isLoaded]);
 
   // Update map center when location changes
-  // When activity is selected, always keep map centered on user (locked perspective)
+  // When workout is active, always keep map centered on user (locked perspective)
   useEffect(() => {
     if (!location || !location.lat || !location.lng || !mapRef || !isLoaded || !window.google) {
       return;
@@ -1415,12 +1441,13 @@ const MapScreen = () => {
           return prev;
         });
         
-        // Center map on user when location is first obtained or when activity is selected
-        if (selectedActivity) {
+        // Center map on user when workout is active (locked), otherwise allow free panning
+        if (isActive) {
           mapRef.panTo({ lat: location.lat, lng: location.lng });
           mapRef.setCenter({ lat: location.lat, lng: location.lng });
         } else {
-          mapRef.panTo({ lat: location.lat, lng: location.lng });
+          // When inactive, only pan if user hasn't manually moved the map
+          // This allows free dragging when workout is not active
         }
       } else if (isNavigationStyle) {
         const cameraCenter = calculateCameraOffset(location.lat, location.lng, userHeading || 0);
@@ -1435,14 +1462,14 @@ const MapScreen = () => {
           return prev;
         });
         mapRef.panTo(cameraCenter);
-        if (selectedActivity) {
+        if (isActive) {
           mapRef.setCenter(cameraCenter);
         }
       }
     }, 100); // Small delay to batch updates
     
     return () => clearTimeout(updateTimer);
-  }, [location, isNavigationStyle, userHeading, mapRef, isLoaded, selectedActivity]);
+  }, [location, isNavigationStyle, userHeading, mapRef, isLoaded, isActive]);
 
   // Get zoom radius for selected activity and zoom level
   const getZoomRadiusForActivity = (
@@ -1461,9 +1488,9 @@ const MapScreen = () => {
         far: 15000     // 15km - very wide
       },
       walking: {
-        close: 100,    // 100m - really close
-        medium: 1000,  // 1km - current default
-        far: 3000      // 3km - wider view
+        close: 50,     // 50m - really close
+        medium: 150,   // 150m - medium
+        far: 300       // 300m - wider view
       }
     };
     return zoomConfig[activity][zoomLevel];
@@ -1482,24 +1509,24 @@ const MapScreen = () => {
     }
   }, [selectedActivity, zoomLevel, location, mapRef, isLoaded, isNavigationStyle]);
 
-  // Lock/unlock map when activity selection changes
+  // Lock/unlock map when workout is active
   useEffect(() => {
     if (mapRef && isLoaded && window.google) {
-      // Lock map when activity is selected (running, cycling, or walking)
+      // Lock map when workout is active (isActive = true)
       // But allow zoom controls so user can zoom in/out on their location
       mapRef.setOptions({
-        draggable: !selectedActivity, // Disable dragging/panning
+        draggable: !isActive, // Disable dragging/panning when workout is active
         scrollwheel: true, // Allow scroll zoom
-        disableDoubleClickZoom: !!selectedActivity, // Disable double-click zoom
-        gestureHandling: selectedActivity ? "cooperative" : "auto" // Allow zoom but not pan when activity is selected
+        disableDoubleClickZoom: !!isActive, // Disable double-click zoom when workout is active
+        gestureHandling: isActive ? "cooperative" : "auto" // Allow zoom but not pan when workout is active
       });
       
-      // Force center on user when activity is selected
-      if (selectedActivity && location) {
+      // Force center on user when workout is active
+      if (isActive && location) {
         mapRef.setCenter({ lat: location.lat, lng: location.lng });
       }
     }
-  }, [selectedActivity, mapRef, isLoaded, location]);
+  }, [isActive, mapRef, isLoaded, location]);
 
   const onMapLoad = useCallback((map: any) => {
     setMapRef(map);
@@ -1508,8 +1535,8 @@ const MapScreen = () => {
         mapTypeId: window.google.maps.MapTypeId.ROADMAP
       });
       
-      // Lock map when activity is selected (disable dragging but allow zoom)
-      if (selectedActivity) {
+      // Lock map when workout is active (disable dragging but allow zoom)
+      if (isActive) {
         map.setOptions({
           draggable: false, // Disable dragging/panning
           scrollwheel: true, // Allow scroll zoom
@@ -1518,7 +1545,7 @@ const MapScreen = () => {
         });
       }
     }
-  }, [selectedActivity]);
+  }, [isActive]);
 
   const onMarkerClick = (userData: any) => {
     // Ensure user data structure matches ProfileView expectations
@@ -1565,6 +1592,12 @@ const MapScreen = () => {
   const handlePoke = async (userId: string) => {
     if (!user?.uid) {
       toast.error("You must be logged in to poke someone");
+      return;
+    }
+
+    // Check if user has active workout session
+    if (!isActive && !isWorkoutActive()) {
+      toast.error("You must have an active workout session to poke someone");
       return;
     }
 
@@ -1858,28 +1891,16 @@ const MapScreen = () => {
           onLoad={onMapLoad}
           options={{
             disableDefaultUI: false,
-            zoomControl: true, // Always show zoom controls
-            zoomControlOptions: isLoaded && window.google?.maps ? {
-              position: window.google.maps.ControlPosition.RIGHT_CENTER
-            } : undefined,
+            zoomControl: false, // Zoom controls disabled
             streetViewControl: false,
-            mapTypeControl: true,
-            mapTypeControlOptions: isLoaded && window.google?.maps ? {
-              style: window.google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
-              position: window.google.maps.ControlPosition.TOP_CENTER,
-              mapTypeIds: [
-                window.google.maps.MapTypeId.ROADMAP,
-                window.google.maps.MapTypeId.SATELLITE,
-                window.google.maps.MapTypeId.TERRAIN
-              ]
-            } : undefined,
-            fullscreenControl: true,
+            mapTypeControl: false, // Map/Satellite toggle disabled
+            fullscreenControl: false, // Fullscreen button disabled
             mapTypeId: isLoaded && window.google?.maps ? window.google.maps.MapTypeId.ROADMAP : undefined,
-            // Lock map when activity is selected (running, cycling, or walking)
-            draggable: !selectedActivity, // Disable dragging when activity is selected
-            scrollwheel: true, // Allow scroll zoom even when activity is selected
-            disableDoubleClickZoom: !!selectedActivity, // Disable double-click zoom when activity is selected
-            gestureHandling: (selectedActivity ? "cooperative" : "auto") as "cooperative" | "auto" | "greedy" | "none" // Allow zoom gestures but not pan when activity is selected
+            // Lock map when workout is active (isActive = true)
+            draggable: !isActive, // Disable dragging when workout is active
+            scrollwheel: true, // Allow scroll zoom even when workout is active
+            disableDoubleClickZoom: !!isActive, // Disable double-click zoom when workout is active
+            gestureHandling: (isActive ? "cooperative" : "auto") as "cooperative" | "auto" | "greedy" | "none" // Allow zoom gestures but not pan when workout is active
           }}
         >
           {/* Current user's activity trail */}
@@ -2013,7 +2034,7 @@ const MapScreen = () => {
       <NotificationBanner
         show={showNotification}
         onDismiss={() => setShowNotification(false)}
-        onTap={handleNotificationTap}
+        onTap={handleNotificationBannerTap}
       />
 
       {/* Workout Summary Modal */}
@@ -2031,8 +2052,34 @@ const MapScreen = () => {
         pokes={workoutPokes}
       />
 
-      {/* Top Bar - Right Side Controls */}
-      <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
+      {/* Top Bar - Beacon Mode Header - Only visible when workout is not active */}
+      {!isActive && (
+        <div className="absolute top-0 left-0 right-0 z-[60] bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Beacon Mode</h2>
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowNotificationDrawer(true)}
+            className={`relative touch-target bg-transparent rounded-full hover:bg-gray-700 transition-all ${
+              unreadCount > 0 ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-gray-800' : ''
+            }`}
+            style={{ width: 40, height: 40 }}
+            title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : "Notifications"}
+          >
+            <NotificationsIcon 
+              style={{ fontSize: 24 }} 
+              className={unreadCount > 0 ? 'text-red-400' : 'text-white'}
+            />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center border-2 border-gray-800 shadow-lg animate-pulse z-10">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </motion.button>
+        </div>
+      )}
+
+      {/* Right Side Controls - No Background */}
+      <div className="absolute top-1/2 -translate-y-1/2 right-4 flex flex-col gap-3 z-10">
         {/* Filter Button */}
         <motion.button
           whileTap={{ scale: 0.95 }}
@@ -2047,39 +2094,47 @@ const MapScreen = () => {
         >
           <FilterListIcon style={{ fontSize: 28 }} />
           {searchFilter !== "all" && (
-            <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background">
+            <span className={`absolute -top-1 -right-1 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background ${
+              searchFilter === "beginner" 
+                ? "bg-blue-500" 
+                : searchFilter === "intermediate" 
+                ? "bg-green-500" 
+                : "bg-purple-500"
+            }`}>
               {searchFilter === "beginner" ? "B" : searchFilter === "intermediate" ? "I" : "P"}
             </span>
           )}
         </motion.button>
 
-        {/* Zoom Level Button */}
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => {
-            // Cycle through zoom levels: close → medium → far → close
-            setZoomLevel((current) => {
-              if (current === "close") return "medium";
-              if (current === "medium") return "far";
-              return "close";
-            });
-          }}
-          className={`touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
-            zoomLevel !== "medium"
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-card text-foreground border-border hover:border-primary"
-          }`}
-          style={{ width: 56, height: 56 }}
-          title={`Zoom: ${zoomLevel === "close" ? "Close" : zoomLevel === "medium" ? "Medium" : "Far"}`}
-        >
-          {zoomLevel === "close" ? (
-            <ZoomIn style={{ fontSize: 28 }} />
-          ) : zoomLevel === "medium" ? (
-            <ViewComfy style={{ fontSize: 28 }} />
-          ) : (
-            <ZoomOut style={{ fontSize: 28 }} />
-          )}
-        </motion.button>
+        {/* Zoom Level Button - Only visible when workout is active */}
+        {isActive && (
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              // Cycle through zoom levels: close → medium → far → close
+              setZoomLevel((current) => {
+                if (current === "close") return "medium";
+                if (current === "medium") return "far";
+                return "close";
+              });
+            }}
+            className={`touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
+              zoomLevel !== "medium"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-card text-foreground border-border hover:border-primary"
+            }`}
+            style={{ width: 56, height: 56 }}
+            title={`Zoom: ${zoomLevel === "close" ? "Close" : zoomLevel === "medium" ? "Medium" : "Far"}`}
+          >
+            {zoomLevel === "close" ? (
+              <ZoomIn style={{ fontSize: 28 }} />
+            ) : zoomLevel === "medium" ? (
+              <ViewComfy style={{ fontSize: 28 }} />
+            ) : (
+              <ZoomOut style={{ fontSize: 28 }} />
+            )}
+          </motion.button>
+        )}
 
         {/* Poke Notification Button - Only visible when workout is active */}
         {isActive && (
@@ -2115,16 +2170,6 @@ const MapScreen = () => {
           </motion.button>
         )}
 
-        {/* Settings */}
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => navigate("/settings")}
-          className="touch-target bg-card text-foreground rounded-full shadow-elevation-3"
-          style={{ width: 56, height: 56 }}
-        >
-          <SettingsIcon style={{ fontSize: 28 }} />
-        </motion.button>
-
         {/* People Sidebar Toggle */}
         <motion.button
           whileTap={{ scale: 0.95 }}
@@ -2145,13 +2190,28 @@ const MapScreen = () => {
           title={showSidebar ? "Hide sidebar" : "Show sidebar"}
         >
           <PeopleIcon style={{ fontSize: 28 }} />
-          {/* Red notification badge when there are new matches */}
-          {!showSidebar && matches.length > lastViewedMatchesCount && (
-            <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background animate-pulse">
-              {matches.length - lastViewedMatchesCount > 9 ? '9+' : matches.length - lastViewedMatchesCount}
-            </span>
-          )}
         </motion.button>
+
+        {/* Recenter Button - Only visible when workout is not active */}
+        {!isActive && (
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              if (location && mapRef && isLoaded && window.google) {
+                const center = { lat: location.lat, lng: location.lng };
+                mapRef.panTo(center);
+                mapRef.setCenter(center);
+                setMapCenter(center);
+                toast.success("Map recentered on your location");
+              }
+            }}
+            className="touch-target bg-card text-foreground rounded-full shadow-elevation-3 border-2 border-border hover:border-primary transition-all"
+            style={{ width: 56, height: 56 }}
+            title="Recenter on your location"
+          >
+            <MyLocationMui style={{ fontSize: 28 }} />
+          </motion.button>
+        )}
       </div>
 
       {/* Profile View Modal */}
@@ -2173,8 +2233,9 @@ const MapScreen = () => {
             onAcceptFriend={() => handleAcceptFriend(selectedUser.id)}
             onDeclineFriend={() => handleDeclineFriend(selectedUser.id)}
             onUnfriend={() => handleUnfriend(selectedUser.id)}
-            onPoke={() => handlePoke(selectedUser.id)}
+            onPoke={isActive ? () => handlePoke(selectedUser.id) : undefined}
             hasPoked={hasPokedUsers[selectedUser.id] || false}
+            isWorkoutActive={isActive}
           />
         )}
       </AnimatePresence>
@@ -2240,7 +2301,7 @@ const MapScreen = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {/* Enhanced Stats Display - Above Pause Button */}
+      {/* Combined Minimalistic Control - Active State */}
       <AnimatePresence>
         {isActive && (
           <motion.div
@@ -2248,11 +2309,11 @@ const MapScreen = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 200, damping: 20 }}
-            className="absolute bottom-[calc(5rem+1.5rem)] left-0 right-0 px-6 z-10"
+            className="absolute bottom-20 left-0 right-0 px-4 z-10"
           >
             <div
               className={`
-              bg-card/90 backdrop-blur-sm rounded-lg shadow-elevation-2 border border-border/30 overflow-hidden
+              bg-card/95 backdrop-blur-md rounded-2xl shadow-elevation-4 border border-border/50 overflow-hidden
               ${
                 selectedActivity === "running"
                   ? "border-success/30"
@@ -2262,198 +2323,246 @@ const MapScreen = () => {
               }
             `}
             >
-              {/* Minimal Stats Card */}
-              <div className="px-2.5 py-1.5">
-                {/* Compact Header */}
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-1.5">
-                    {selectedActivity === "running" && (
-                      <DirectionsRunIcon className="text-success" style={{ fontSize: 14 }} />
-                    )}
-                    {selectedActivity === "cycling" && (
-                      <DirectionsBikeIcon className="text-primary" style={{ fontSize: 14 }} />
-                    )}
-                    {selectedActivity === "walking" && (
-                      <DirectionsWalkIcon className="text-warning" style={{ fontSize: 14 }} />
-                    )}
-                    <span className="text-[10px] font-medium text-foreground capitalize">
-                      {selectedActivity}
-                    </span>
-                    <span className={`text-[9px] px-1 py-0.5 rounded ${
-                      isPaused ? "bg-muted/50 text-muted-foreground" : "bg-success/15 text-success"
-                    }`}>
-                      {isPaused ? "Paused" : "Active"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Minimal Stats - Distance, Time, Avg Speed */}
-                <div className="grid grid-cols-3 gap-1.5">
+              {/* Stats Row */}
+              <div className="px-4 py-2.5 border-b border-border/30">
+                <div className="grid grid-cols-3 gap-2">
                   {/* Time */}
                   <div className="text-center">
-                    <TimerIcon className="text-muted-foreground mx-auto mb-0.5" style={{ fontSize: 12 }} />
-                    <div className="text-sm font-semibold text-foreground tabular-nums leading-tight">
+                    <div className="text-lg font-bold text-foreground tabular-nums">
                       {formatTime(elapsedTime)}
                     </div>
-                    <div className="text-[9px] text-muted-foreground">Time</div>
+                    <div className="text-[9px] text-muted-foreground mt-0.5">Time</div>
                   </div>
 
                   {/* Distance */}
                   <div className="text-center">
-                    <div className="text-xs mb-0.5">📍</div>
-                    <div className="text-sm font-semibold text-foreground tabular-nums leading-tight">
+                    <div className="text-lg font-bold text-foreground tabular-nums">
                       {convertDistance(distance).value}
                     </div>
-                    <div className="text-[9px] text-muted-foreground">
-                      {convertDistance(distance).unit}
-                    </div>
+                    <div className="text-[9px] text-muted-foreground mt-0.5">{convertDistance(distance).unit}</div>
                   </div>
 
                   {/* Average Speed */}
                   <div className="text-center">
-                    <SpeedIcon className="text-muted-foreground mx-auto mb-0.5" style={{ fontSize: 12 }} />
-                    <div className="text-sm font-semibold text-foreground tabular-nums leading-tight">
+                    <div className="text-lg font-bold text-foreground tabular-nums">
                       {convertSpeed(avgSpeed).value}
                     </div>
-                    <div className="text-[9px] text-muted-foreground">
-                      {convertSpeed(avgSpeed).unit}
-                    </div>
+                    <div className="text-[9px] text-muted-foreground mt-0.5">{convertSpeed(avgSpeed).unit}</div>
                   </div>
                 </div>
               </div>
 
+              {/* Buttons Row */}
+              <div className="px-3 py-3">
+                <div className="flex items-center justify-center gap-3">
+                  {/* Pause Button */}
+                  <motion.div whileTap={{ scale: 0.97 }} className="flex-1">
+                    <Button
+                      onClick={handlePause}
+                      className={`
+                        w-full h-14 text-base font-extrabold shadow-elevation-4 transition-all duration-300 rounded-xl
+                        ${
+                          selectedActivity === "running"
+                            ? "bg-gradient-to-r from-warning to-warning/90 text-warning-foreground hover:from-warning/90 hover:to-warning"
+                            : selectedActivity === "cycling"
+                            ? "bg-gradient-to-r from-secondary to-secondary/90 text-secondary-foreground hover:from-secondary/90 hover:to-secondary"
+                            : "bg-gradient-to-r from-secondary to-secondary/90 text-secondary-foreground hover:from-secondary/90 hover:to-secondary"
+                        }
+                      `}
+                    >
+                      {isPaused ? (
+                        <>
+                          <PlayArrowIcon className="mr-2" style={{ fontSize: 24 }} />
+                          Resume
+                        </>
+                      ) : (
+                        <>
+                          <PauseIcon className="mr-2" style={{ fontSize: 24 }} />
+                          Pause
+                        </>
+                      )}
+                    </Button>
+                  </motion.div>
+
+                  {/* Stop Button */}
+                  <motion.div whileTap={{ scale: 0.97 }} className="flex-1">
+                    <Button
+                      onClick={() => setShowStopConfirmation(true)}
+                      className="w-full h-14 text-base font-extrabold shadow-elevation-4 transition-all duration-300 rounded-xl bg-gradient-to-r from-destructive to-destructive/90 text-destructive-foreground hover:from-destructive/90 hover:to-destructive"
+                    >
+                      <StopIcon className="mr-2" style={{ fontSize: 24 }} />
+                      Stop
+                    </Button>
+                  </motion.div>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Bottom Controls */}
-      <div className={`absolute ${isActive ? 'bottom-0' : 'bottom-20'} left-0 right-0 p-6 z-10`}>
-        {/* Activity Selector (when not active) */}
-        <AnimatePresence>
-          {!isActive && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="mb-4 bg-card/95 backdrop-blur-md rounded-2xl p-5 shadow-elevation-4 border border-border/50"
+      {/* Combined Minimalistic Control - Inactive State */}
+      <AnimatePresence>
+        {!isActive && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 200, damping: 20 }}
+            className="absolute bottom-20 left-0 right-0 px-4 z-10"
+          >
+            <div
+              className={`
+              bg-card/95 backdrop-blur-md rounded-2xl shadow-elevation-4 border border-border/50 overflow-hidden
+              ${
+                selectedActivity === "running"
+                  ? "border-success/30"
+                  : selectedActivity === "cycling"
+                  ? "border-primary/30"
+                  : "border-warning/30"
+              }
+            `}
             >
-              <p className="text-sm font-bold mb-3 text-center">Select Activity Type</p>
-              <div className={`grid gap-3 ${
-                availableActivities.length === 1 ? 'grid-cols-1' : 
-                availableActivities.length === 2 ? 'grid-cols-2' : 
-                'grid-cols-3'
-              }`}>
-                {availableActivities.map((act) => {
-                  const Icon = act.icon;
-                  const isSelected = selectedActivity === act.id;
-                  return (
+              {/* Stats Row */}
+              <div className="px-4 py-2.5 border-b border-border/30">
+                <div className="grid grid-cols-3 gap-2">
+                  {/* Time */}
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-foreground tabular-nums">
+                      00:00
+                    </div>
+                    <div className="text-[9px] text-muted-foreground mt-0.5">Time</div>
+                  </div>
+
+                  {/* Average Speed */}
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-foreground tabular-nums">
+                      --
+                    </div>
+                    <div className="text-[9px] text-muted-foreground mt-0.5">Avg. speed (km/h)</div>
+                  </div>
+
+                  {/* Distance */}
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-foreground tabular-nums">
+                      0.00
+                    </div>
+                    <div className="text-[9px] text-muted-foreground mt-0.5">Distance (km)</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Buttons Row */}
+              <div className="px-3 py-3">
+                <div className="flex items-center justify-center gap-4">
+                  {/* Activity Selector Button (Left) */}
+                  <div className="flex flex-col items-center gap-1.5">
                     <motion.button
-                      key={act.id}
                       whileTap={{ scale: 0.95 }}
-                      onClick={() => setSelectedActivity(act.id as typeof selectedActivity)}
+                      onClick={() => {
+                        // Cycle through available activities
+                        const currentIndex = availableActivities.findIndex(a => a.id === selectedActivity);
+                        const nextIndex = (currentIndex + 1) % availableActivities.length;
+                        setSelectedActivity(availableActivities[nextIndex].id as typeof selectedActivity);
+                      }}
                       className={`
-                        flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all duration-300
-                        ${isSelected 
-                          ? act.color === 'success'
-                            ? 'border-success bg-success/15 shadow-elevation-2'
-                            : act.color === 'primary'
-                            ? 'border-primary bg-primary/15 shadow-elevation-2'
-                            : 'border-warning bg-warning/15 shadow-elevation-2'
-                          : 'border-border bg-card/50 hover:bg-secondary'
+                        relative flex flex-col items-center justify-center w-14 h-14 rounded-full border-2 transition-all duration-300
+                        ${
+                          selectedActivity === "running"
+                            ? "border-success bg-success/15 shadow-elevation-2"
+                            : selectedActivity === "cycling"
+                            ? "border-primary bg-primary/15 shadow-elevation-2"
+                            : "border-warning bg-warning/15 shadow-elevation-2"
                         }
                       `}
                     >
-                      <Icon
+                      {selectedActivity === "running" && (
+                        <DirectionsRunIcon className="text-success" style={{ fontSize: 24 }} />
+                      )}
+                      {selectedActivity === "cycling" && (
+                        <DirectionsBikeIcon className="text-primary" style={{ fontSize: 24 }} />
+                      )}
+                      {selectedActivity === "walking" && (
+                        <DirectionsWalkIcon className="text-warning" style={{ fontSize: 24 }} />
+                      )}
+                      <CheckCircleIcon 
                         className={
-                          isSelected
-                            ? act.color === 'success'
-                              ? 'text-success'
-                              : act.color === 'primary'
-                              ? 'text-primary'
-                              : 'text-warning'
-                            : 'text-muted-foreground'
+                          selectedActivity === "running"
+                            ? "text-success"
+                            : selectedActivity === "cycling"
+                            ? "text-primary"
+                            : "text-warning"
                         }
-                        style={{ fontSize: 32 }}
+                        style={{ fontSize: 14, position: 'absolute', top: -2, right: -2 }}
                       />
-                      <span className={`text-xs mt-2 font-semibold ${isSelected ? 'text-foreground' : 'text-muted-foreground'}`}>
-                        {act.label}
-                      </span>
                     </motion.button>
-                  );
-                })}
+                    <span className="text-[10px] font-medium text-foreground">
+                      {availableActivities.find((a) => a.id === selectedActivity)?.label || selectedActivity}
+                    </span>
+                  </div>
+
+                  {/* Start Button (Middle) - Circular */}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      animate={{ scale: [1, 1.01, 1] }}
+                      transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+                      onClick={handleStartStop}
+                      className={`
+                        flex flex-col items-center justify-center w-16 h-16 rounded-full border-2 transition-all duration-300 shadow-elevation-4
+                        ${
+                          selectedActivity === "running"
+                            ? "bg-gradient-to-r from-success to-success/90 text-success-foreground border-success hover:from-success/90 hover:to-success"
+                            : selectedActivity === "cycling"
+                            ? "bg-gradient-to-r from-primary to-primary/90 text-primary-foreground border-primary hover:from-primary/90 hover:to-primary"
+                            : "bg-gradient-to-r from-warning to-warning/90 text-warning-foreground border-warning hover:from-warning/90 hover:to-warning"
+                        }
+                      `}
+                    >
+                      <span className="text-base font-extrabold">Start</span>
+                    </motion.button>
+                  </div>
+
+                  {/* Filter Button (Right) */}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setShowFilterModal(true)}
+                      className={`
+                        relative flex flex-col items-center justify-center w-14 h-14 rounded-full border-2 transition-all duration-300
+                        ${
+                          searchFilter !== "all"
+                            ? "border-primary bg-primary/15 shadow-elevation-2"
+                            : "border-border bg-card/50 hover:bg-secondary"
+                        }
+                      `}
+                      title={`Filter: ${searchFilter === "all" ? "All Levels" : searchFilter.charAt(0).toUpperCase() + searchFilter.slice(1)}`}
+                    >
+                      <FilterListIcon 
+                        className={searchFilter !== "all" ? "text-primary" : "text-muted-foreground"}
+                        style={{ fontSize: 24 }} 
+                      />
+                      {searchFilter !== "all" && (
+                        <span className={`absolute -top-1 -right-1 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background ${
+                          searchFilter === "beginner" 
+                            ? "bg-blue-500" 
+                            : searchFilter === "intermediate" 
+                            ? "bg-green-500" 
+                            : "bg-purple-500"
+                        }`}>
+                          {searchFilter === "beginner" ? "B" : searchFilter === "intermediate" ? "I" : "P"}
+                        </span>
+                      )}
+                    </motion.button>
+                    <span className="text-[10px] font-medium text-foreground">Filter</span>
+                  </div>
+                </div>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* 3D Controls removed */}
-
-        {/* Start/Stop/Pause Activity Buttons */}
-        {isActive ? (
-          <div className="flex gap-3">
-            <motion.div whileTap={{ scale: 0.97 }} className="flex-1">
-              <Button
-                onClick={handlePause}
-                className={`
-                  w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl
-                  ${
-                    selectedActivity === "running"
-                      ? "bg-gradient-to-r from-warning to-warning/90 text-warning-foreground hover:from-warning/90 hover:to-warning"
-                      : selectedActivity === "cycling"
-                      ? "bg-gradient-to-r from-secondary to-secondary/90 text-secondary-foreground hover:from-secondary/90 hover:to-secondary"
-                      : "bg-gradient-to-r from-secondary to-secondary/90 text-secondary-foreground hover:from-secondary/90 hover:to-secondary"
-                  }
-                `}
-              >
-                {isPaused ? (
-                  <>
-                    <PlayArrowIcon className="mr-2" style={{ fontSize: 28 }} />
-                    Resume
-                  </>
-                ) : (
-                  <>
-                    <PauseIcon className="mr-2" style={{ fontSize: 28 }} />
-                    Pause
-                  </>
-                )}
-              </Button>
-            </motion.div>
-            <motion.div whileTap={{ scale: 0.97 }} className="flex-1">
-              <Button
-                onClick={() => setShowStopConfirmation(true)}
-                className="w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl bg-gradient-to-r from-destructive to-destructive/90 text-destructive-foreground hover:from-destructive/90 hover:to-destructive"
-              >
-                <StopIcon className="mr-2" style={{ fontSize: 28 }} />
-                Stop
-              </Button>
-            </motion.div>
-          </div>
-        ) : (
-          <motion.div
-            whileTap={{ scale: 0.97 }}
-            animate={{ scale: [1, 1.01, 1] }}
-            transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
-          >
-            <Button
-              onClick={handleStartStop}
-              className={`
-                w-full h-16 text-lg font-extrabold shadow-elevation-4 transition-all duration-300 rounded-2xl
-                ${
-                  selectedActivity === "running"
-                    ? "bg-gradient-to-r from-success to-success/90 text-success-foreground hover:from-success/90 hover:to-success"
-                    : selectedActivity === "cycling"
-                    ? "bg-gradient-to-r from-primary to-primary/90 text-primary-foreground hover:from-primary/90 hover:to-primary"
-                    : "bg-gradient-to-r from-warning to-warning/90 text-warning-foreground hover:from-warning/90 hover:to-warning"
-                }
-              `}
-            >
-              <PlayArrowIcon className="mr-3" style={{ fontSize: 32 }} />
-              Start {availableActivities.find((a) => a.id === selectedActivity)?.label}
-            </Button>
+            </div>
           </motion.div>
         )}
-      </div>
+      </AnimatePresence>
+
 
 
 
@@ -2607,14 +2716,16 @@ const MapScreen = () => {
 
                               {/* Actions */}
                               <div className="flex items-center gap-2 mt-2">
-                                <Button
-                                  size="sm"
-                                  className="flex-1 h-8 text-xs justify-center bg-purple-500 hover:bg-purple-600 text-white"
-                                  onClick={() => handlePoke(user.uid)}
-                                >
-                                  <TouchAppIcon style={{ fontSize: 14 }} className="mr-1" />
-                                  Poke
-                                </Button>
+                                {isActive && (
+                                  <Button
+                                    size="sm"
+                                    className="flex-1 h-8 text-xs justify-center bg-purple-500 hover:bg-purple-600 text-white"
+                                    onClick={() => handlePoke(user.uid)}
+                                  >
+                                    <TouchAppIcon style={{ fontSize: 14 }} className="mr-1" />
+                                    Poke
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -2770,6 +2881,202 @@ const MapScreen = () => {
                   );
                 })}
               </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Notification Drawer */}
+      <AnimatePresence>
+        {showNotificationDrawer && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowNotificationDrawer(false)}
+              className="fixed inset-0 bg-black/50 z-40"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl shadow-elevation-4 p-6 ${
+                isActive ? 'pb-6' : 'pb-24'
+              } border-t border-border`}
+              style={{ 
+                maxHeight: '85vh',
+                minHeight: '200px',
+                overflowY: 'auto'
+              }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground">Notifications</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'All caught up!'}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowNotificationDrawer(false)}
+                  className="rounded-full"
+                >
+                  <CloseIcon />
+                </Button>
+              </div>
+
+              {/* Notifications List - Sorted by newest first */}
+              {notifications.length > 0 ? (
+                <div className="space-y-2">
+                  {[...notifications]
+                    .sort((a, b) => b.timestamp - a.timestamp) // Newest first
+                    .map((notification) => {
+                      const getNotificationIcon = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return <MailIcon style={{ fontSize: 20 }} className="text-primary" />;
+                          case "friend_request":
+                            return <PersonAddIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          case "poke":
+                            return <TouchAppIcon style={{ fontSize: 20 }} className="text-purple-500" />;
+                          case "friend_accepted":
+                            return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
+                          case "workout_complete":
+                            return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
+                          case "achievement":
+                            return <EmojiEventsIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          default:
+                            return <NotificationsIcon style={{ fontSize: 20 }} />;
+                        }
+                      };
+
+                      const getNotificationTitle = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return notification.userName;
+                          case "friend_request":
+                            return notification.userName;
+                          case "poke":
+                            return notification.userName;
+                          case "friend_accepted":
+                            return notification.userName;
+                          case "workout_complete":
+                            return "Workout Completed";
+                          case "achievement":
+                            return notification.message || "Congrats for a new achievement!";
+                          default:
+                            return notification.userName;
+                        }
+                      };
+
+                      const getNotificationMessage = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return notification.message || "Sent you a message";
+                          case "friend_request":
+                            return "wants to add you as a friend";
+                          case "poke":
+                            return "poked you! They're interested in matching";
+                          case "friend_accepted":
+                            return "accepted your friend request";
+                          case "workout_complete":
+                            return notification.message || "Workout completed successfully!";
+                          case "achievement":
+                            return notification.message || "Congrats for a new achievement!";
+                          default:
+                            return "";
+                        }
+                      };
+
+                      const formatTimestamp = (timestamp: number) => {
+                        const now = Date.now();
+                        const diff = now - timestamp;
+                        const minutes = Math.floor(diff / 60000);
+                        const hours = Math.floor(diff / 3600000);
+                        const days = Math.floor(diff / 86400000);
+
+                        if (minutes < 1) return "Just now";
+                        if (minutes < 60) return `${minutes}m ago`;
+                        if (hours < 24) return `${hours}h ago`;
+                        if (days < 7) return `${days}d ago`;
+                        return new Date(timestamp).toLocaleDateString();
+                      };
+
+                      return (
+                        <motion.div
+                          key={notification.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className={`p-4 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors cursor-pointer ${
+                            !notification.read ? 'bg-primary/5 border-primary/30' : ''
+                          }`}
+                          onClick={() => {
+                            handleNotificationTap(notification);
+                            setShowNotificationDrawer(false);
+                          }}
+                        >
+                          <div className="flex items-start gap-3">
+                            {/* Icon */}
+                            <div className={`flex-shrink-0 p-2 rounded-full ${
+                              notification.type === "message"
+                                ? "bg-primary/15"
+                                : notification.type === "friend_request"
+                                ? "bg-warning/15"
+                                : notification.type === "poke"
+                                ? "bg-purple-500/15"
+                                : notification.type === "workout_complete"
+                                ? "bg-success/15"
+                                : notification.type === "achievement"
+                                ? "bg-warning/15"
+                                : "bg-success/15"
+                            }`}>
+                              {getNotificationIcon()}
+                            </div>
+
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="font-semibold text-sm text-foreground">
+                                  {getNotificationTitle()}
+                                </p>
+                                {!notification.read && (
+                                  <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0"></span>
+                                )}
+                              </div>
+                              <p className="text-sm text-muted-foreground mb-1">
+                                {getNotificationMessage()}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatTimestamp(notification.timestamp)}
+                              </p>
+                            </div>
+
+                            {/* Dismiss button */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                dismissNotification(notification.id);
+                              }}
+                              className="flex-shrink-0 p-1 hover:bg-accent rounded-full transition-colors"
+                            >
+                              <CloseIcon style={{ fontSize: 16 }} className="text-muted-foreground" />
+                            </button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="py-12 text-center">
+                  <NotificationsIcon className="text-muted-foreground mx-auto mb-2" style={{ fontSize: 48 }} />
+                  <p className="text-sm text-muted-foreground">No notifications yet</p>
+                </div>
+              )}
             </motion.div>
           </>
         )}

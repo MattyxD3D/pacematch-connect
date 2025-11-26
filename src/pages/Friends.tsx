@@ -19,6 +19,7 @@ import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
 import SendIcon from "@mui/icons-material/Send";
 import { sendPoke } from "@/services/pokeService";
+import { isWorkoutActive } from "@/utils/workoutState";
 import {
   getPendingRequests,
   sendFriendRequest,
@@ -245,6 +246,12 @@ const Friends = () => {
   const handlePoke = async (userId: string) => {
     if (!user?.uid) {
       toast.error("You must be logged in to poke someone");
+      return;
+    }
+
+    // Check if user has active workout session
+    if (!isWorkoutActive()) {
+      toast.error("You must have an active workout session to poke someone");
       return;
     }
 
@@ -584,19 +591,21 @@ const Friends = () => {
                         
                         {/* Action Buttons */}
                         <div className="flex gap-2 pt-3 border-t border-border/50">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="flex-1 h-9 text-xs"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handlePoke(user.id);
-                            }}
-                            disabled={hasPoked}
-                          >
-                            <TouchAppIcon style={{ fontSize: 16 }} className="mr-1" />
-                            {hasPoked ? "Poked" : "Poke"}
-                          </Button>
+                          {isWorkoutActive() && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 h-9 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePoke(user.id);
+                              }}
+                              disabled={hasPoked}
+                            >
+                              <TouchAppIcon style={{ fontSize: 16 }} className="mr-1" />
+                              {hasPoked ? "Poked" : "Poke"}
+                            </Button>
+                          )}
                           
                           {isRequestPending ? (
                             <Button 
@@ -712,12 +721,13 @@ const Friends = () => {
                   confirmUnfriend();
                 }
               }}
-              onPoke={() => {
+              onPoke={isWorkoutActive() ? () => {
                 if (isDiscoverUser) {
                   handlePoke(userData.id);
                 }
-              }}
+              } : undefined}
               hasPoked={isDiscoverUser ? (hasPokedUsers[userData.id] || false) : false}
+              isWorkoutActive={isWorkoutActive()}
             />
           );
         })()}

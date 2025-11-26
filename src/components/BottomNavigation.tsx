@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { useNavigate, useLocation } from "react-router-dom";
 import HomeIcon from "@mui/icons-material/Home";
-import MapIcon from "@mui/icons-material/Map";
+import MyLocationIcon from "@mui/icons-material/MyLocation";
 import EventIcon from "@mui/icons-material/Event";
 import MailIcon from "@mui/icons-material/Mail";
 import PersonIcon from "@mui/icons-material/Person";
@@ -12,8 +12,8 @@ const BottomNavigation = () => {
 
   const navItems = [
     { path: "/", icon: HomeIcon, label: "Feed" },
-    { path: "/map", icon: MapIcon, label: "Map" },
     { path: "/events", icon: EventIcon, label: "Events" },
+    { path: "/map", icon: MyLocationIcon, label: "Beacon" },
     { path: "/messages", icon: MailIcon, label: "Messages" },
     { path: "/settings", icon: PersonIcon, label: "Profile" },
   ];

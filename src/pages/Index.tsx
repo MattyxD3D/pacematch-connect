@@ -1,21 +1,25 @@
 import { useState, useEffect, useMemo } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation } from "@/hooks/useLocation";
 import { useMatching } from "@/hooks/useMatching";
 import { listenToWorkoutPosts, WorkoutPost as FirebaseWorkoutPost } from "@/services/feedService";
-import { listenToUserFriends } from "@/services/friendService";
+import { listenToUserFriends, listenToFriendRequests, sendFriendRequest, acceptFriendRequest, declineFriendRequest, removeFriend } from "@/services/friendService";
 import { listenToAllUsers, updateUserVisibility } from "@/services/locationService";
 import { getUserData } from "@/services/authService";
 import { generateDummyWorkoutPosts, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 import { formatDistance, calculateDistance } from "@/utils/distance";
 import { WorkoutPost } from "@/components/WorkoutPost";
 import { CommentDrawer } from "@/components/CommentDrawer";
+import { WorkoutHistoryFeed } from "@/components/WorkoutHistoryFeed";
+import { ProfileView } from "@/pages/ProfileView";
+import { WorkoutWithUser } from "@/services/workoutService";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import HomeIcon from "@mui/icons-material/Home";
 import MapIcon from "@mui/icons-material/Map";
 import EventIcon from "@mui/icons-material/Event";
@@ -27,16 +31,28 @@ import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import LocationOffIcon from "@mui/icons-material/LocationOff";
 import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
+import NotificationsIcon from "@mui/icons-material/Notifications";
+import CloseIcon from "@mui/icons-material/Close";
+import MailIcon from "@mui/icons-material/Mail";
+import PersonAddIcon from "@mui/icons-material/PersonAdd";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import BottomNavigation from "@/components/BottomNavigation";
 import { Switch } from "@/components/ui/switch";
 import { Avatar } from "@mui/material";
 import { toast } from "sonner";
+import { useNotificationContext } from "@/contexts/NotificationContext";
+
+type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 
 const Index = () => {
   const navigate = useNavigate();
   const { userProfile, workoutHistory, useMetric } = useUser();
   const { user: currentUser } = useAuth();
   const [selectedTab, setSelectedTab] = useState<string>("all");
+  const [activeFriendsTab, setActiveFriendsTab] = useState<"active" | "history">("history");
+  const [timeframe, setTimeframe] = useState<"week" | "month" | "all">("all");
   const [selectedPost, setSelectedPost] = useState<FirebaseWorkoutPost | null>(null);
   const [isCommentDrawerOpen, setIsCommentDrawerOpen] = useState(false);
   const [workoutPosts, setWorkoutPosts] = useState<FirebaseWorkoutPost[]>([]);
@@ -45,8 +61,15 @@ const Index = () => {
   const [friendsList, setFriendsList] = useState<string[]>([]);
   const [friendsData, setFriendsData] = useState<Record<string, any>>({});
   const [userVisibility, setUserVisibility] = useState(true);
+  const [selectedWorkoutHistoryItem, setSelectedWorkoutHistoryItem] = useState<WorkoutWithUser | null>(null);
+  const [friendRequests, setFriendRequests] = useState<{ incoming: string[]; outgoing: string[] }>({ incoming: [], outgoing: [] });
+  const [friendStatuses, setFriendStatuses] = useState<Record<string, { status: FriendStatus; cooldownUntil?: number }>>({});
   // TODO: Set to false in production - this is for preview/demo purposes
   const [showDummyData, setShowDummyData] = useState(true);
+  const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
+  
+  // Notification context
+  const { unreadCount, notifications, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
 
   // Get user location for matching
   const { location } = useLocation(currentUser?.uid || null, false, true);
@@ -198,6 +221,125 @@ const Index = () => {
       unsubscribeUsers();
     };
   }, [currentUser?.uid]);
+
+  // Listen to friend requests
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+
+    const unsubscribe = listenToFriendRequests(currentUser.uid, (requests) => {
+      setFriendRequests(requests);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.uid]);
+
+  // Mark all notifications as read when notification drawer opens
+  useEffect(() => {
+    if (showNotificationDrawer && unreadCount > 0) {
+      markAllAsRead();
+    }
+  }, [showNotificationDrawer, unreadCount, markAllAsRead]);
+
+  // Get friend status for a user
+  const getFriendStatus = (userId: string | number): FriendStatus => {
+    const id = typeof userId === "number" ? userId.toString() : userId;
+    
+    // Check if already friends
+    if (friendsList.includes(id)) {
+      return "friends";
+    }
+    
+    // Check if request pending (outgoing)
+    if (friendRequests.outgoing.includes(id)) {
+      return "request_pending";
+    }
+    
+    // Check if request received (incoming)
+    if (friendRequests.incoming.includes(id)) {
+      return "request_received";
+    }
+    
+    // Check local state
+    const localStatus = friendStatuses[id];
+    if (localStatus) {
+      return localStatus.status;
+    }
+    
+    return "not_friends";
+  };
+
+  // Handle workout history item click
+  const handleWorkoutHistoryClick = (item: WorkoutWithUser) => {
+    setSelectedWorkoutHistoryItem(item);
+  };
+
+  // Handle profile view actions
+  const handleAddFriend = async (userId: string) => {
+    if (!currentUser?.uid) return;
+    
+    try {
+      await sendFriendRequest(currentUser.uid, userId);
+      setFriendStatuses((prev) => ({
+        ...prev,
+        [userId]: { status: "request_pending" },
+      }));
+      toast.success("Friend request sent!");
+    } catch (error) {
+      console.error("Error sending friend request:", error);
+      toast.error("Failed to send friend request");
+    }
+  };
+
+  const handleAcceptFriend = async (userId: string) => {
+    if (!currentUser?.uid) return;
+    
+    try {
+      await acceptFriendRequest(currentUser.uid, userId);
+      setFriendStatuses((prev) => ({
+        ...prev,
+        [userId]: { status: "friends" },
+      }));
+      toast.success("Friend request accepted!");
+    } catch (error) {
+      console.error("Error accepting friend request:", error);
+      toast.error("Failed to accept friend request");
+    }
+  };
+
+  const handleDeclineFriend = async (userId: string) => {
+    if (!currentUser?.uid) return;
+    
+    try {
+      await declineFriendRequest(currentUser.uid, userId);
+      setFriendStatuses((prev) => {
+        const updated = { ...prev };
+        delete updated[userId];
+        return updated;
+      });
+      toast.success("Friend request declined");
+    } catch (error) {
+      console.error("Error declining friend request:", error);
+      toast.error("Failed to decline friend request");
+    }
+  };
+
+  const handleUnfriend = async (userId: string) => {
+    if (!currentUser?.uid) return;
+    
+    try {
+      await removeFriend(currentUser.uid, userId);
+      setFriendStatuses((prev) => {
+        const updated = { ...prev };
+        delete updated[userId];
+        return updated;
+      });
+      toast.success("Friend removed");
+      setSelectedWorkoutHistoryItem(null);
+    } catch (error) {
+      console.error("Error removing friend:", error);
+      toast.error("Failed to remove friend");
+    }
+  };
 
   // Use Firebase workout posts
   const allPosts = workoutPosts;
@@ -354,8 +496,32 @@ const Index = () => {
         className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-10 border-b border-border/50"
       >
         <div className="max-w-4xl mx-auto px-6 py-5">
-          <h1 className="text-3xl font-bold mb-1">Welcome back, {userProfile?.username || "Athlete"}! 👋</h1>
-          <p className="text-sm text-muted-foreground">Stay connected with your fitness community</p>
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <h1 className="text-3xl font-bold mb-1">Welcome back, {userProfile?.username || "Athlete"}! 👋</h1>
+              <p className="text-sm text-muted-foreground">Stay connected with your fitness community</p>
+            </div>
+            {/* Notification Bell */}
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowNotificationDrawer(true)}
+              className={`relative touch-target bg-transparent rounded-full hover:bg-muted transition-all ${
+                unreadCount > 0 ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-card' : ''
+              }`}
+              style={{ width: 40, height: 40 }}
+              title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : "Notifications"}
+            >
+              <NotificationsIcon 
+                style={{ fontSize: 24 }} 
+                className={unreadCount > 0 ? 'text-red-400' : 'text-foreground'}
+              />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center border-2 border-card shadow-lg animate-pulse z-10">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </motion.button>
+          </div>
         </div>
       </motion.div>
 
@@ -388,151 +554,175 @@ const Index = () => {
           </Card>
         </motion.div>
 
-        {/* Friends Section */}
+        {/* Friends Section with Tabs */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.12 }}
         >
           <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-bold">Active Friends</h2>
-                  {showDummyData && activeFriends.length > 0 && activeFriends[0]?.id?.startsWith('dummy-') && (
+            <Tabs value={activeFriendsTab} onValueChange={(value) => setActiveFriendsTab(value as "active" | "history")} className="w-full">
+              <div className="flex items-center justify-between mb-4">
+                <TabsList className="grid grid-cols-2">
+                  <TabsTrigger value="history">Workout History</TabsTrigger>
+                  <TabsTrigger value="active">Active Friends</TabsTrigger>
+                </TabsList>
+                <div className="flex items-center gap-3">
+                  {activeFriendsTab === "active" && (
+                    <div className="flex items-center gap-2">
+                      {userVisibility ? (
+                        <LocationOnIcon className="text-success" style={{ fontSize: 20 }} />
+                      ) : (
+                        <LocationOffIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
+                      )}
+                      <div className="flex flex-col">
+                        <span className="text-xs font-medium">Share Location</span>
+                        <Switch
+                          checked={userVisibility}
+                          onCheckedChange={handleVisibilityToggle}
+                          className="scale-75"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {activeFriendsTab === "history" && (
+                    <Select value={timeframe} onValueChange={(value: "week" | "month" | "all") => setTimeframe(value)}>
+                      <SelectTrigger className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="week">Last Week</SelectItem>
+                        <SelectItem value="month">Last Month</SelectItem>
+                        <SelectItem value="all">All Time</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              </div>
+
+              <TabsContent value="history" className="mt-0">
+                {currentUser?.uid ? (
+                  <WorkoutHistoryFeed
+                    currentUserId={currentUser.uid}
+                    selectedActivity={selectedTab}
+                    timeframe={timeframe}
+                    useMetric={useMetric}
+                    onWorkoutClick={handleWorkoutHistoryClick}
+                  />
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">Please sign in to view workout history</p>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="active" className="mt-0">
+                {showDummyData && activeFriends.length > 0 && activeFriends[0]?.id?.startsWith('dummy-') && (
+                  <div className="mb-3">
                     <span className="text-xs px-2 py-0.5 bg-warning/20 text-warning rounded-full">
                       Demo Data
                     </span>
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {activeFriends.length} {activeFriends.length === 1 ? 'friend' : 'friends'} currently active
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  {userVisibility ? (
-                    <LocationOnIcon className="text-success" style={{ fontSize: 20 }} />
-                  ) : (
-                    <LocationOffIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
-                  )}
-                  <div className="flex flex-col">
-                    <span className="text-xs font-medium">Share Location</span>
-                    <Switch
-                      checked={userVisibility}
-                      onCheckedChange={handleVisibilityToggle}
-                      className="scale-75"
-                    />
                   </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => navigate("/friends")}
-                  className="text-primary"
-                >
-                  View All
-                </Button>
-              </div>
-            </div>
-
-            {activeFriends.length === 0 ? (
-              <div className="text-center py-8">
-                <FitnessCenterIcon className="mx-auto text-muted-foreground" style={{ fontSize: 48 }} />
-                <p className="text-muted-foreground mt-4">No active friends right now</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Friends will appear here when they start a workout
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {activeFriends.map((friend, index) => {
-                  const activityIcon = 
-                    friend.activity === "running" ? DirectionsRunIcon :
-                    friend.activity === "cycling" ? DirectionsBikeIcon :
-                    DirectionsWalkIcon;
-                  const ActivityIcon = activityIcon;
-                  
-                  return (
-                    <motion.div
-                      key={friend.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex items-center gap-4 p-4 border border-border rounded-lg hover:shadow-md transition-shadow cursor-pointer"
-                      onClick={() => navigate("/map")}
-                    >
-                      <div className="relative">
-                        <Avatar
-                          src={friend.photoURL || `https://ui-avatars.com/api/?name=${friend.name || friend.username || 'Friend'}`}
-                          alt={friend.name || friend.username}
-                          sx={{ width: 56, height: 56 }}
-                        />
-                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-success rounded-full border-2 border-card flex items-center justify-center">
-                          <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-                        </div>
-                      </div>
+                )}
+                {activeFriends.length === 0 ? (
+                  <div className="text-center py-8">
+                    <FitnessCenterIcon className="mx-auto text-muted-foreground" style={{ fontSize: 48 }} />
+                    <p className="text-muted-foreground mt-4">No active friends right now</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Friends will appear here when they start a workout
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {activeFriends.map((friend, index) => {
+                      const activityIcon = 
+                        friend.activity === "running" ? DirectionsRunIcon :
+                        friend.activity === "cycling" ? DirectionsBikeIcon :
+                        DirectionsWalkIcon;
+                      const ActivityIcon = activityIcon;
                       
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-sm truncate">
-                            {friend.name || friend.username || "Friend"}
-                          </h3>
-                          <FitnessCenterIcon className="text-success" style={{ fontSize: 16 }} />
-                        </div>
-                        
-                        <div className="flex items-center gap-2 mt-1">
-                          <ActivityIcon 
-                            className={
-                              friend.activity === "running" ? "text-success" :
-                              friend.activity === "cycling" ? "text-primary" :
-                              "text-warning"
-                            }
-                            style={{ fontSize: 16 }}
-                          />
-                          <span className="text-xs text-muted-foreground capitalize">
-                            {friend.activity || "working out"}
-                          </span>
-                        </div>
-
-                        {friend.distanceKm !== null && (
-                          <div className="flex items-center gap-1 mt-1">
-                            <LocationOnIcon className="text-primary" style={{ fontSize: 14 }} />
-                            <span className="text-xs text-muted-foreground">
-                              {formatDistance(friend.distanceKm)} away
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // Navigate to map and pass friend location as state
-                            navigate("/map", {
-                              state: {
-                                focusFriend: {
-                                  id: friend.id,
-                                  lat: friend.lat,
-                                  lng: friend.lng,
-                                  name: friend.name || friend.username,
-                                  activity: friend.activity,
-                                }
-                              }
-                            });
-                          }}
+                      return (
+                        <motion.div
+                          key={friend.id}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="flex items-center gap-4 p-4 border border-border rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+                          onClick={() => navigate("/map")}
                         >
-                          View
-                        </Button>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
+                          <div className="relative">
+                            <Avatar
+                              src={friend.photoURL || `https://ui-avatars.com/api/?name=${friend.name || friend.username || 'Friend'}`}
+                              alt={friend.name || friend.username}
+                              sx={{ width: 56, height: 56 }}
+                            />
+                            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-success rounded-full border-2 border-card flex items-center justify-center">
+                              <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                            </div>
+                          </div>
+                          
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-semibold text-sm truncate">
+                                {friend.name || friend.username || "Friend"}
+                              </h3>
+                              <FitnessCenterIcon className="text-success" style={{ fontSize: 16 }} />
+                            </div>
+                            
+                            <div className="flex items-center gap-2 mt-1">
+                              <ActivityIcon 
+                                className={
+                                  friend.activity === "running" ? "text-success" :
+                                  friend.activity === "cycling" ? "text-primary" :
+                                  "text-warning"
+                                }
+                                style={{ fontSize: 16 }}
+                              />
+                              <span className="text-xs text-muted-foreground capitalize">
+                                {friend.activity || "working out"}
+                              </span>
+                            </div>
+
+                            {friend.distanceKm !== null && (
+                              <div className="flex items-center gap-1 mt-1">
+                                <LocationOnIcon className="text-primary" style={{ fontSize: 14 }} />
+                                <span className="text-xs text-muted-foreground">
+                                  {formatDistance(friend.distanceKm)} away
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // Navigate to map and pass friend location as state
+                                navigate("/map", {
+                                  state: {
+                                    focusFriend: {
+                                      id: friend.id,
+                                      lat: friend.lat,
+                                      lng: friend.lng,
+                                      name: friend.name || friend.username,
+                                      activity: friend.activity,
+                                    }
+                                  }
+                                });
+                              }}
+                            >
+                              View
+                            </Button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </Card>
         </motion.div>
 
@@ -688,6 +878,251 @@ const Index = () => {
         currentUsername={userProfile?.username || currentUser?.displayName || "You"}
         currentAvatar={currentUser?.photoURL || ""}
       />
+
+      {/* Profile View Modal for Workout History */}
+      <AnimatePresence>
+        {selectedWorkoutHistoryItem && (() => {
+          const item = selectedWorkoutHistoryItem;
+          const user = item.userData;
+          const workout = item.workout;
+          const userId = item.userId;
+          
+          // Calculate distance if possible
+          let distance = "Unknown";
+          if (location?.lat && location?.lng && user?.lat && user?.lng) {
+            const distanceKm = calculateDistance(
+              location.lat,
+              location.lng,
+              user.lat,
+              user.lng
+            );
+            distance = formatDistance(distanceKm);
+          }
+          
+          const friendStatus = getFriendStatus(userId);
+          const activityLabel = workout.activity.charAt(0).toUpperCase() + workout.activity.slice(1);
+          
+          return (
+            <ProfileView
+              user={{
+                id: userId,
+                name: user?.name || user?.username || "User",
+                distance: distance,
+                activity: activityLabel,
+                avatar: user?.photoURL || `https://ui-avatars.com/api/?name=${user?.name || user?.username || 'User'}`,
+                photos: user?.photos || [],
+                bio: user?.bio,
+              }}
+              friendStatus={friendStatus}
+              onClose={() => setSelectedWorkoutHistoryItem(null)}
+              onSendMessage={() => {
+                setSelectedWorkoutHistoryItem(null);
+                navigate("/messages", {
+                  state: { userId, userName: user?.name || user?.username }
+                });
+              }}
+              onAddFriend={() => handleAddFriend(userId)}
+              onAcceptFriend={() => handleAcceptFriend(userId)}
+              onDeclineFriend={() => handleDeclineFriend(userId)}
+              onUnfriend={() => handleUnfriend(userId)}
+            />
+          );
+        })()}
+      </AnimatePresence>
+
+      {/* Notification Drawer */}
+      <AnimatePresence>
+        {showNotificationDrawer && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowNotificationDrawer(false)}
+              className="fixed inset-0 bg-black/50 z-40"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl shadow-elevation-4 p-6 pb-24 border-t border-border`}
+              style={{ 
+                maxHeight: '85vh',
+                minHeight: '200px',
+                overflowY: 'auto'
+              }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground">Notifications</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'All caught up!'}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowNotificationDrawer(false)}
+                  className="rounded-full"
+                >
+                  <CloseIcon />
+                </Button>
+              </div>
+
+              {/* Notifications List - Sorted by newest first */}
+              {notifications.length > 0 ? (
+                <div className="space-y-2">
+                  {[...notifications]
+                    .sort((a, b) => b.timestamp - a.timestamp) // Newest first
+                    .map((notification) => {
+                      const getNotificationIcon = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return <MailIcon style={{ fontSize: 20 }} className="text-primary" />;
+                          case "friend_request":
+                            return <PersonAddIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          case "poke":
+                            return <TouchAppIcon style={{ fontSize: 20 }} className="text-purple-500" />;
+                          case "friend_accepted":
+                            return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
+                          case "workout_complete":
+                            return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
+                          case "achievement":
+                            return <EmojiEventsIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          default:
+                            return <NotificationsIcon style={{ fontSize: 20 }} />;
+                        }
+                      };
+
+                      const getNotificationTitle = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return notification.userName;
+                          case "friend_request":
+                            return notification.userName;
+                          case "poke":
+                            return notification.userName;
+                          case "friend_accepted":
+                            return notification.userName;
+                          case "workout_complete":
+                            return "Workout Completed";
+                          case "achievement":
+                            return notification.message || "Congrats for a new achievement!";
+                          default:
+                            return notification.userName;
+                        }
+                      };
+
+                      const getNotificationMessage = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return notification.message || "Sent you a message";
+                          case "friend_request":
+                            return "wants to add you as a friend";
+                          case "poke":
+                            return "poked you! They're interested in matching";
+                          case "friend_accepted":
+                            return "accepted your friend request";
+                          case "workout_complete":
+                            return notification.message || "Workout completed successfully!";
+                          case "achievement":
+                            return notification.message || "Congrats for a new achievement!";
+                          default:
+                            return "";
+                        }
+                      };
+
+                      const formatTimestamp = (timestamp: number) => {
+                        const now = Date.now();
+                        const diff = now - timestamp;
+                        const minutes = Math.floor(diff / 60000);
+                        const hours = Math.floor(diff / 3600000);
+                        const days = Math.floor(diff / 86400000);
+
+                        if (minutes < 1) return "Just now";
+                        if (minutes < 60) return `${minutes}m ago`;
+                        if (hours < 24) return `${hours}h ago`;
+                        if (days < 7) return `${days}d ago`;
+                        return new Date(timestamp).toLocaleDateString();
+                      };
+
+                      return (
+                        <motion.div
+                          key={notification.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className={`p-4 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors cursor-pointer ${
+                            !notification.read ? 'bg-primary/5 border-primary/30' : ''
+                          }`}
+                          onClick={() => {
+                            handleNotificationTap(notification);
+                            setShowNotificationDrawer(false);
+                          }}
+                        >
+                          <div className="flex items-start gap-3">
+                            {/* Icon */}
+                            <div className={`flex-shrink-0 p-2 rounded-full ${
+                              notification.type === "message"
+                                ? "bg-primary/15"
+                                : notification.type === "friend_request"
+                                ? "bg-warning/15"
+                                : notification.type === "poke"
+                                ? "bg-purple-500/15"
+                                : notification.type === "workout_complete"
+                                ? "bg-success/15"
+                                : notification.type === "achievement"
+                                ? "bg-warning/15"
+                                : "bg-success/15"
+                            }`}>
+                              {getNotificationIcon()}
+                            </div>
+
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="font-semibold text-sm text-foreground">
+                                  {getNotificationTitle()}
+                                </p>
+                                {!notification.read && (
+                                  <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0"></span>
+                                )}
+                              </div>
+                              <p className="text-sm text-muted-foreground mb-1">
+                                {getNotificationMessage()}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatTimestamp(notification.timestamp)}
+                              </p>
+                            </div>
+
+                            {/* Dismiss button */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                dismissNotification(notification.id);
+                              }}
+                              className="flex-shrink-0 p-1 hover:bg-accent rounded-full transition-colors"
+                            >
+                              <CloseIcon style={{ fontSize: 16 }} className="text-muted-foreground" />
+                            </button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="py-12 text-center">
+                  <NotificationsIcon className="text-muted-foreground mx-auto mb-2" style={{ fontSize: 48 }} />
+                  <p className="text-sm text-muted-foreground">No notifications yet</p>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
       
       <BottomNavigation />
     </div>

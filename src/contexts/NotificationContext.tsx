@@ -5,6 +5,7 @@ interface NotificationContextType {
   notifications: Notification[];
   addNotification: (notification: Omit<Notification, "id" | "timestamp" | "read">) => void;
   dismissNotification: (id: string) => void;
+  markAllAsRead: () => void;
   handleNotificationTap: (notification: Notification) => void;
   unreadCount: number;
   unreadMessageCount: number;

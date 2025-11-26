@@ -6,8 +6,10 @@ import MailIcon from "@mui/icons-material/Mail";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CloseIcon from "@mui/icons-material/Close";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 
-export type NotificationType = "message" | "friend_request" | "friend_accepted" | "poke";
+export type NotificationType = "message" | "friend_request" | "friend_accepted" | "poke" | "workout_complete" | "achievement";
 
 export interface Notification {
   id: string;
@@ -18,6 +20,7 @@ export interface Notification {
   message?: string;
   timestamp: number;
   read: boolean;
+  workoutId?: string; // Optional workout ID for workout_complete notifications
 }
 
 interface NotificationSystemProps {
@@ -80,6 +83,10 @@ export const NotificationSystem = ({
                     ? "bg-warning"
                     : notification.type === "poke"
                     ? "bg-purple-500"
+                    : notification.type === "workout_complete"
+                    ? "bg-success"
+                    : notification.type === "achievement"
+                    ? "bg-warning"
                     : "bg-success"
                 }`}>
                   {notification.type === "message" && (
@@ -93,6 +100,12 @@ export const NotificationSystem = ({
                   )}
                   {notification.type === "friend_accepted" && (
                     <span className="text-white text-xs font-bold">✓</span>
+                  )}
+                  {notification.type === "workout_complete" && (
+                    <CheckCircleIcon style={{ fontSize: 14 }} className="text-white" />
+                  )}
+                  {notification.type === "achievement" && (
+                    <EmojiEventsIcon style={{ fontSize: 14 }} className="text-white" />
                   )}
                 </div>
               </div>
@@ -109,6 +122,12 @@ export const NotificationSystem = ({
                   {notification.type === "friend_request" && "wants to add you as a friend"}
                   {notification.type === "poke" && "poked you! They're interested in matching"}
                   {notification.type === "friend_accepted" && "accepted your friend request"}
+                  {notification.type === "workout_complete" && (
+                    notification.message || "Workout completed successfully!"
+                  )}
+                  {notification.type === "achievement" && (
+                    notification.message || "Congrats for a new achievement!"
+                  )}
                 </p>
               </div>
 
@@ -136,6 +155,10 @@ export const NotificationSystem = ({
                   ? "bg-warning"
                   : notification.type === "poke"
                   ? "bg-purple-500"
+                  : notification.type === "workout_complete"
+                  ? "bg-success"
+                  : notification.type === "achievement"
+                  ? "bg-warning"
                   : "bg-success"
               }`}
             />
@@ -212,6 +235,12 @@ export const useNotifications = () => {
     );
   };
 
+  const markAllAsRead = () => {
+    setNotifications(prev =>
+      prev.map(n => ({ ...n, read: true }))
+    );
+  };
+
   const handleNotificationTap = (notification: Notification) => {
     dismissNotification(notification.id);
     
@@ -226,13 +255,21 @@ export const useNotifications = () => {
         },
       });
     } else if (notification.type === "friend_request") {
-      // Open friend request modal or navigate to a requests page
-      console.log("Open friend request:", notification);
+      // Navigate to friends page with requests tab
+      navigate("/friends", { state: { tab: "requests" } });
     } else if (notification.type === "poke") {
       // Navigate to map to see the user who poked
       navigate("/map");
     } else if (notification.type === "friend_accepted") {
-      navigate("/map");
+      navigate("/friends", { state: { tab: "friends" } });
+    } else if (notification.type === "workout_complete") {
+      // Navigate to workout history page with specific workout ID
+      navigate("/workout-history", { 
+        state: { workoutId: notification.workoutId } 
+      });
+    } else if (notification.type === "achievement") {
+      // Navigate to workout history or profile for achievements
+      navigate("/workout-history");
     }
   };
 
@@ -251,6 +288,7 @@ export const useNotifications = () => {
     notifications,
     addNotification,
     dismissNotification,
+    markAllAsRead,
     handleNotificationTap,
     unreadCount,
     unreadMessageCount,

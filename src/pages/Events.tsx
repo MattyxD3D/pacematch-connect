@@ -25,10 +25,16 @@ import FilterListIcon from "@mui/icons-material/FilterList";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
 import MenuIcon from "@mui/icons-material/Menu";
+import NotificationsIcon from "@mui/icons-material/Notifications";
+import MailIcon from "@mui/icons-material/Mail";
+import PersonAddIcon from "@mui/icons-material/PersonAdd";
+import TouchAppIcon from "@mui/icons-material/TouchApp";
+import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import Avatar from "@mui/material/Avatar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { useNotificationContext } from "@/contexts/NotificationContext";
 import { EventDetailModal } from "@/components/EventDetailModal";
 import { CreateEventModal } from "@/components/CreateEventModal";
 import { QuickCheckInModal } from "@/components/QuickCheckInModal";
@@ -136,6 +142,7 @@ const EventMarker = ({ event, checkInCount, countdown, onClick }: EventMarkerPro
 const Events = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
+  const { unreadCount, notifications, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [activityFilter, setActivityFilter] = useState<EventType | "all">("all");
   const [categoryFilter, setCategoryFilter] = useState<EventCategory>("all");
@@ -143,6 +150,7 @@ const Events = () => {
   const [showEventDetail, setShowEventDetail] = useState(false);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
+  const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false); // Start closed on mobile
@@ -262,6 +270,13 @@ const Events = () => {
     
     return () => clearInterval(interval);
   }, []);
+
+  // Mark all notifications as read when notification drawer opens
+  useEffect(() => {
+    if (showNotificationDrawer && unreadCount > 0) {
+      markAllAsRead();
+    }
+  }, [showNotificationDrawer, unreadCount, markAllAsRead]);
 
   // Listen to events from Firebase
   useEffect(() => {
@@ -457,60 +472,32 @@ const Events = () => {
         className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-20 border-b border-border/50"
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-bold">Events</h1>
-                <p className="text-sm text-muted-foreground">
-                  {sortedEvents.length} event{sortedEvents.length !== 1 ? "s" : ""} near you
-                </p>
-              </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold">Events</h1>
+              <p className="text-sm text-muted-foreground">
+                {sortedEvents.length} event{sortedEvents.length !== 1 ? "s" : ""} near you
+              </p>
             </div>
-
-            {/* View Toggle & My Events */}
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setShowQuickCheckIn(true)}
-                className="h-10"
-              >
-                <LocationOnIcon className="mr-2" style={{ fontSize: 20 }} />
-                <span className="hidden sm:inline">Quick Check-in</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => navigate("/my-events")}
-                className="h-10"
-              >
-                <CheckCircleIcon className="mr-2" style={{ fontSize: 20 }} />
-                <span className="hidden sm:inline">My Events</span>
-              </Button>
-              
-              <div className="flex gap-2 bg-muted rounded-xl p-1">
-                <motion.button
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setViewMode("map")}
-                  className={`px-3 py-2 rounded-lg transition-all ${
-                    viewMode === "map"
-                      ? "bg-primary text-primary-foreground shadow-elevation-1"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <MapIcon style={{ fontSize: 20 }} />
-                </motion.button>
-                <motion.button
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setViewMode("list")}
-                  className={`px-3 py-2 rounded-lg transition-all ${
-                    viewMode === "list"
-                      ? "bg-primary text-primary-foreground shadow-elevation-1"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <ViewListIcon style={{ fontSize: 20 }} />
-                </motion.button>
-              </div>
-            </div>
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowNotificationDrawer(true)}
+              className={`relative touch-target bg-transparent rounded-full hover:bg-muted transition-all ${
+                unreadCount > 0 ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-card' : ''
+              }`}
+              style={{ width: 40, height: 40 }}
+              title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : "Notifications"}
+            >
+              <NotificationsIcon 
+                style={{ fontSize: 24 }} 
+                className={unreadCount > 0 ? 'text-red-400' : 'text-foreground'}
+              />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center border-2 border-card shadow-lg animate-pulse z-10">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </motion.button>
           </div>
         </div>
       </motion.div>
@@ -679,11 +666,11 @@ const Events = () => {
                       }
                     }}
                     options={{
-                      disableDefaultUI: false,
-                      zoomControl: true,
+                      disableDefaultUI: true,
+                      zoomControl: false,
                       streetViewControl: false,
                       mapTypeControl: false,
-                      fullscreenControl: true,
+                      fullscreenControl: false,
                     }}
                   >
                     {/* User Location Marker */}
@@ -1212,6 +1199,255 @@ const Events = () => {
           </div>
         </DrawerContent>
       </Drawer>
+      
+      {/* Quick Check-in, My Events, and View Toggle - Above Bottom Navigation */}
+      <div className="fixed bottom-20 left-0 right-0 z-40 px-4 pb-2">
+        <div className="bg-card/95 backdrop-blur-md rounded-2xl p-3 shadow-elevation-3 border border-border/50 max-w-2xl mx-auto">
+          <div className="flex items-center gap-2">
+            {/* Quick Check-in Button */}
+            <Button
+              variant="outline"
+              onClick={() => setShowQuickCheckIn(true)}
+              className="flex-1 h-10 border-border bg-background hover:bg-secondary"
+            >
+              <LocationOnIcon style={{ fontSize: 18 }} className="mr-2" />
+              <span className="text-sm font-semibold">Quick Check-in</span>
+            </Button>
+
+            {/* My Events Button */}
+            <Button
+              variant="outline"
+              onClick={() => navigate("/my-events")}
+              className="flex-1 h-10 border-border bg-background hover:bg-secondary"
+            >
+              <div className="flex items-center mr-2">
+                <CheckCircleIcon style={{ fontSize: 16 }} />
+              </div>
+              <span className="text-sm font-semibold">My Events</span>
+            </Button>
+
+            {/* View Toggle - Grouped */}
+            <div className="flex gap-1 bg-muted rounded-xl p-1">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setViewMode("map")}
+                className={`px-3 py-2 rounded-lg transition-all ${
+                  viewMode === "map"
+                    ? "bg-primary text-primary-foreground shadow-elevation-1"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <MapIcon style={{ fontSize: 20 }} />
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setViewMode("list")}
+                className={`px-3 py-2 rounded-lg transition-all ${
+                  viewMode === "list"
+                    ? "bg-primary text-primary-foreground shadow-elevation-1"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <ViewListIcon style={{ fontSize: 20 }} />
+              </motion.button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Notification Drawer */}
+      <AnimatePresence>
+        {showNotificationDrawer && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowNotificationDrawer(false)}
+              className="fixed inset-0 bg-black/50 z-40"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl shadow-elevation-4 p-6 pb-24 border-t border-border`}
+              style={{ 
+                maxHeight: '85vh',
+                minHeight: '200px',
+                overflowY: 'auto'
+              }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground">Notifications</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'All caught up!'}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowNotificationDrawer(false)}
+                  className="rounded-full"
+                >
+                  <CloseIcon />
+                </Button>
+              </div>
+
+              {/* Notifications List - Sorted by newest first */}
+              {notifications.length > 0 ? (
+                <div className="space-y-2">
+                  {[...notifications]
+                    .sort((a, b) => b.timestamp - a.timestamp) // Newest first
+                    .map((notification) => {
+                      const getNotificationIcon = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return <MailIcon style={{ fontSize: 20 }} className="text-primary" />;
+                          case "friend_request":
+                            return <PersonAddIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          case "poke":
+                            return <TouchAppIcon style={{ fontSize: 20 }} className="text-purple-500" />;
+                          case "friend_accepted":
+                            return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
+                          case "workout_complete":
+                            return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
+                          case "achievement":
+                            return <EmojiEventsIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          default:
+                            return <NotificationsIcon style={{ fontSize: 20 }} />;
+                        }
+                      };
+
+                      const getNotificationTitle = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return notification.userName;
+                          case "friend_request":
+                            return notification.userName;
+                          case "poke":
+                            return notification.userName;
+                          case "friend_accepted":
+                            return notification.userName;
+                          case "workout_complete":
+                            return "Workout Completed";
+                          case "achievement":
+                            return notification.message || "Congrats for a new achievement!";
+                          default:
+                            return notification.userName;
+                        }
+                      };
+
+                      const getNotificationMessage = () => {
+                        switch (notification.type) {
+                          case "message":
+                            return notification.message || "Sent you a message";
+                          case "friend_request":
+                            return "wants to add you as a friend";
+                          case "poke":
+                            return "poked you! They're interested in matching";
+                          case "friend_accepted":
+                            return "accepted your friend request";
+                          case "workout_complete":
+                            return notification.message || "Workout completed successfully!";
+                          case "achievement":
+                            return notification.message || "Congrats for a new achievement!";
+                          default:
+                            return "";
+                        }
+                      };
+
+                      const formatTimestamp = (timestamp: number) => {
+                        const now = Date.now();
+                        const diff = now - timestamp;
+                        const minutes = Math.floor(diff / 60000);
+                        const hours = Math.floor(diff / 3600000);
+                        const days = Math.floor(diff / 86400000);
+
+                        if (minutes < 1) return "Just now";
+                        if (minutes < 60) return `${minutes}m ago`;
+                        if (hours < 24) return `${hours}h ago`;
+                        if (days < 7) return `${days}d ago`;
+                        return new Date(timestamp).toLocaleDateString();
+                      };
+
+                      return (
+                        <motion.div
+                          key={notification.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className={`p-4 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors cursor-pointer ${
+                            !notification.read ? 'bg-primary/5 border-primary/30' : ''
+                          }`}
+                          onClick={() => {
+                            handleNotificationTap(notification);
+                            setShowNotificationDrawer(false);
+                          }}
+                        >
+                          <div className="flex items-start gap-3">
+                            {/* Icon */}
+                            <div className={`flex-shrink-0 p-2 rounded-full ${
+                              notification.type === "message"
+                                ? "bg-primary/15"
+                                : notification.type === "friend_request"
+                                ? "bg-warning/15"
+                                : notification.type === "poke"
+                                ? "bg-purple-500/15"
+                                : notification.type === "workout_complete"
+                                ? "bg-success/15"
+                                : notification.type === "achievement"
+                                ? "bg-warning/15"
+                                : "bg-success/15"
+                            }`}>
+                              {getNotificationIcon()}
+                            </div>
+
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="font-semibold text-sm text-foreground">
+                                  {getNotificationTitle()}
+                                </p>
+                                {!notification.read && (
+                                  <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0"></span>
+                                )}
+                              </div>
+                              <p className="text-sm text-muted-foreground mb-1">
+                                {getNotificationMessage()}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatTimestamp(notification.timestamp)}
+                              </p>
+                            </div>
+
+                            {/* Dismiss button */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                dismissNotification(notification.id);
+                              }}
+                              className="flex-shrink-0 p-1 hover:bg-accent rounded-full transition-colors"
+                            >
+                              <CloseIcon style={{ fontSize: 16 }} className="text-muted-foreground" />
+                            </button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="py-12 text-center">
+                  <NotificationsIcon className="text-muted-foreground mx-auto mb-2" style={{ fontSize: 48 }} />
+                  <p className="text-sm text-muted-foreground">No notifications yet</p>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
       
       <BottomNavigation />
     </div>

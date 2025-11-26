@@ -46,6 +46,7 @@ interface ProfileViewProps {
   onUnfriend?: () => void;
   onPoke?: () => void;
   hasPoked?: boolean;
+  isWorkoutActive?: boolean;
 }
 
 export const ProfileView = ({
@@ -60,6 +61,7 @@ export const ProfileView = ({
   onUnfriend,
   onPoke,
   hasPoked = false,
+  isWorkoutActive = false,
 }: ProfileViewProps) => {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showUnfriendDialog, setShowUnfriendDialog] = useState(false);
@@ -222,14 +224,27 @@ export const ProfileView = ({
                 </div>
               )}
 
-              {/* Poke Button - Show when not friends */}
-              {onPoke && friendStatus === "not_friends" && !hasPoked && (
+              {/* Poke Button - Show when not friends and workout is active */}
+              {onPoke && friendStatus === "not_friends" && !hasPoked && isWorkoutActive && (
                 <Button
                   onClick={onPoke}
                   className="w-full h-12 font-semibold bg-purple-500 hover:bg-purple-600 text-white"
                 >
                   <TouchAppIcon className="mr-2" style={{ fontSize: 20 }} />
                   Poke {user.name}
+                </Button>
+              )}
+
+              {/* Show disabled poke button when workout is not active */}
+              {onPoke && friendStatus === "not_friends" && !hasPoked && !isWorkoutActive && (
+                <Button
+                  disabled
+                  variant="outline"
+                  className="w-full h-12 opacity-50"
+                  title="You must have an active workout session to poke someone"
+                >
+                  <TouchAppIcon className="mr-2" style={{ fontSize: 20 }} />
+                  Poke {user.name} (Start workout first)
                 </Button>
               )}
 

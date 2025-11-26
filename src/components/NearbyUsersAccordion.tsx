@@ -32,6 +32,7 @@ interface NearbyUsersAccordionProps {
   onPoke?: (userId: string) => void;
   loading?: boolean;
   pokes?: string[]; // Array of user IDs who poked the current user
+  isWorkoutActive?: boolean;
 }
 
 export const NearbyUsersAccordion = ({
@@ -41,7 +42,8 @@ export const NearbyUsersAccordion = ({
   onSendMessage,
   onPoke,
   loading = false,
-  pokes = []
+  pokes = [],
+  isWorkoutActive = false
 }: NearbyUsersAccordionProps) => {
   const getActivityIcon = (activity: string) => {
     switch (activity.toLowerCase()) {
@@ -197,7 +199,7 @@ export const NearbyUsersAccordion = ({
 
                         {/* Actions */}
                         <div className="flex items-center justify-center gap-2 mt-2">
-                          {onPoke && (
+                          {onPoke && isWorkoutActive && (
                             <Button
                               size="sm"
                               className="flex-1 h-8 text-xs justify-center bg-purple-500 hover:bg-purple-600 text-white"

@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useUser, type WorkoutHistory } from "@/contexts/UserContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import { generateDummyWorkoutHistory, ENABLE_DUMMY_DATA } from "@/lib/dummyData"
 
 const WorkoutHistoryPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { workoutHistory, useMetric } = useUser();
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutHistory | null>(null);
 
@@ -29,6 +30,19 @@ const WorkoutHistoryPage = () => {
     }
     return workouts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [workoutHistory]);
+
+  // Auto-open workout detail modal if workoutId is provided in navigation state
+  useEffect(() => {
+    const workoutId = (location.state as { workoutId?: string })?.workoutId;
+    if (workoutId && sortedWorkouts.length > 0) {
+      const workout = sortedWorkouts.find(w => w.id === workoutId);
+      if (workout) {
+        setSelectedWorkout(workout);
+        // Clear the state to prevent reopening on subsequent navigations
+        navigate(location.pathname, { replace: true, state: {} });
+      }
+    }
+  }, [location.state, sortedWorkouts, navigate, location.pathname]);
 
 
   const formatTime = (seconds: number) => {

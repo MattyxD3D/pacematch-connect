@@ -3,14 +3,53 @@ import { ref, set, get, onValue, off, remove, DataSnapshot } from "firebase/data
 import { database } from "./firebase";
 
 /**
+ * Check if user has an active workout session
+ * This checks if user has recent location updates (within last 5 minutes)
+ * which indicates they're actively tracking a workout
+ */
+const isUserActive = async (userId: string): Promise<boolean> => {
+  try {
+    const userRef = ref(database, `users/${userId}`);
+    const snapshot = await get(userRef);
+    
+    if (!snapshot.exists()) {
+      return false;
+    }
+    
+    const userData = snapshot.val();
+    const timestamp = userData.timestamp;
+    
+    if (!timestamp) {
+      return false;
+    }
+    
+    // Consider user active if location was updated within last 5 minutes
+    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+    return timestamp > fiveMinutesAgo;
+  } catch (error) {
+    console.error("❌ Error checking user activity:", error);
+    // If we can't check, allow the poke (fail open, frontend validation is primary)
+    return true;
+  }
+};
+
+/**
  * Send a poke to another user
  * A poke is a lightweight way to show interest in matching with someone
+ * Note: Frontend validation should check workout state, this is defense in depth
  */
 export const sendPoke = async (
   fromUserId: string,
   toUserId: string
 ): Promise<void> => {
   try {
+    // Optional backend validation: Check if sender has active workout
+    // Frontend validation is primary, this is defense in depth
+    const isActive = await isUserActive(fromUserId);
+    if (!isActive) {
+      throw new Error("You must have an active workout session to poke someone");
+    }
+    
     const pokeRef = ref(database, `pokes/${toUserId}/${fromUserId}`);
     await set(pokeRef, {
       fromUserId,

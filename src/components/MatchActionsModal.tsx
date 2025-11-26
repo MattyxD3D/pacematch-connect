@@ -38,6 +38,7 @@ interface MatchActionsModalProps {
   onViewProfile: () => void;
   onPoke?: () => void;
   hasPoked?: boolean;
+  isWorkoutActive?: boolean;
 }
 
 export const MatchActionsModal = ({
@@ -51,7 +52,8 @@ export const MatchActionsModal = ({
   onChat,
   onViewProfile,
   onPoke,
-  hasPoked = false
+  hasPoked = false,
+  isWorkoutActive = false
 }: MatchActionsModalProps) => {
   const getActivityIcon = () => {
     switch (user.activity.toLowerCase()) {
@@ -146,8 +148,8 @@ export const MatchActionsModal = ({
 
               {/* Action Buttons */}
               <div className="space-y-3">
-                {/* Poke Button - Show before Add Friend */}
-                {onPoke && friendStatus === "not_friends" && !hasPoked && (
+                {/* Poke Button - Show before Add Friend (only when workout is active) */}
+                {onPoke && friendStatus === "not_friends" && !hasPoked && isWorkoutActive && (
                   <Button
                     onClick={() => {
                       onPoke();
@@ -157,6 +159,19 @@ export const MatchActionsModal = ({
                   >
                     <TouchAppIcon className="mr-2" />
                     Poke {user.name}
+                  </Button>
+                )}
+
+                {/* Show disabled poke button when workout is not active */}
+                {onPoke && friendStatus === "not_friends" && !hasPoked && !isWorkoutActive && (
+                  <Button
+                    disabled
+                    variant="outline"
+                    className="w-full h-14 text-base font-semibold opacity-50"
+                    title="You must have an active workout session to poke someone"
+                  >
+                    <TouchAppIcon className="mr-2" />
+                    Poke {user.name} (Start workout first)
                   </Button>
                 )}
 

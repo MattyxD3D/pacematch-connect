@@ -44,6 +44,9 @@ import { Switch } from "@/components/ui/switch";
 import { Avatar } from "@mui/material";
 import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
+import { QuickCheckInModal } from "@/components/QuickCheckInModal";
+import { getUserVenuePreferences, listenToUsersByVenues, VenueUser } from "@/services/venuePreferenceService";
+import { getAllVenues, getVenueById } from "@/services/venueService";
 
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 
@@ -71,6 +74,9 @@ const Index = () => {
   const [profileVisible, setProfileVisible] = useState(true);
   const [generalLocation, setGeneralLocation] = useState<string>("");
   const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
+  const [usersByVenue, setUsersByVenue] = useState<Record<string, VenueUser[]>>({});
+  const [userVenuePreferences, setUserVenuePreferences] = useState<{ venues: string[]; activities: string[] } | null>(null);
   
   // Notification context
   const { unreadCount, notifications, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
@@ -245,6 +251,55 @@ const Index = () => {
       markAllAsRead();
     }
   }, [showNotificationDrawer, unreadCount, markAllAsRead]);
+
+  // Load user venue preferences and listen to users by venues
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setUsersByVenue({});
+      setUserVenuePreferences(null);
+      return;
+    }
+
+    const loadPreferences = async () => {
+      try {
+        const preferences = await getUserVenuePreferences(currentUser.uid);
+        if (preferences && preferences.venues && preferences.venues.length > 0) {
+          setUserVenuePreferences({
+            venues: preferences.venues,
+            activities: preferences.activities
+          });
+        } else {
+          setUserVenuePreferences(null);
+          setUsersByVenue({});
+        }
+      } catch (error) {
+        console.error("Error loading venue preferences:", error);
+        setUserVenuePreferences(null);
+      }
+    };
+
+    loadPreferences();
+  }, [currentUser?.uid]);
+
+  // Listen to users by venues when preferences are set
+  useEffect(() => {
+    if (!currentUser?.uid || !userVenuePreferences || userVenuePreferences.venues.length === 0) {
+      setUsersByVenue({});
+      return;
+    }
+
+    const unsubscribe = listenToUsersByVenues(
+      userVenuePreferences.venues,
+      (usersByVenueData) => {
+        // Keep all users including current user
+        setUsersByVenue(usersByVenueData);
+      }
+    );
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [currentUser?.uid, userVenuePreferences]);
 
   // Get friend status for a user
   const getFriendStatus = (userId: string | number): FriendStatus => {
@@ -674,19 +729,22 @@ const Index = () => {
                     </Button>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between">
+                  <div>
                     <span className="text-sm text-muted-foreground">
                       {generalLocation || "No location set"}
                     </span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIsEditingLocation(true)}
-                    >
-                      {generalLocation ? "Edit" : "Add Location"}
-                    </Button>
                   </div>
                 )}
+                
+                {/* Quick Check-in Button */}
+                <Button
+                  variant="outline"
+                  onClick={() => setShowQuickCheckIn(true)}
+                  className="w-full h-10 border-border bg-background hover:bg-secondary mt-3"
+                >
+                  <LocationOnIcon style={{ fontSize: 18 }} className="mr-2" />
+                  <span className="text-sm font-semibold">Add location</span>
+                </Button>
               </div>
             </div>
           </Card>
@@ -702,7 +760,7 @@ const Index = () => {
             <Tabs value={activeFriendsTab} onValueChange={(value) => setActiveFriendsTab(value as "active" | "history")} className="w-full">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                 <TabsList className="grid grid-cols-2 w-full sm:w-auto flex-shrink-0">
-                  <TabsTrigger value="history" className="text-xs sm:text-sm">Workout History</TabsTrigger>
+                  <TabsTrigger value="history" className="text-xs sm:text-sm">Active Users</TabsTrigger>
                   <TabsTrigger value="active" className="text-xs sm:text-sm">Active Friends</TabsTrigger>
                 </TabsList>
                 <div className="flex items-center gap-3 flex-shrink-0">
@@ -729,33 +787,104 @@ const Index = () => {
                       />
                     </div>
                   )}
-                  {activeFriendsTab === "history" && (
-                    <Select value={timeframe} onValueChange={(value: "week" | "month" | "all") => setTimeframe(value)}>
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="week">Last Week</SelectItem>
-                        <SelectItem value="month">Last Month</SelectItem>
-                        <SelectItem value="all">All Time</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
                 </div>
               </div>
 
               <TabsContent value="history" className="mt-0">
-                {currentUser?.uid ? (
-                  <WorkoutHistoryFeed
-                    currentUserId={currentUser.uid}
-                    selectedActivity={selectedTab}
-                    timeframe={timeframe}
-                    useMetric={useMetric}
-                    onWorkoutClick={handleWorkoutHistoryClick}
-                  />
-                ) : (
+                {!currentUser?.uid ? (
                   <div className="text-center py-8">
-                    <p className="text-muted-foreground">Please sign in to view workout history</p>
+                    <p className="text-muted-foreground">Please sign in to view active users</p>
+                  </div>
+                ) : !userVenuePreferences || userVenuePreferences.venues.length === 0 ? (
+                  <div className="text-center py-8">
+                    <LocationOnIcon className="mx-auto text-muted-foreground" style={{ fontSize: 48 }} />
+                    <p className="text-muted-foreground mt-4">No venues selected</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Use the "Add location" button to select venues and discover people nearby
+                    </p>
+                    <Button
+                      onClick={() => setShowQuickCheckIn(true)}
+                      className="mt-4"
+                    >
+                      Add location
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {userVenuePreferences.venues.map((venueId) => {
+                      const venue = getVenueById(venueId);
+                      const venueUsers = usersByVenue[venueId] || [];
+                      
+                      if (!venue) return null;
+
+                      return (
+                        <div key={venueId} className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <LocationOnIcon className="text-primary" style={{ fontSize: 20 }} />
+                            <h3 className="font-semibold text-base">
+                              Active users in {venue.name}
+                            </h3>
+                            {venueUsers.length > 0 && (
+                              <span className="text-sm text-muted-foreground">
+                                ({venueUsers.length})
+                              </span>
+                            )}
+                          </div>
+                          
+                          {venueUsers.length === 0 ? (
+                            <div className="text-center py-6 border border-border rounded-lg bg-muted/30">
+                              <p className="text-sm text-muted-foreground">
+                                No active users in this venue yet
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                              {venueUsers.map((venueUser) => {
+                                const activityIcons = {
+                                  running: DirectionsRunIcon,
+                                  cycling: DirectionsBikeIcon,
+                                  walking: DirectionsWalkIcon
+                                };
+                                
+                                return (
+                                  <motion.div
+                                    key={venueUser.userId}
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    className="flex flex-col items-center p-3 border border-border rounded-lg bg-card hover:bg-secondary transition-colors"
+                                  >
+                                    <Avatar
+                                      src={venueUser.avatar || `https://ui-avatars.com/api/?name=${venueUser.username}`}
+                                      alt={venueUser.username}
+                                      sx={{ width: 56, height: 56 }}
+                                    />
+                                    <p className="text-sm font-medium mt-2 text-center truncate w-full">
+                                      {venueUser.username}
+                                    </p>
+                                    <div className="flex gap-1 mt-1">
+                                      {venueUser.activities.map((activity) => {
+                                        const ActivityIcon = activityIcons[activity];
+                                        return (
+                                          <ActivityIcon
+                                            key={activity}
+                                            className={
+                                              activity === "running" ? "text-success" :
+                                              activity === "cycling" ? "text-primary" :
+                                              "text-warning"
+                                            }
+                                            style={{ fontSize: 16 }}
+                                          />
+                                        );
+                                      })}
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </TabsContent>
@@ -826,15 +955,6 @@ const Index = () => {
                                 {friend.activity || "working out"}
                               </span>
                             </div>
-
-                            {friend.distanceKm !== null && (
-                              <div className="flex items-center gap-1 mt-1">
-                                <LocationOnIcon className="text-primary" style={{ fontSize: 14 }} />
-                                <span className="text-xs text-muted-foreground">
-                                  {formatDistance(friend.distanceKm)} away
-                                </span>
-                              </div>
-                            )}
                           </div>
 
                           <div className="text-right">
@@ -1267,6 +1387,13 @@ const Index = () => {
           </>
         )}
       </AnimatePresence>
+
+      {/* Quick Check-in Modal */}
+      {showQuickCheckIn && (
+        <QuickCheckInModal
+          onClose={() => setShowQuickCheckIn(false)}
+        />
+      )}
       
       <BottomNavigation />
     </div>

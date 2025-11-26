@@ -3,20 +3,18 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import CloseIcon from "@mui/icons-material/Close";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import SearchIcon from "@mui/icons-material/Search";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import CheckBoxIcon from "@mui/icons-material/CheckBox";
+import CheckBoxOutlineBlankIcon from "@mui/icons-material/CheckBoxOutlineBlank";
 import { toast } from "sonner";
 import { getAllVenues, searchVenues, Venue } from "@/services/venueService";
-import { useVenueCheckIns } from "@/hooks/useVenueCheckIns";
 import { useAuth } from "@/hooks/useAuth";
-
-type Activity = "running" | "cycling" | "walking";
+import { saveUserVenuePreferences, getUserVenuePreferences, Activity } from "@/services/venuePreferenceService";
 
 interface QuickCheckInModalProps {
   onClose: () => void;
@@ -25,10 +23,29 @@ interface QuickCheckInModalProps {
 export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedActivity, setSelectedActivity] = useState<Activity>("running");
-  const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
+  const [selectedActivities, setSelectedActivities] = useState<Activity[]>([]);
+  const [selectedVenues, setSelectedVenues] = useState<string[]>([]);
   const [venues, setVenues] = useState<Venue[]>(getAllVenues());
-  const { userCheckIn, checkIn, checkOut, isCheckedIn, loading } = useVenueCheckIns({ autoLoad: true });
+  const [loading, setLoading] = useState(false);
+
+  // Load existing preferences on mount
+  useEffect(() => {
+    const loadPreferences = async () => {
+      if (!user?.uid) return;
+
+      try {
+        const preferences = await getUserVenuePreferences(user.uid);
+        if (preferences) {
+          setSelectedActivities(preferences.activities || []);
+          setSelectedVenues(preferences.venues || []);
+        }
+      } catch (error) {
+        console.error("Error loading preferences:", error);
+      }
+    };
+
+    loadPreferences();
+  }, [user?.uid]);
 
   useEffect(() => {
     if (searchQuery.trim()) {
@@ -38,49 +55,51 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
     }
   }, [searchQuery]);
 
-  // Set selected venue if user is already checked in
-  useEffect(() => {
-    if (userCheckIn && !selectedVenue) {
-      const venue = venues.find(v => v.id === userCheckIn.venueId);
-      if (venue) {
-        setSelectedVenue(venue);
-        setSelectedActivity(userCheckIn.activity);
+  const handleToggleActivity = (activity: Activity) => {
+    setSelectedActivities(prev => {
+      if (prev.includes(activity)) {
+        return prev.filter(a => a !== activity);
+      } else {
+        return [...prev, activity];
       }
-    }
-  }, [userCheckIn, venues, selectedVenue]);
-
-  const handleCheckIn = async () => {
-    if (!selectedVenue) {
-      toast.error("Please select a venue");
-      return;
-    }
-
-    if (!user?.uid) {
-      toast.error("Please log in to check in");
-      return;
-    }
-
-    try {
-      await checkIn(selectedVenue.id, { id: selectedVenue.id, name: selectedVenue.name }, selectedActivity);
-      toast.success(`Checked in to ${selectedVenue.name}!`);
-      onClose();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to check in");
-    }
+    });
   };
 
-  const handleCheckOut = async () => {
-    if (!user?.uid) {
+  const handleToggleVenue = (venueId: string) => {
+    setSelectedVenues(prev => {
+      if (prev.includes(venueId)) {
+        return prev.filter(id => id !== venueId);
+      } else {
+        return [...prev, venueId];
+      }
+    });
+  };
+
+  const handleSetLocation = async () => {
+    if (selectedVenues.length === 0) {
+      toast.error("Please select at least one venue");
       return;
     }
 
+    if (selectedActivities.length === 0) {
+      toast.error("Please select at least one activity");
+      return;
+    }
+
+    if (!user?.uid) {
+      toast.error("Please log in to set location");
+      return;
+    }
+
+    setLoading(true);
     try {
-      await checkOut();
-      toast.success("Checked out successfully!");
-      setSelectedVenue(null);
+      await saveUserVenuePreferences(user.uid, selectedVenues, selectedActivities);
+      toast.success("Location preferences saved!");
       onClose();
     } catch (error: any) {
-      toast.error(error.message || "Failed to check out");
+      toast.error(error.message || "Failed to save preferences");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -133,9 +152,9 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                   <LocationOnIcon className="text-primary" style={{ fontSize: 28 }} />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold">Quick Check-in</h2>
+                  <h2 className="text-2xl font-bold">Add venues</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Check in to a venue to see who's there
+                    Select venues and activities to discover people nearby
                   </p>
                 </div>
               </div>
@@ -143,44 +162,20 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
 
             {/* Content */}
             <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
-              {/* Current Check-in Status */}
-              {isCheckedIn && userCheckIn && (
-                <div className="bg-success/10 border-2 border-success/30 rounded-xl p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <CheckCircleIcon className="text-success" style={{ fontSize: 20 }} />
-                        <p className="font-semibold text-success">Currently Checked In</p>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {userCheckIn.venueName} • {userCheckIn.activity}
-                      </p>
-                    </div>
-                    <Button
-                      onClick={handleCheckOut}
-                      variant="outline"
-                      className="border-success text-success hover:bg-success/10"
-                    >
-                      Check Out
-                    </Button>
-                  </div>
-                </div>
-              )}
-
               {/* Activity Selection */}
               <div className="space-y-3">
-                <label className="text-base font-semibold">What are you doing?</label>
+                <label className="text-base font-semibold">Activities</label>
                 <div className="grid grid-cols-3 gap-3">
                   {activities.map((activity) => {
                     const Icon = activity.icon;
-                    const isSelected = selectedActivity === activity.id;
+                    const isSelected = selectedActivities.includes(activity.id);
                     return (
                       <motion.button
                         key={activity.id}
                         whileTap={{ scale: 0.95 }}
-                        onClick={() => setSelectedActivity(activity.id)}
+                        onClick={() => handleToggleActivity(activity.id)}
                         className={`
-                          flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all duration-300
+                          flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all duration-300 relative
                           ${
                             isSelected
                               ? activity.color === "success"
@@ -192,6 +187,20 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                           }
                         `}
                       >
+                        {isSelected && (
+                          <div className="absolute top-2 right-2">
+                            <CheckBoxIcon
+                              className={
+                                activity.color === "success"
+                                  ? "text-success"
+                                  : activity.color === "primary"
+                                  ? "text-primary"
+                                  : "text-warning"
+                              }
+                              style={{ fontSize: 20 }}
+                            />
+                          </div>
+                        )}
                         <Icon
                           className={
                             isSelected
@@ -239,42 +248,40 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                   </div>
                 ) : (
                   venues.map((venue) => {
-                    const isSelected = selectedVenue?.id === venue.id;
-                    const isCheckedInHere = userCheckIn?.venueId === venue.id;
+                    const isSelected = selectedVenues.includes(venue.id);
                     
                     return (
                       <motion.button
                         key={venue.id}
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => setSelectedVenue(venue)}
+                        onClick={() => handleToggleVenue(venue.id)}
                         className={`
                           w-full text-left p-4 rounded-xl border-2 transition-all duration-300
                           ${
                             isSelected
                               ? "border-primary bg-primary/10 shadow-elevation-2"
-                              : isCheckedInHere
-                              ? "border-success bg-success/5"
                               : "border-border bg-card hover:bg-secondary"
                           }
                         `}
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <LocationOnIcon
-                                className={isSelected ? "text-primary" : "text-muted-foreground"}
-                                style={{ fontSize: 20 }}
-                              />
-                              <h3 className="font-semibold">{venue.name}</h3>
-                              {isCheckedInHere && (
-                                <Badge className="bg-success/20 text-success border-success/30">
-                                  <CheckCircleIcon style={{ fontSize: 12 }} className="mr-1" />
-                                  Checked In
-                                </Badge>
-                              )}
+                          <div className="flex items-center gap-3 flex-1">
+                            {isSelected ? (
+                              <CheckBoxIcon className="text-primary" style={{ fontSize: 24 }} />
+                            ) : (
+                              <CheckBoxOutlineBlankIcon className="text-muted-foreground" style={{ fontSize: 24 }} />
+                            )}
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <LocationOnIcon
+                                  className={isSelected ? "text-primary" : "text-muted-foreground"}
+                                  style={{ fontSize: 20 }}
+                                />
+                                <h3 className="font-semibold">{venue.name}</h3>
+                              </div>
+                              <p className="text-sm text-muted-foreground">{venue.description}</p>
+                              <p className="text-xs text-muted-foreground mt-1">{venue.city}</p>
                             </div>
-                            <p className="text-sm text-muted-foreground">{venue.description}</p>
-                            <p className="text-xs text-muted-foreground mt-1">{venue.city}</p>
                           </div>
                         </div>
                       </motion.button>
@@ -294,11 +301,11 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                   Cancel
                 </Button>
                 <Button
-                  onClick={handleCheckIn}
-                  disabled={!selectedVenue || loading || isCheckedIn}
+                  onClick={handleSetLocation}
+                  disabled={selectedVenues.length === 0 || selectedActivities.length === 0 || loading}
                   className="flex-1 h-12 font-semibold"
                 >
-                  {loading ? "Checking in..." : isCheckedIn ? "Already Checked In" : "Check In"}
+                  {loading ? "Saving..." : "Set location"}
                 </Button>
               </div>
             </div>

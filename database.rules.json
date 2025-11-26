@@ -140,6 +140,13 @@
           ".write": "auth != null && ($recipientId === auth.uid || $senderId === auth.uid)"
         }
       }
+    },
+    "userVenuePreferences": {
+      ".read": "auth != null",
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "$userId === auth.uid"
+      }
     }
   }
 }

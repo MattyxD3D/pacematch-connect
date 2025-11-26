@@ -37,7 +37,6 @@ import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 import { EventDetailModal } from "@/components/EventDetailModal";
 import { CreateEventModal } from "@/components/CreateEventModal";
-import { QuickCheckInModal } from "@/components/QuickCheckInModal";
 import BottomNavigation from "@/components/BottomNavigation";
 import { generateDummyEvents, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 import {
@@ -149,7 +148,6 @@ const Events = () => {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
-  const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
   const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1034,12 +1032,6 @@ const Events = () => {
       )}
 
       {/* Quick Check-in Modal */}
-      {showQuickCheckIn && (
-        <QuickCheckInModal
-          onClose={() => setShowQuickCheckIn(false)}
-        />
-      )}
-
       {/* Mobile Events Drawer */}
       <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DrawerContent className="max-h-[85vh]">
@@ -1204,16 +1196,6 @@ const Events = () => {
       <div className="fixed bottom-20 left-0 right-0 z-40 px-4 pb-2">
         <div className="bg-card/95 backdrop-blur-md rounded-2xl p-3 shadow-elevation-3 border border-border/50 max-w-2xl mx-auto">
           <div className="flex items-center gap-2">
-            {/* Quick Check-in Button */}
-            <Button
-              variant="outline"
-              onClick={() => setShowQuickCheckIn(true)}
-              className="flex-1 h-10 border-border bg-background hover:bg-secondary"
-            >
-              <LocationOnIcon style={{ fontSize: 18 }} className="mr-2" />
-              <span className="text-sm font-semibold">Quick Check-in</span>
-            </Button>
-
             {/* My Events Button */}
             <Button
               variant="outline"

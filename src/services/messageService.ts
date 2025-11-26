@@ -9,6 +9,10 @@ export interface Message {
   content: string;
   timestamp: number;
   isRead?: boolean;
+  type?: 'text' | 'location';
+  location?: { lat: number; lng: number };
+  locationSharingId?: string;
+  expiresAt?: number;
 }
 
 /**
@@ -227,5 +231,63 @@ const updateUserConversationSummaries = async (
     set(senderSummaryRef, senderSummary),
     set(receiverSummaryRef, receiverSummary)
   ]);
+};
+
+/**
+ * Send a location message
+ */
+export const sendLocationMessage = async (
+  senderId: string,
+  receiverId: string,
+  location: { lat: number; lng: number },
+  locationSharingId?: string,
+  expiresAt?: number
+): Promise<string> => {
+  try {
+    const conversationId = [senderId, receiverId].sort().join("_");
+    const messagesRef = ref(database, `messages/${conversationId}`);
+    const newMessageRef = push(messagesRef);
+    const messageId = newMessageRef.key!;
+    const timestamp = Date.now();
+
+    const messageData: Message = {
+      id: messageId,
+      senderId,
+      receiverId,
+      content: "📍 Shared location",
+      timestamp,
+      isRead: false,
+      type: 'location',
+      location,
+      locationSharingId,
+      expiresAt
+    };
+    
+    await set(newMessageRef, messageData);
+    
+    // Update conversation metadata
+    const conversationMetaRef = ref(database, `conversations/${conversationId}`);
+    const participantMap: Record<string, boolean> = {
+      [senderId]: true,
+      [receiverId]: true
+    };
+    await set(conversationMetaRef, {
+      participants: participantMap,
+      participantList: Object.keys(participantMap),
+      lastMessage: "📍 Shared location",
+      lastMessageTime: timestamp,
+      lastMessageSender: senderId,
+      updatedAt: timestamp
+    });
+    
+    // Maintain lightweight per-user summaries
+    await updateUserConversationSummaries(conversationId, senderId, receiverId, messageData);
+    
+    console.log(`✅ Location message sent: ${messageId}`);
+    return messageId;
+  } catch (error) {
+    console.error("❌ Error sending location message:", error);
+    throw error;
+  }
 };
 

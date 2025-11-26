@@ -4,21 +4,34 @@ import { useNavigate, useLocation } from "react-router-dom";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import SendIcon from "@mui/icons-material/Send";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
+import LocationOnIcon from "@mui/icons-material/LocationOn";
+import NavigationIcon from "@mui/icons-material/Navigation";
 import Avatar from "@mui/material/Avatar";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import { ProfileView } from "./ProfileView";
 import { useUser } from "@/contexts/UserContext";
 import { useAuth } from "@/hooks/useAuth";
+import { useLocation as useLocationHook } from "@/hooks/useLocation";
 import { 
   getPendingRequests, 
   sendFriendRequest, 
   acceptFriendRequest, 
   declineFriendRequest 
 } from "@/lib/socialStorage";
-import { listenToMessages, sendMessage, markMessagesAsRead, Message as FirebaseMessage } from "@/services/messageService";
+import { listenToMessages, sendMessage, sendLocationMessage, markMessagesAsRead, Message as FirebaseMessage } from "@/services/messageService";
 import { generateDummyChatMessages, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
+import LocationSharingModal from "@/components/LocationSharingModal";
+import {
+  startLocationSharing,
+  stopLocationSharing,
+  updateSharedLocation,
+  listenToSharedLocation,
+  SharedLocation,
+} from "@/services/locationSharingService";
+import { openGoogleMapsNavigation } from "@/utils/navigation";
 
 interface ChatUser {
   id: string; // Firebase UID
@@ -49,6 +62,21 @@ const Chat = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [messages, setMessages] = useState<FirebaseMessage[]>([]);
+  
+  // Location sharing state
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState<15 | 30 | 60 | null>(null);
+  const [isSharingLocation, setIsSharingLocation] = useState(false);
+  const [sharingTimer, setSharingTimer] = useState(0);
+  const [sharedLocation, setSharedLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Get current user location
+  const { location: currentLocation } = useLocationHook(
+    currentUser?.uid || null,
+    isSharingLocation, // Only track when sharing
+    true
+  );
 
   // Listen to real-time messages from Firebase
   useEffect(() => {
@@ -165,6 +193,115 @@ const Chat = () => {
     // Already in chat, just close the profile
   };
 
+  // Location sharing handlers
+  const handleStartSharing = async () => {
+    if (!currentUser?.uid || !chatUser?.id || !selectedDuration || !currentLocation) {
+      toast.error("Unable to start sharing. Please check your location permissions.");
+      return;
+    }
+
+    try {
+      await startLocationSharing(
+        currentUser.uid,
+        chatUser.id,
+        selectedDuration,
+        currentLocation
+      );
+
+      // Send location message
+      await sendLocationMessage(
+        currentUser.uid,
+        chatUser.id,
+        currentLocation,
+        `${currentUser.uid}_${chatUser.id}`,
+        Date.now() + (selectedDuration * 60 * 1000)
+      );
+
+      setIsSharingLocation(true);
+      setSharingTimer(selectedDuration * 60);
+      setSharedLocation(currentLocation);
+      toast.success(`Sharing location for ${selectedDuration} minutes`);
+
+      // Start timer countdown
+      timerIntervalRef.current = setInterval(() => {
+        setSharingTimer((prev) => {
+          if (prev <= 1) {
+            handleStopSharing();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch (error) {
+      console.error("Error starting location sharing:", error);
+      toast.error("Failed to start sharing location");
+    }
+  };
+
+  const handleStopSharing = async () => {
+    if (!currentUser?.uid || !chatUser?.id) return;
+
+    try {
+      await stopLocationSharing(currentUser.uid, chatUser.id);
+      setIsSharingLocation(false);
+      setSharingTimer(0);
+      setSharedLocation(null);
+      setSelectedDuration(null);
+      setShowLocationModal(false); // Close modal when stopping
+      toast.success("Location sharing stopped");
+
+      // Clear interval
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+    } catch (error) {
+      console.error("Error stopping location sharing:", error);
+      toast.error("Failed to stop sharing location");
+    }
+  };
+
+  // Update shared location when current location changes (while sharing)
+  useEffect(() => {
+    if (isSharingLocation && currentLocation && currentUser?.uid && chatUser?.id) {
+      updateSharedLocation(currentUser.uid, chatUser.id, currentLocation).catch(console.error);
+      setSharedLocation(currentLocation);
+    }
+  }, [currentLocation?.lat, currentLocation?.lng, isSharingLocation, currentUser?.uid, chatUser?.id]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Listen to shared location from friend
+  useEffect(() => {
+    if (!currentUser?.uid || !chatUser?.id) return;
+
+    const unsubscribe = listenToSharedLocation(
+      chatUser.id,
+      currentUser.uid,
+      (location: SharedLocation | null) => {
+        if (location) {
+          // Friend is sharing location with us
+          // This will be displayed in the message bubble
+        }
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser?.uid, chatUser?.id]);
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -249,17 +386,51 @@ const Chat = () => {
                 <div
                   className={`max-w-[75%] ${isMe ? "order-last" : ""}`}
                 >
-                  <div
-                    className={`rounded-2xl px-4 py-2.5 ${
-                      isMe
-                        ? "bg-primary text-primary-foreground rounded-br-md"
-                        : "bg-muted text-foreground rounded-bl-md"
-                    }`}
-                  >
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                      {message.content}
-                    </p>
-                  </div>
+                  {message.type === 'location' && message.location ? (
+                    // Location message
+                    <div
+                      className={`rounded-2xl px-4 py-3 ${
+                        isMe
+                          ? "bg-primary text-primary-foreground rounded-br-md"
+                          : "bg-muted text-foreground rounded-bl-md"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <LocationOnIcon style={{ fontSize: 20 }} />
+                        <p className="text-sm font-medium">Shared location</p>
+                      </div>
+                      <p className="text-xs opacity-90 mb-3">
+                        {message.location.lat.toFixed(6)}, {message.location.lng.toFixed(6)}
+                      </p>
+                      {message.expiresAt && Date.now() < message.expiresAt && (
+                        <p className="text-xs opacity-75 mb-3">
+                          Expires in {formatTime(Math.floor((message.expiresAt - Date.now()) / 1000))}
+                        </p>
+                      )}
+                      <Button
+                        size="sm"
+                        variant={isMe ? "secondary" : "default"}
+                        onClick={() => openGoogleMapsNavigation(message.location!.lat, message.location!.lng)}
+                        className="w-full"
+                      >
+                        <NavigationIcon style={{ fontSize: 16 }} className="mr-2" />
+                        Start navigation using Google Maps
+                      </Button>
+                    </div>
+                  ) : (
+                    // Text message
+                    <div
+                      className={`rounded-2xl px-4 py-2.5 ${
+                        isMe
+                          ? "bg-primary text-primary-foreground rounded-br-md"
+                          : "bg-muted text-foreground rounded-bl-md"
+                      }`}
+                    >
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                        {message.content}
+                      </p>
+                    </div>
+                  )}
                   <p className={`text-xs text-muted-foreground mt-1 px-1 ${
                     isMe ? "text-right" : "text-left"
                   }`}>
@@ -325,6 +496,38 @@ const Chat = () => {
         </div>
       )}
 
+      {/* Location Display on Screen */}
+      {isSharingLocation && sharedLocation && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="fixed bottom-24 left-4 right-4 z-20 sm:left-auto sm:right-4 sm:w-80"
+        >
+          <Card className="p-4 bg-card border-2 border-primary shadow-lg">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <LocationOnIcon className="text-success" style={{ fontSize: 24 }} />
+                <p className="font-semibold">I'm here</p>
+              </div>
+              <div className="text-2xl font-bold text-primary">
+                {formatTime(sharingTimer)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {sharedLocation.lat.toFixed(6)}, {sharedLocation.lng.toFixed(6)}
+              </p>
+              <Button
+                onClick={() => openGoogleMapsNavigation(sharedLocation.lat, sharedLocation.lng)}
+                className="w-full"
+                size="sm"
+              >
+                <NavigationIcon style={{ fontSize: 16 }} className="mr-2" />
+                Start navigation using Google Maps
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
+      )}
+
       {/* Input Area */}
       {chatUser && (
         <div className="border-t border-border p-4 bg-background">
@@ -352,6 +555,14 @@ const Chat = () => {
             </div>
           </div>
           <Button
+            onClick={() => setShowLocationModal(true)}
+            size="icon"
+            variant="outline"
+            className="rounded-full h-11 w-11 flex-shrink-0"
+          >
+            <LocationOnIcon style={{ fontSize: 20 }} />
+          </Button>
+          <Button
             onClick={handleSendMessage}
             disabled={!messageInput.trim()}
             size="icon"
@@ -362,6 +573,19 @@ const Chat = () => {
         </div>
       </div>
       )}
+
+      {/* Location Sharing Modal */}
+      <LocationSharingModal
+        open={showLocationModal}
+        onOpenChange={setShowLocationModal}
+        selectedDuration={selectedDuration}
+        onDurationSelect={setSelectedDuration}
+        onStartSharing={handleStartSharing}
+        onStopSharing={handleStopSharing}
+        isSharing={isSharingLocation}
+        remainingSeconds={sharingTimer}
+        currentLocation={currentLocation}
+      />
 
       {/* Profile View Modal */}
       {showProfile && chatUser && (

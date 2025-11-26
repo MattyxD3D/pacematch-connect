@@ -66,10 +66,26 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [userProfile, setUserProfileState] = useState<UserProfile | null>(null);
   const { user } = useAuth();
 
-  // Load from localStorage on mount
+  // Clear profile when user logs out or changes
   useEffect(() => {
+    if (!user?.uid) {
+      // User logged out - clear profile and localStorage
+      setUserProfileState(null);
+      localStorage.removeItem("userProfile");
+      localStorage.removeItem("userProfileUserId");
+      return;
+    }
+  }, [user?.uid]);
+
+  // Load from localStorage on mount - only if it belongs to current user
+  useEffect(() => {
+    if (!user?.uid) return; // Don't load if no user is logged in
+
+    const storedUserId = localStorage.getItem("userProfileUserId");
     const stored = localStorage.getItem("userProfile");
-    if (stored) {
+    
+    // Only load if localStorage belongs to current user
+    if (stored && storedUserId === user.uid) {
       try {
         const parsed = JSON.parse(stored);
         // Convert date strings back to Date objects
@@ -82,9 +98,17 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         setUserProfileState(parsed);
       } catch (e) {
         console.error("Failed to parse user profile:", e);
+        // Clear corrupted data
+        localStorage.removeItem("userProfile");
+        localStorage.removeItem("userProfileUserId");
       }
+    } else if (stored && storedUserId !== user.uid) {
+      // Different user's data - clear it
+      console.log("⚠️ Clearing localStorage from different user");
+      localStorage.removeItem("userProfile");
+      localStorage.removeItem("userProfileUserId");
     }
-  }, []);
+  }, [user?.uid]);
 
   // Load workouts from Firebase when user is authenticated
   useEffect(() => {
@@ -97,14 +121,30 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       
       // Update user profile with workouts from Firebase
       setUserProfileState((prev) => {
-        if (!prev) return prev;
+        // If profile doesn't exist, create a minimal one with workouts
+        if (!prev) {
+          const minimalProfile: UserProfile = {
+            username: "",
+            activities: [],
+            workoutHistory: workouts,
+            useMetric: true,
+          };
+          // Save to localStorage with user ID
+          localStorage.setItem("userProfile", JSON.stringify(minimalProfile));
+          localStorage.setItem("userProfileUserId", user.uid);
+          return minimalProfile;
+        }
         
         // Merge Firebase workouts with existing profile
         // Firebase workouts take precedence
-        return {
+        const updated = {
           ...prev,
           workoutHistory: workouts,
         };
+        // Save to localStorage with user ID
+        localStorage.setItem("userProfile", JSON.stringify(updated));
+        localStorage.setItem("userProfileUserId", user.uid);
+        return updated;
       });
     });
 
@@ -115,7 +155,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
   const setUserProfile = (profile: UserProfile) => {
     setUserProfileState(profile);
-    localStorage.setItem("userProfile", JSON.stringify(profile));
+    if (user?.uid) {
+      localStorage.setItem("userProfile", JSON.stringify(profile));
+      localStorage.setItem("userProfileUserId", user.uid);
+    }
   };
 
   const hasActivity = (activity: Activity): boolean => {
@@ -132,17 +175,23 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const addWorkout = (workout: Omit<WorkoutHistory, "id">) => {
-    if (userProfile) {
-      const newWorkout: WorkoutHistory = {
-        ...workout,
-        id: Date.now().toString(),
-      };
-      const updated = {
-        ...userProfile,
-        workoutHistory: [...(userProfile.workoutHistory || []), newWorkout],
-      };
-      setUserProfile(updated);
-    }
+    // Create a minimal profile if it doesn't exist
+    const currentProfile = userProfile || {
+      username: "",
+      activities: [],
+      workoutHistory: [],
+      useMetric: true,
+    };
+    
+    const newWorkout: WorkoutHistory = {
+      ...workout,
+      id: Date.now().toString(),
+    };
+    const updated = {
+      ...currentProfile,
+      workoutHistory: [...(currentProfile.workoutHistory || []), newWorkout],
+    };
+    setUserProfile(updated);
   };
 
   const workoutHistory = userProfile?.workoutHistory || [];

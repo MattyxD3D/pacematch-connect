@@ -352,36 +352,40 @@ const Settings = () => {
             ) : (
               // Edit Mode
               <div className="space-y-6">
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Fitness Level</Label>
-                  <Select value={fitnessLevel} onValueChange={(value) => setFitnessLevel(value as FitnessLevel)}>
-                    <SelectTrigger className="h-12">
-                      <div className="flex items-center gap-2">
-                        {fitnessLevel && (
-                          <div className={`w-3 h-3 rounded-full ${
-                            fitnessLevel === "beginner" ? "bg-blue-500" :
-                            fitnessLevel === "intermediate" ? "bg-green-500" :
+                  <div className="space-y-3">
+                    {fitnessLevelOptions.map((option) => {
+                      const isSelected = fitnessLevel === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          onClick={() => setFitnessLevel(option.value)}
+                          className={`
+                            w-full flex items-start gap-3 p-4 rounded-lg border-2 transition-all duration-300 text-left
+                            ${isSelected 
+                              ? `${option.bgColor} ${option.borderColor} ring-2 ring-offset-2 ring-current` 
+                              : 'border-border bg-card hover:bg-secondary'
+                            }
+                          `}
+                        >
+                          <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 ${
+                            option.value === "beginner" ? "bg-blue-500" :
+                            option.value === "intermediate" ? "bg-green-500" :
                             "bg-purple-500"
                           }`} />
-                        )}
-                        <SelectValue />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {fitnessLevelOptions.map((option) => (
-                        <SelectItem 
-                          key={option.value} 
-                          value={option.value} 
-                          className="py-3 cursor-pointer focus:bg-transparent"
-                        >
-                          <div className={`flex flex-col gap-1 p-3 rounded-lg border-2 transition-all ${option.bgColor} ${option.borderColor} ${fitnessLevel === option.value ? 'ring-2 ring-offset-2 ring-current' : ''}`}>
-                            <span className={`font-bold text-base ${option.color}`}>{option.label}</span>
-                            <span className="text-xs text-muted-foreground leading-relaxed">{option.description}</span>
+                          <div className="flex-1 min-w-0">
+                            <span className={`font-bold text-base block ${isSelected ? option.color : 'text-foreground'}`}>
+                              {option.label}
+                            </span>
+                            <span className="text-xs text-muted-foreground leading-relaxed block mt-1">
+                              {option.description}
+                            </span>
                           </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                        </button>
+                      );
+                    })}
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     Choose the level that best matches your current fitness and training intensity.
                   </p>

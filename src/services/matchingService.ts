@@ -31,23 +31,35 @@ export interface MatchResult {
   distance: number; // in meters
 }
 
-// Fixed radius in meters for each activity type
-const FIXED_RADIUS: Record<Activity, number> = {
+// Base radius in meters for each activity type
+const BASE_RADIUS: Record<Activity, number> = {
   cycling: 10000,  // 10km for cycling
   running: 2000,   // 2km for running
   walking: 1000    // 1km for walking
 };
 
+// Radius multipliers based on user preference
+const RADIUS_MULTIPLIERS: Record<RadiusPreference, number> = {
+  nearby: 0.5,   // 50% of base radius
+  normal: 1.0,   // 100% of base radius (default)
+  wide: 2.0      // 200% of base radius
+};
+
 /**
- * Get fixed radius based on activity type
- * Cycling: 10km, Running: 2km, Walking: 1km
+ * Get radius based on activity type and user preference
+ * Cycling: 10km base, Running: 2km base, Walking: 1km base
+ * Multiplied by preference: nearby (0.5x), normal (1x), wide (2x)
  */
 export function computeRadius(
   user: MatchingUser,
   nearbyCount?: number
 ): number {
-  // Return fixed radius based on activity type
-  return FIXED_RADIUS[user.activity] || FIXED_RADIUS.running;
+  const baseRadius = BASE_RADIUS[user.activity] || BASE_RADIUS.running;
+  const preference = user.radiusPreference || "normal";
+  const multiplier = RADIUS_MULTIPLIERS[preference] || 1.0;
+  
+  // Return radius adjusted by user preference
+  return Math.round(baseRadius * multiplier);
 }
 
 /**

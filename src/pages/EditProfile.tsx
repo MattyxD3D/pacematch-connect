@@ -346,17 +346,15 @@ const EditProfile = () => {
                       <span className="font-medium">{activity.label}</span>
                     </div>
                     <div 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleActivityToggle(activity.id as "running" | "cycling" | "walking");
-                      }}
                       className="flex-shrink-0"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       <Checkbox 
                         checked={isSelected}
-                        onCheckedChange={(checked) => {
+                        onCheckedChange={() => {
                           handleActivityToggle(activity.id as "running" | "cycling" | "walking");
                         }}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </div>
                   </motion.div>

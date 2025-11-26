@@ -20,7 +20,9 @@ const ProfileSetup = () => {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const [username, setUsername] = useState("");
-  const [activity, setActivity] = useState<"running" | "cycling" | "walking">("running");
+  const [selectedActivities, setSelectedActivities] = useState<("running" | "cycling" | "walking" | string)[]>(["running"]);
+  const [customActivity, setCustomActivity] = useState("");
+  const [showCustomInput, setShowCustomInput] = useState(false);
   const [gender, setGender] = useState("");
   const [fitnessLevel, setFitnessLevel] = useState<FitnessLevel>("intermediate");
   const [pace, setPace] = useState("");
@@ -45,7 +47,12 @@ const ProfileSetup = () => {
         const userData = await getUserData(user.uid);
         if (userData) {
           if (userData.name) setUsername(userData.name);
-          if (userData.activity) setActivity(userData.activity as typeof activity);
+          // Load activities - support both old single activity and new array format
+          if (userData.activities && Array.isArray(userData.activities)) {
+            setSelectedActivities(userData.activities);
+          } else if (userData.activity) {
+            setSelectedActivities([userData.activity as "running" | "cycling" | "walking"]);
+          }
           if (userData.gender) setGender(userData.gender);
           if (userData.fitnessLevel) setFitnessLevel(userData.fitnessLevel);
           if (userData.pace) setPace(userData.pace.toString());
@@ -75,15 +82,26 @@ const ProfileSetup = () => {
 
     setSaving(true);
     try {
+      // Ensure at least one activity is selected
+      if (selectedActivities.length === 0) {
+        toast.error("Please select at least one preferred activity");
+        setSaving(false);
+        return;
+      }
+
       const paceValue = pace ? parseFloat(pace) : null;
       const visibility: VisibilitySettings = {
         visibleToAllLevels: visibleToAllLevels,
         allowedLevels: visibleToAllLevels ? ["beginner", "intermediate", "pro"] : allowedLevels
       };
 
+      // Get primary activity (first selected, or running if available, otherwise first)
+      const primaryActivity = selectedActivities.find(a => ["running", "cycling", "walking"].includes(a)) as "running" | "cycling" | "walking" || selectedActivities[0] as "running" | "cycling" | "walking" || "running";
+
       await updateUserProfile(user.uid, {
         name: username.trim(),
-        activity: activity,
+        activity: primaryActivity, // Keep for backward compatibility (use first standard activity or first selected)
+        activities: selectedActivities.filter(a => a.trim() !== "") as ("running" | "cycling" | "walking")[], // Save as array
         gender: gender || null,
         fitnessLevel: fitnessLevel,
         pace: paceValue,
@@ -155,10 +173,27 @@ const ProfileSetup = () => {
     }
   };
 
-  const getPaceUnit = () => {
-    if (activity === "cycling") return "km/h";
-    return "min/km";
+  const handleActivityToggle = (activityId: "running" | "cycling" | "walking") => {
+    if (selectedActivities.includes(activityId)) {
+      setSelectedActivities(selectedActivities.filter(a => a !== activityId));
+    } else {
+      setSelectedActivities([...selectedActivities, activityId]);
+    }
   };
+
+  const handleAddCustomActivity = () => {
+    if (customActivity.trim() && !selectedActivities.includes(customActivity.trim())) {
+      setSelectedActivities([...selectedActivities, customActivity.trim()]);
+      setCustomActivity("");
+      setShowCustomInput(false);
+    }
+  };
+
+  const handleRemoveActivity = (activityToRemove: string) => {
+    setSelectedActivities(selectedActivities.filter(a => a !== activityToRemove));
+  };
+
+  const hasRunning = selectedActivities.includes("running");
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-success/5 flex flex-col items-center justify-center p-4">
@@ -213,34 +248,111 @@ const ProfileSetup = () => {
           transition={{ duration: 0.3, delay: 0.3 }}
           className="space-y-3"
         >
-          <Label className="text-base">Preferred Activity</Label>
+          <Label className="text-base">Preferred Activities</Label>
           <div className="grid grid-cols-3 gap-3">
             {activities.map((act) => {
               const Icon = act.icon;
+              const isSelected = selectedActivities.includes(act.id);
               return (
                 <button
                   key={act.id}
-                  onClick={() => setActivity(act.id as typeof activity)}
+                  type="button"
+                  onClick={() => handleActivityToggle(act.id)}
                   className={`
-                    flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-300
+                    flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-300 relative
                     ${
-                      activity === act.id
+                      isSelected
                         ? `border-${act.color} bg-${act.color}/10`
                         : "border-border bg-card hover:bg-secondary"
                     }
                   `}
                 >
+                  {isSelected && (
+                    <div className="absolute top-2 right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
+                      <span className="text-white text-xs">✓</span>
+                    </div>
+                  )}
                   <Icon
-                    className={activity === act.id ? `text-${act.color}` : "text-muted-foreground"}
+                    className={isSelected ? `text-${act.color}` : "text-muted-foreground"}
                     style={{ fontSize: 32 }}
                   />
-                  <span className={`text-xs mt-2 font-medium ${activity === act.id ? `text-${act.color}` : "text-muted-foreground"}`}>
+                  <span className={`text-xs mt-2 font-medium ${isSelected ? `text-${act.color}` : "text-muted-foreground"}`}>
                     {act.label}
                   </span>
                 </button>
               );
             })}
           </div>
+          
+          {/* Custom Activity Input */}
+          <div className="space-y-2">
+            {!showCustomInput ? (
+              <button
+                type="button"
+                onClick={() => setShowCustomInput(true)}
+                className="w-full p-3 rounded-lg border-2 border-dashed border-border bg-card hover:bg-secondary text-muted-foreground text-sm font-medium transition-all"
+              >
+                + Add Other Activity
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  placeholder="Enter activity name"
+                  value={customActivity}
+                  onChange={(e) => setCustomActivity(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddCustomActivity();
+                    }
+                  }}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  onClick={handleAddCustomActivity}
+                  disabled={!customActivity.trim()}
+                  variant="outline"
+                >
+                  Add
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setShowCustomInput(false);
+                    setCustomActivity("");
+                  }}
+                  variant="ghost"
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Display Selected Custom Activities */}
+          {selectedActivities.filter(a => !["running", "cycling", "walking"].includes(a)).length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {selectedActivities
+                .filter(a => !["running", "cycling", "walking"].includes(a))
+                .map((activity) => (
+                  <div
+                    key={activity}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20"
+                  >
+                    <span className="text-sm font-medium text-primary">{activity}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveActivity(activity)}
+                      className="text-primary hover:text-primary/70 text-sm font-bold"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
         </motion.div>
 
         {/* Gender Selection (Optional) */}
@@ -276,67 +388,71 @@ const ProfileSetup = () => {
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.3, delay: 0.5 }}
-          className="space-y-2"
+          className="space-y-3"
         >
           <Label className="text-base">Fitness Level</Label>
-          <Select value={fitnessLevel} onValueChange={(value) => setFitnessLevel(value as FitnessLevel)}>
-            <SelectTrigger className="h-12">
-              <div className="flex items-center gap-2">
-                {fitnessLevel && (
-                  <div className={`w-3 h-3 rounded-full ${
-                    fitnessLevel === "beginner" ? "bg-blue-500" :
-                    fitnessLevel === "intermediate" ? "bg-green-500" :
+          <div className="space-y-3">
+            {fitnessLevelOptions.map((option) => {
+              const isSelected = fitnessLevel === option.value;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => setFitnessLevel(option.value)}
+                  className={`
+                    w-full flex items-start gap-3 p-4 rounded-lg border-2 transition-all duration-300 text-left
+                    ${isSelected 
+                      ? `${option.bgColor} ${option.borderColor} ring-2 ring-offset-2 ring-current` 
+                      : 'border-border bg-card hover:bg-secondary'
+                    }
+                  `}
+                >
+                  <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 ${
+                    option.value === "beginner" ? "bg-blue-500" :
+                    option.value === "intermediate" ? "bg-green-500" :
                     "bg-purple-500"
                   }`} />
-                )}
-                <SelectValue />
-              </div>
-            </SelectTrigger>
-            <SelectContent>
-              {fitnessLevelOptions.map((option) => (
-                <SelectItem 
-                  key={option.value} 
-                  value={option.value} 
-                  className="py-3 cursor-pointer focus:bg-transparent"
-                >
-                  <div className={`flex flex-col gap-1 p-3 rounded-lg border-2 transition-all ${option.bgColor} ${option.borderColor} ${fitnessLevel === option.value ? 'ring-2 ring-offset-2 ring-current' : ''}`}>
-                    <span className={`font-bold text-base ${option.color}`}>{option.label}</span>
-                    <span className="text-xs text-muted-foreground leading-relaxed">{option.description}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className={`font-bold text-base block ${isSelected ? option.color : 'text-foreground'}`}>
+                      {option.label}
+                    </span>
+                    <span className="text-xs text-muted-foreground leading-relaxed block mt-1">
+                      {option.description}
+                    </span>
                   </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                </button>
+              );
+            })}
+          </div>
           <p className="text-xs text-muted-foreground">
             Choose the level that best matches your current fitness and training intensity.
           </p>
         </motion.div>
 
-        {/* Pace Input */}
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.3, delay: 0.6 }}
-          className="space-y-2"
-        >
-          <Label htmlFor="pace" className="text-base">
-            Average Pace ({getPaceUnit()}) <span className="text-xs text-muted-foreground">(Optional)</span>
-          </Label>
-          <Input
-            id="pace"
-            type="number"
-            step="0.1"
-            placeholder={`e.g., ${activity === "cycling" ? "25" : "5.5"}`}
-            value={pace}
-            onChange={(e) => setPace(e.target.value)}
-            className="h-12 text-base"
-          />
-          <p className="text-xs text-muted-foreground">
-            {activity === "cycling" 
-              ? "Your average cycling speed in km/h" 
-              : "Your average pace in minutes per kilometer"}
-          </p>
-        </motion.div>
+        {/* Pace Input - Only show if running is selected */}
+        {hasRunning && (
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3, delay: 0.6 }}
+            className="space-y-2"
+          >
+            <Label htmlFor="pace" className="text-base">
+              Average Pace (min/km) <span className="text-xs text-muted-foreground">(Optional)</span>
+            </Label>
+            <Input
+              id="pace"
+              type="number"
+              step="0.1"
+              placeholder="e.g., 5.5"
+              value={pace}
+              onChange={(e) => setPace(e.target.value)}
+              className="h-12 text-base"
+            />
+            <p className="text-xs text-muted-foreground">
+              Your average running pace in minutes per kilometer
+            </p>
+          </motion.div>
+        )}
 
         {/* Visibility Settings */}
         <motion.div
@@ -363,39 +479,43 @@ const ProfileSetup = () => {
           </div>
           
           {!visibleToAllLevels && (
-            <div className="space-y-2 pl-6">
-              <Label className="text-sm text-muted-foreground">Select allowed levels:</Label>
-              {fitnessLevelOptions.map((option) => (
-                <div 
-                  key={option.value} 
-                  className={`flex items-center space-x-3 p-2 rounded-lg border transition-all ${
-                    allowedLevels.includes(option.value) 
-                      ? `${option.bgColor} ${option.borderColor} border-2` 
-                      : 'border-border/50'
-                  }`}
-                >
-                  <Checkbox
-                    id={`level-${option.value}`}
-                    checked={allowedLevels.includes(option.value)}
-                    onCheckedChange={() => handleLevelToggle(option.value)}
-                  />
-                  <div className="flex items-center gap-2 flex-1">
-                    <div className={`w-2.5 h-2.5 rounded-full ${
-                      option.value === "beginner" ? "bg-blue-500" :
-                      option.value === "intermediate" ? "bg-green-500" :
-                      "bg-purple-500"
-                    }`} />
-                    <Label 
-                      htmlFor={`level-${option.value}`} 
-                      className={`text-sm font-medium cursor-pointer ${
-                        allowedLevels.includes(option.value) ? option.color : ''
-                      }`}
-                    >
-                      {option.label}
-                    </Label>
+            <div className="space-y-3 pl-6 mt-3">
+              <Label className="text-sm text-muted-foreground block mb-2">Select allowed levels:</Label>
+              <div className="space-y-2">
+                {fitnessLevelOptions.map((option) => (
+                  <div 
+                    key={option.value} 
+                    className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
+                      allowedLevels.includes(option.value) 
+                        ? `${option.bgColor} ${option.borderColor}` 
+                        : 'border-border/50 bg-card'
+                    }`}
+                    onClick={() => handleLevelToggle(option.value)}
+                  >
+                    <Checkbox
+                      id={`level-${option.value}`}
+                      checked={allowedLevels.includes(option.value)}
+                      onCheckedChange={() => handleLevelToggle(option.value)}
+                      className="flex-shrink-0"
+                    />
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className={`w-3 h-3 rounded-full flex-shrink-0 ${
+                        option.value === "beginner" ? "bg-blue-500" :
+                        option.value === "intermediate" ? "bg-green-500" :
+                        "bg-purple-500"
+                      }`} />
+                      <Label 
+                        htmlFor={`level-${option.value}`} 
+                        className={`text-sm font-medium cursor-pointer flex-1 ${
+                          allowedLevels.includes(option.value) ? option.color : 'text-foreground'
+                        }`}
+                      >
+                        {option.label}
+                      </Label>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </motion.div>

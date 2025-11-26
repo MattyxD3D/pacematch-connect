@@ -99,8 +99,15 @@ export const filterUsersByDistance = (
       }
 
       // Only hide if visible is explicitly false (default to visible if not set)
+      // This checks workout location visibility
       if (userData.visible === false) {
         console.log(`User ${userId} filtered out - visible: false`);
+        return null;
+      }
+
+      // Check profile visibility for discovery (default to visible if not set)
+      if (userData.profileVisible === false) {
+        console.log(`User ${userId} filtered out - profileVisible: false`);
         return null;
       }
 

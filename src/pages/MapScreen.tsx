@@ -49,6 +49,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { formatDistance } from "@/utils/distance";
 import { SearchFilter } from "@/services/matchingService";
 import { isWorkoutActive } from "@/utils/workoutState";
+import { createMapIcon } from "@/utils/mapIcons";
+import { preventMarkerOverlap, preventMarkerOverlapSimple, AdjustedPosition } from "@/utils/markerOverlap";
 import { updateUserProfile } from "@/services/authService";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
@@ -333,7 +335,7 @@ const MapScreen = () => {
     return { lat: offsetLat, lng: offsetLng };
   };
 
-  // Load searchFilter and friendsOnly visibility from user profile
+  // Load searchFilter, friendsOnly visibility, and visibility from user profile
   useEffect(() => {
     if (user) {
       import("@/services/authService").then(({ getUserData }) => {
@@ -344,12 +346,32 @@ const MapScreen = () => {
           if (userData?.visibleToFriendsOnly !== undefined) {
             setVisibleToFriendsOnly(userData.visibleToFriendsOnly);
           }
+          // Sync visibility state from Firebase
+          if (userData?.visible !== undefined) {
+            setVisible(userData.visible !== false);
+          }
         });
       });
     } else if (userProfile && (userProfile as any).searchFilter) {
       setSearchFilter((userProfile as any).searchFilter);
     }
   }, [user, userProfile]);
+
+  // Listen to current user's visibility changes in real-time from Firebase
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    import("@/services/locationService").then(({ listenToAllUsers }) => {
+      const unsubscribe = listenToAllUsers((users) => {
+        const currentUserData = users[user.uid];
+        if (currentUserData && currentUserData.visible !== undefined) {
+          setVisible(currentUserData.visible !== false);
+        }
+      });
+
+      return () => unsubscribe();
+    });
+  }, [user?.uid]);
 
   // Load declined users from localStorage
   useEffect(() => {
@@ -754,6 +776,82 @@ const MapScreen = () => {
     nearbyUsersRef.current = result;
     return result;
   }, [matchedUsersForDisplay, nearbyUsersFromHook]);
+
+  // Apply overlap prevention to nearby users markers
+  const nearbyUsersWithAdjustedPositions = useMemo(() => {
+    if (!nearbyUsers || nearbyUsers.length === 0) {
+      return [];
+    }
+
+    // Filter out current user
+    const otherUsers = nearbyUsers.filter((userData: any) => userData.id !== user?.uid);
+    
+    if (otherUsers.length === 0) {
+      return [];
+    }
+
+    // Prepare markers for overlap prevention
+    const markersForOverlap = otherUsers.map((u: any) => ({
+      lat: u.lat,
+      lng: u.lng,
+      id: u.id
+    }));
+
+    let adjustedMarkers: AdjustedPosition[] = [];
+
+    // Try to use map instance for accurate pixel calculations
+    // mapRef should be a google.maps.Map instance, but we need to check if it has the required methods
+    const googleMap = mapRef && isLoaded && window.google && (mapRef as any).getProjection 
+      ? (mapRef as any as google.maps.Map)
+      : null;
+    
+    if (googleMap) {
+      adjustedMarkers = preventMarkerOverlap(
+        markersForOverlap,
+        googleMap,
+        {
+          minDistancePixels: 50,
+          maxOffsetMeters: 50,
+          iterations: 10
+        }
+      );
+    } else if (location && location.lat && location.lng) {
+      // Fallback: use simple algorithm with zoom and center
+      adjustedMarkers = preventMarkerOverlapSimple(
+        markersForOverlap,
+        mapZoom,
+        { lat: location.lat, lng: location.lng },
+        {
+          minDistancePixels: 50,
+          maxOffsetMeters: 50,
+          iterations: 10
+        }
+      );
+    } else {
+      // If no map or location, return original positions
+      return otherUsers;
+    }
+
+    // Merge adjusted positions with original user data
+    return adjustedMarkers.map((adj: AdjustedPosition) => {
+      // Find the original user data
+      const originalUser = otherUsers.find((u: any) => u.id === adj.id);
+      if (!originalUser) {
+        return {
+          ...adj,
+          lat: adj.adjustedLat,
+          lng: adj.adjustedLng
+        };
+      }
+      
+      // Return original user data with adjusted position
+      return {
+        ...originalUser,
+        lat: adj.adjustedLat,
+        lng: adj.adjustedLng
+      };
+    });
+  }, [nearbyUsers, mapRef, isLoaded, mapZoom, location, user?.uid]);
 
   // Track nearby users during workout - using ref to prevent infinite loops
   const nearbyUserIdsString = useMemo(() => 
@@ -1443,8 +1541,9 @@ const MapScreen = () => {
         
         // Center map on user when workout is active (locked), otherwise allow free panning
         if (isActive) {
-          mapRef.panTo({ lat: location.lat, lng: location.lng });
+          // When active, always lock to user's location - no dragging allowed
           mapRef.setCenter({ lat: location.lat, lng: location.lng });
+          mapRef.panTo({ lat: location.lat, lng: location.lng });
         } else {
           // When inactive, only pan if user hasn't manually moved the map
           // This allows free dragging when workout is not active
@@ -1461,9 +1560,12 @@ const MapScreen = () => {
           }
           return prev;
         });
-        mapRef.panTo(cameraCenter);
         if (isActive) {
+          // When active, lock to camera center (user position with offset)
           mapRef.setCenter(cameraCenter);
+          mapRef.panTo(cameraCenter);
+        } else {
+          mapRef.panTo(cameraCenter);
         }
       }
     }, 100); // Small delay to batch updates
@@ -1518,14 +1620,50 @@ const MapScreen = () => {
         draggable: !isActive, // Disable dragging/panning when workout is active
         scrollwheel: true, // Allow scroll zoom
         disableDoubleClickZoom: !!isActive, // Disable double-click zoom when workout is active
-        gestureHandling: isActive ? "cooperative" : "auto" // Allow zoom but not pan when workout is active
+        gestureHandling: isActive ? "cooperative" : "auto", // Allow zoom but not pan when workout is active
+        keyboardShortcuts: true, // Allow keyboard zoom
+        zoomControl: false, // Keep zoom controls disabled (we use scrollwheel)
+        panControl: false // Disable pan control buttons
       });
       
       // Force center on user when workout is active
-      if (isActive && location) {
+      if (isActive && location && location.lat && location.lng) {
         mapRef.setCenter({ lat: location.lat, lng: location.lng });
+        mapRef.panTo({ lat: location.lat, lng: location.lng });
+      }
+      
+      // Add drag prevention when active
+      if (isActive) {
+        // Remove any existing drag listener
+        if ((mapRef as any)._dragListener) {
+          window.google.maps.event.removeListener((mapRef as any)._dragListener);
+        }
+        
+        // Listen to drag events and immediately recenter if user tries to drag
+        const dragListener = mapRef.addListener('drag', () => {
+          if (isActive && location && location.lat && location.lng) {
+            // Immediately snap back to user location
+            mapRef.setCenter({ lat: location.lat, lng: location.lng });
+          }
+        });
+        
+        // Store listener for cleanup
+        (mapRef as any)._dragListener = dragListener;
+      } else {
+        // Remove drag listener when inactive
+        if ((mapRef as any)._dragListener) {
+          window.google.maps.event.removeListener((mapRef as any)._dragListener);
+          delete (mapRef as any)._dragListener;
+        }
       }
     }
+    
+    // Cleanup
+    return () => {
+      if (mapRef && (mapRef as any)._dragListener && window.google) {
+        window.google.maps.event.removeListener((mapRef as any)._dragListener);
+      }
+    };
   }, [isActive, mapRef, isLoaded, location]);
 
   const onMapLoad = useCallback((map: any) => {
@@ -1541,11 +1679,14 @@ const MapScreen = () => {
           draggable: false, // Disable dragging/panning
           scrollwheel: true, // Allow scroll zoom
           disableDoubleClickZoom: true, // Disable double-click zoom
-          gestureHandling: "cooperative" // Allow zoom gestures but not pan
+          gestureHandling: "cooperative", // Allow zoom gestures but not pan
+          panControl: false, // Disable pan control buttons
+          keyboardShortcuts: true // Allow keyboard zoom
         });
       }
+      
     }
-  }, [isActive]);
+  }, [isActive, location]);
 
   const onMarkerClick = (userData: any) => {
     // Ensure user data structure matches ProfileView expectations
@@ -1900,7 +2041,9 @@ const MapScreen = () => {
             draggable: !isActive, // Disable dragging when workout is active
             scrollwheel: true, // Allow scroll zoom even when workout is active
             disableDoubleClickZoom: !!isActive, // Disable double-click zoom when workout is active
-            gestureHandling: (isActive ? "cooperative" : "auto") as "cooperative" | "auto" | "greedy" | "none" // Allow zoom gestures but not pan when workout is active
+            gestureHandling: (isActive ? "cooperative" : "auto") as "cooperative" | "auto" | "greedy" | "none", // Allow zoom gestures but not pan when workout is active
+            panControl: false, // Disable pan control buttons
+            keyboardShortcuts: true // Allow keyboard zoom (+/- keys)
           }}
         >
           {/* Current user's activity trail */}
@@ -1971,26 +2114,31 @@ const MapScreen = () => {
             </>
           )}
 
-          {/* Nearby users' markers */}
-          {nearbyUsers
-            .filter((userData: any) => userData.id !== user?.uid)
-            .map((userData: any) => {
+          {/* Nearby users' markers with profile pictures */}
+          {nearbyUsersWithAdjustedPositions.map((userData: any) => {
               const hasTrail = userTrails[userData.id] && userTrails[userData.id].length > 1;
               const matchScore = userData.matchScore;
               const scorePercent = matchScore ? Math.round(matchScore * 100) : null;
-              return isLoaded && window.google ? (
+              
+              // Get profile picture URL - check both photoURL and avatar fields
+              const photoURL = userData.photoURL || userData.avatar || null;
+              const userName = userData.name || "User";
+              
+              // Create profile picture icon
+              const iconSize = hasTrail ? 56 : 48;
+              const profileIcon = isLoaded && window.google 
+                ? createMapIcon(photoURL, userName, iconSize)
+                : null;
+              
+              return isLoaded && window.google && profileIcon ? (
                 <Marker
                   key={userData.id}
                   position={{ lat: userData.lat, lng: userData.lng }}
-                  title={`${userData.name || "User"}${hasTrail ? " (Moving)" : ""}${scorePercent ? ` - ${scorePercent}% match` : ""}`}
+                  title={`${userName}${hasTrail ? " (Moving)" : ""}${scorePercent ? ` - ${scorePercent}% match` : ""}`}
                   onClick={() => onMarkerClick(userData)}
-                  icon={{
-                    url: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
-                    scaledSize: hasTrail 
-                      ? new window.google.maps.Size(36, 36) 
-                      : new window.google.maps.Size(32, 32)
-                  }}
+                  icon={profileIcon}
                   animation={hasTrail && window.google.maps.Animation ? window.google.maps.Animation.DROP : undefined}
+                  zIndex={hasTrail ? 100 : 99}
                 />
               ) : null;
             })}
@@ -2309,7 +2457,7 @@ const MapScreen = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 200, damping: 20 }}
-            className="absolute bottom-20 left-0 right-0 px-4 z-10"
+            className="fixed bottom-0 left-0 right-0 px-4 pb-4 z-50"
           >
             <div
               className={`

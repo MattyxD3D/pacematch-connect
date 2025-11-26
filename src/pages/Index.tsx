@@ -8,7 +8,7 @@ import { useMatching } from "@/hooks/useMatching";
 import { listenToWorkoutPosts, WorkoutPost as FirebaseWorkoutPost } from "@/services/feedService";
 import { listenToUserFriends, listenToFriendRequests, sendFriendRequest, acceptFriendRequest, declineFriendRequest, removeFriend } from "@/services/friendService";
 import { listenToAllUsers, updateUserVisibility } from "@/services/locationService";
-import { getUserData } from "@/services/authService";
+import { getUserData, updateUserProfile } from "@/services/authService";
 import { generateDummyWorkoutPosts, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 import { formatDistance, calculateDistance } from "@/utils/distance";
 import { WorkoutPost } from "@/components/WorkoutPost";
@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import HomeIcon from "@mui/icons-material/Home";
 import MapIcon from "@mui/icons-material/Map";
 import EventIcon from "@mui/icons-material/Event";
@@ -67,6 +68,9 @@ const Index = () => {
   // TODO: Set to false in production - this is for preview/demo purposes
   const [showDummyData, setShowDummyData] = useState(true);
   const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
+  const [profileVisible, setProfileVisible] = useState(true);
+  const [generalLocation, setGeneralLocation] = useState<string>("");
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
   
   // Notification context
   const { unreadCount, notifications, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
@@ -122,22 +126,24 @@ const Index = () => {
     }
   }, [workoutPosts, selectedPost?.id]);
 
-  // Get current user's visibility status
+  // Get current user's visibility status and profile discovery settings
   useEffect(() => {
     if (!currentUser?.uid) return;
 
-    const fetchUserVisibility = async () => {
+    const fetchUserSettings = async () => {
       try {
         const userData = await getUserData(currentUser.uid);
         if (userData) {
           setUserVisibility(userData.visible !== false);
+          setProfileVisible(userData.profileVisible !== false);
+          setGeneralLocation(userData.generalLocation || "");
         }
       } catch (error) {
-        console.error("Error fetching user visibility:", error);
+        console.error("Error fetching user settings:", error);
       }
     };
 
-    fetchUserVisibility();
+    fetchUserSettings();
   }, [currentUser?.uid]);
 
   // Calculate friends online and fetch friends data from Firebase
@@ -369,10 +375,43 @@ const Index = () => {
     try {
       await updateUserVisibility(currentUser.uid, checked);
       setUserVisibility(checked);
+      
+      // If user has a current location, update it immediately with new visibility
+      if (location?.lat && location?.lng) {
+        const { updateUserLocation } = await import("@/services/locationService");
+        await updateUserLocation(currentUser.uid, location.lat, location.lng, checked);
+      }
+      
       toast.success(checked ? "Location sharing enabled" : "Location sharing disabled");
     } catch (error) {
       console.error("Error updating visibility:", error);
       toast.error("Failed to update visibility");
+    }
+  };
+
+  const handleProfileVisibilityToggle = async (checked: boolean) => {
+    if (!currentUser?.uid) return;
+
+    try {
+      await updateUserProfile(currentUser.uid, { profileVisible: checked });
+      setProfileVisible(checked);
+      toast.success(checked ? "Your profile is now discoverable" : "Your profile is now hidden from discovery");
+    } catch (error) {
+      console.error("Error updating profile visibility:", error);
+      toast.error("Failed to update profile visibility");
+    }
+  };
+
+  const handleLocationSave = async () => {
+    if (!currentUser?.uid) return;
+
+    try {
+      await updateUserProfile(currentUser.uid, { generalLocation: generalLocation.trim() || null });
+      setIsEditingLocation(false);
+      toast.success("Location updated successfully");
+    } catch (error) {
+      console.error("Error updating location:", error);
+      toast.error("Failed to update location");
     }
   };
 
@@ -554,6 +593,105 @@ const Index = () => {
           </Card>
         </motion.div>
 
+        {/* Profile Discovery Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.11 }}
+        >
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold">Meet New People</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Share your profile and location to connect with others
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Profile Visibility Toggle */}
+              <div className="flex items-center justify-between p-4 border border-border rounded-lg">
+                <div className="flex items-center gap-3 flex-1">
+                  {profileVisible ? (
+                    <PersonAddIcon className="text-success" style={{ fontSize: 24 }} />
+                  ) : (
+                    <PersonAddIcon className="text-muted-foreground" style={{ fontSize: 24 }} />
+                  )}
+                  <div className="flex flex-col flex-1">
+                    <span className="text-sm font-medium">
+                      Make my profile discoverable
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {profileVisible 
+                        ? "Others can find and connect with you" 
+                        : "Your profile is hidden from discovery"}
+                    </span>
+                  </div>
+                </div>
+                <Switch
+                  checked={profileVisible}
+                  onCheckedChange={handleProfileVisibilityToggle}
+                />
+              </div>
+
+              {/* General Location Input */}
+              <div className="p-4 border border-border rounded-lg space-y-3">
+                <div className="flex items-center gap-2">
+                  <LocationOnIcon className="text-primary" style={{ fontSize: 20 }} />
+                  <span className="text-sm font-medium">General Location</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Share your general area (e.g., "Pasig", "UP Diliman") to help others find you
+                </p>
+                {isEditingLocation ? (
+                  <div className="flex gap-2">
+                    <Input
+                      value={generalLocation}
+                      onChange={(e) => setGeneralLocation(e.target.value)}
+                      placeholder="e.g., Pasig, UP Diliman, Makati"
+                      className="flex-1"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleLocationSave();
+                        } else if (e.key === "Escape") {
+                          setIsEditingLocation(false);
+                        }
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      onClick={handleLocationSave}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsEditingLocation(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      {generalLocation || "No location set"}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsEditingLocation(true)}
+                    >
+                      {generalLocation ? "Edit" : "Add Location"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
         {/* Friends Section with Tabs */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -562,27 +700,33 @@ const Index = () => {
         >
           <Card className="p-6">
             <Tabs value={activeFriendsTab} onValueChange={(value) => setActiveFriendsTab(value as "active" | "history")} className="w-full">
-              <div className="flex items-center justify-between mb-4">
-                <TabsList className="grid grid-cols-2">
-                  <TabsTrigger value="history">Workout History</TabsTrigger>
-                  <TabsTrigger value="active">Active Friends</TabsTrigger>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <TabsList className="grid grid-cols-2 w-full sm:w-auto flex-shrink-0">
+                  <TabsTrigger value="history" className="text-xs sm:text-sm">Workout History</TabsTrigger>
+                  <TabsTrigger value="active" className="text-xs sm:text-sm">Active Friends</TabsTrigger>
                 </TabsList>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-shrink-0">
                   {activeFriendsTab === "active" && (
-                    <div className="flex items-center gap-2">
-                      {userVisibility ? (
-                        <LocationOnIcon className="text-success" style={{ fontSize: 20 }} />
-                      ) : (
-                        <LocationOffIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
-                      )}
-                      <div className="flex flex-col">
-                        <span className="text-xs font-medium">Share Location</span>
-                        <Switch
-                          checked={userVisibility}
-                          onCheckedChange={handleVisibilityToggle}
-                          className="scale-75"
-                        />
+                    <div className="flex items-center justify-between gap-3 w-full">
+                      <div className="flex items-center gap-3">
+                        {userVisibility ? (
+                          <LocationOnIcon className="text-success" style={{ fontSize: 20 }} />
+                        ) : (
+                          <LocationOffIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
+                        )}
+                        <div className="flex flex-col">
+                          <span className="text-xs sm:text-sm font-medium">
+                            Share your workout location with friends
+                          </span>
+                          <span className="text-xs sm:text-sm text-muted-foreground">
+                            You will be visible when you start working out
+                          </span>
+                        </div>
                       </div>
+                      <Switch
+                        checked={userVisibility}
+                        onCheckedChange={handleVisibilityToggle}
+                      />
                     </div>
                   )}
                   {activeFriendsTab === "history" && (

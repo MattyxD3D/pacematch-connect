@@ -254,7 +254,10 @@ const saveUserToDatabase = async (user: User): Promise<void> => {
           allowedLevels: ["beginner", "intermediate", "pro"]
         },
         searchFilter: "all", // Who do I want to find? (Beginner/Intermediate/Pro/All)
-        radiusPreference: "normal"
+        radiusPreference: "normal",
+        // Profile discovery settings
+        profileVisible: true, // Allow profile to be discovered by others
+        generalLocation: null // General location (e.g., "Pasig", "UP Diliman")
       });
     } else {
       // Update basic info if it changed
@@ -272,7 +275,10 @@ const saveUserToDatabase = async (user: User): Promise<void> => {
           allowedLevels: ["beginner", "intermediate", "pro"]
         },
         searchFilter: existingData.searchFilter || "all",
-        radiusPreference: existingData.radiusPreference || "normal"
+        radiusPreference: existingData.radiusPreference || "normal",
+        // Ensure profile discovery fields exist with defaults if missing
+        profileVisible: existingData.profileVisible !== undefined ? existingData.profileVisible : true,
+        generalLocation: existingData.generalLocation || null
       });
     }
   } catch (error) {

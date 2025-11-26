@@ -100,17 +100,16 @@ export const ProfileView = ({
         className="w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
-        <Card className="overflow-hidden shadow-elevation-4 border-2 border-border/50">
-          {/* Close button */}
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 z-10 p-2 bg-background/80 backdrop-blur-sm hover:bg-secondary rounded-full transition-colors touch-target shadow-elevation-2"
-          >
-            <CloseIcon fontSize="small" />
-          </button>
-
+        <Card className="overflow-hidden shadow-elevation-4 border-2 border-border/50 relative">
           {/* Photo Gallery */}
           <div className="relative w-full aspect-square bg-muted">
+            {/* Close button */}
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors touch-target shadow-lg"
+            >
+              <CloseIcon fontSize="small" />
+            </button>
             <motion.img
               key={selectedPhotoIndex}
               initial={{ opacity: 0 }}

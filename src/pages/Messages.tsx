@@ -24,6 +24,7 @@ import {
 } from "@/lib/messageStorage";
 import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
+import { generateDummyConversations, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 
 interface Conversation {
   conversationId: string;
@@ -56,7 +57,7 @@ const Messages = () => {
         const firebaseConversations = await getUserConversations(currentUser.uid);
         
         // Fetch user data for each conversation
-        const conversationsWithUserData = await Promise.all(
+        let conversationsWithUserData = await Promise.all(
           firebaseConversations.map(async (conv) => {
             try {
               const userRef = ref(database, `users/${conv.otherUserId}`);
@@ -78,6 +79,11 @@ const Messages = () => {
             }
           })
         );
+        
+        // Add dummy conversations if enabled and no real conversations exist
+        if (ENABLE_DUMMY_DATA && conversationsWithUserData.length === 0) {
+          conversationsWithUserData = generateDummyConversations(currentUser.uid);
+        }
         
         setConversations(conversationsWithUserData);
       } catch (error) {

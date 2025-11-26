@@ -9,6 +9,7 @@ import { listenToWorkoutPosts, WorkoutPost as FirebaseWorkoutPost } from "@/serv
 import { listenToUserFriends } from "@/services/friendService";
 import { listenToAllUsers, updateUserVisibility } from "@/services/locationService";
 import { getUserData } from "@/services/authService";
+import { generateDummyWorkoutPosts, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 import { formatDistance, calculateDistance } from "@/utils/distance";
 import { WorkoutPost } from "@/components/WorkoutPost";
 import { CommentDrawer } from "@/components/CommentDrawer";
@@ -75,7 +76,13 @@ const Index = () => {
   // Listen to workout posts from Firebase
   useEffect(() => {
     const unsubscribe = listenToWorkoutPosts((posts) => {
-      setWorkoutPosts(posts);
+      // Add dummy posts if enabled and no real posts exist
+      if (ENABLE_DUMMY_DATA && posts.length === 0) {
+        const dummyPosts = generateDummyWorkoutPosts();
+        setWorkoutPosts(dummyPosts);
+      } else {
+        setWorkoutPosts(posts);
+      }
       setLoading(false);
     });
 

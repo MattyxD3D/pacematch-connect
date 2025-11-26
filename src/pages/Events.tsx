@@ -33,6 +33,7 @@ import { EventDetailModal } from "@/components/EventDetailModal";
 import { CreateEventModal } from "@/components/CreateEventModal";
 import { QuickCheckInModal } from "@/components/QuickCheckInModal";
 import BottomNavigation from "@/components/BottomNavigation";
+import { generateDummyEvents, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 import {
   Drawer,
   DrawerContent,
@@ -266,7 +267,7 @@ const Events = () => {
   useEffect(() => {
     const unsubscribe = listenToEvents((firebaseEvents: FirebaseEvent[]) => {
       // Transform Firebase events to match local Event interface
-      const transformedEvents: Event[] = firebaseEvents.map((event) => {
+      let transformedEvents: Event[] = firebaseEvents.map((event) => {
         // Calculate distance if user location is available
         let distance = "Unknown";
         let distanceValue = Infinity;
@@ -291,6 +292,16 @@ const Events = () => {
           distanceValue,
         };
       });
+      
+      // Add dummy events if enabled and no real events exist
+      if (ENABLE_DUMMY_DATA && transformedEvents.length === 0 && userLocation) {
+        const dummyEvents = generateDummyEvents(userLocation);
+        transformedEvents = dummyEvents.map((event) => ({
+          ...event,
+          isJoined: currentUser?.uid ? event.participants.includes(currentUser.uid) : false,
+        }));
+      }
+      
       setEvents(transformedEvents);
       setLoading(false);
     });

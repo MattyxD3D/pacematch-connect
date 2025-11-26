@@ -18,6 +18,7 @@ import {
   declineFriendRequest 
 } from "@/lib/socialStorage";
 import { listenToMessages, sendMessage, markMessagesAsRead, Message as FirebaseMessage } from "@/services/messageService";
+import { generateDummyChatMessages, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 
 interface ChatUser {
   id: string; // Firebase UID
@@ -57,7 +58,13 @@ const Chat = () => {
       currentUser.uid,
       chatUser.id,
       (firebaseMessages) => {
-        setMessages(firebaseMessages);
+        // Add dummy messages if enabled and no real messages exist
+        if (ENABLE_DUMMY_DATA && firebaseMessages.length === 0) {
+          const dummyMessages = generateDummyChatMessages(currentUser.uid, chatUser.id);
+          setMessages(dummyMessages);
+        } else {
+          setMessages(firebaseMessages);
+        }
         // Mark messages as read when viewing chat
         markMessagesAsRead(currentUser.uid, chatUser.id).catch(console.error);
       }

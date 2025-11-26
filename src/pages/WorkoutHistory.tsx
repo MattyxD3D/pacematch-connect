@@ -13,6 +13,7 @@ import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import PeopleIcon from "@mui/icons-material/People";
 import { format } from "date-fns";
 import BottomNavigation from "@/components/BottomNavigation";
+import { generateDummyWorkoutHistory, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 
 const WorkoutHistoryPage = () => {
   const navigate = useNavigate();
@@ -21,7 +22,12 @@ const WorkoutHistoryPage = () => {
 
   // Sort workouts by date (most recent first)
   const sortedWorkouts = useMemo(() => {
-    return [...workoutHistory].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Add dummy workout history if enabled and no real workouts exist
+    let workouts = [...workoutHistory];
+    if (ENABLE_DUMMY_DATA && workouts.length === 0) {
+      workouts = generateDummyWorkoutHistory();
+    }
+    return workouts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [workoutHistory]);
 
 

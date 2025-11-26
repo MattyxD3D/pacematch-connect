@@ -52,7 +52,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Dummy friend data for preview
+// Dummy friend data for preview - enhanced with more variety
 const dummyFriends = [
   {
     id: 1,
@@ -102,6 +102,22 @@ const dummyFriends = [
     activities: ["running", "cycling"],
     photos: ["https://ui-avatars.com/api/?name=Lisa+Speed&size=120&background=00BCD4&color=fff"],
   },
+  {
+    id: 7,
+    username: "James Wilson",
+    avatar: "https://i.pravatar.cc/150?img=12",
+    bio: "Early morning runner • Coffee enthusiast",
+    activities: ["running"],
+    photos: ["https://i.pravatar.cc/150?img=12"],
+  },
+  {
+    id: 8,
+    username: "Sophie Martinez",
+    avatar: "https://i.pravatar.cc/150?img=68",
+    bio: "Triathlete in training • Always pushing limits",
+    activities: ["cycling", "running"],
+    photos: ["https://i.pravatar.cc/150?img=68"],
+  },
 ];
 
 const Friends = () => {
@@ -111,7 +127,7 @@ const Friends = () => {
   const { userProfile } = useUser();
   const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState(getPendingRequests());
-  const [friends, setFriends] = useState<number[]>([1, 2, 3, 4, 5, 6]); // Mock friend list IDs
+  const [friends, setFriends] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8]); // Mock friend list IDs (enhanced)
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [locationSharing, setLocationSharing] = useState<Record<number, boolean>>(getLocationSharingSettings());
   const [unfriendDialog, setUnfriendDialog] = useState<{ open: boolean; friendId: number | null; friendName: string }>({

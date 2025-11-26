@@ -41,7 +41,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useNavigate, useLocation as useRouterLocation } from "react-router-dom";
-import { useUser } from "@/contexts/UserContext";
+import { useUser, Activity } from "@/contexts/UserContext";
 import { useLocation } from "@/hooks/useLocation";
 import { useNearbyUsers } from "@/hooks/useNearbyUsers";
 import { useMatching } from "@/hooks/useMatching";
@@ -85,7 +85,8 @@ import {
   ViewComfy,
   Navigation,
   Explore as ExploreMui,
-  ZoomIn
+  ZoomIn,
+  ZoomOut
 } from "@mui/icons-material";
 import { toast } from "sonner";
 import { NotificationBanner } from "@/components/NotificationBanner";
@@ -204,6 +205,7 @@ const MapScreen = () => {
   const [isNavigationStyle, setIsNavigationStyle] = useState(false);
   const [viewDistanceMeters, setViewDistanceMeters] = useState(150);
   const [showViewDistanceControl, setShowViewDistanceControl] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState<"close" | "medium" | "far">("medium");
   
   // Workout tracking state
   const [isActive, setIsActive] = useState(false);
@@ -232,10 +234,35 @@ const MapScreen = () => {
   const nearbyUsersRef = useRef<any[]>([]);
   
   // Get user's enabled activities from profile
-  const userActivities = userProfile?.activities || ["running", "cycling", "walking"];
+  // Handle both 'activities' (array) and 'activity' (single value) for backward compatibility
+  const userActivities = userProfile?.activities?.length > 0 
+    ? userProfile.activities 
+    : (userProfile as any)?.activity 
+      ? [(userProfile as any).activity as Activity]
+      : ["running", "cycling", "walking"];
   const [selectedActivity, setSelectedActivity] = useState<"running" | "cycling" | "walking">(
     userActivities[0] as "running" | "cycling" | "walking"
   );
+  
+  // Track previous userActivities to detect changes
+  const prevUserActivitiesRef = useRef<Activity[]>(userActivities);
+  
+  // Update selectedActivity when user profile activities change
+  useEffect(() => {
+    if (userActivities && userActivities.length > 0) {
+      const prevActivities = prevUserActivitiesRef.current;
+      const activitiesChanged = JSON.stringify(prevActivities) !== JSON.stringify(userActivities);
+      
+      if (activitiesChanged) {
+        // If current selectedActivity is not in new userActivities, switch to first available
+        if (!userActivities.includes(selectedActivity)) {
+          setSelectedActivity(userActivities[0] as "running" | "cycling" | "walking");
+        }
+        // Update ref for next comparison
+        prevUserActivitiesRef.current = userActivities;
+      }
+    }
+  }, [userActivities, selectedActivity]);
   
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [showMessageModal, setShowMessageModal] = useState(false);
@@ -655,9 +682,12 @@ const MapScreen = () => {
   ] as const;
 
   // Filter activities based on user's profile
-  const availableActivities = activities.filter(act => 
-    userActivities.includes(act.id as "running" | "cycling" | "walking")
-  );
+  // Ensure we always have at least the default activities if userActivities is empty
+  const availableActivities = userActivities.length > 0
+    ? activities.filter(act => 
+        userActivities.includes(act.id as "running" | "cycling" | "walking")
+      )
+    : activities; // Fallback to all activities if userActivities is empty
 
   // Use matched users if available, otherwise fallback to nearby users
   // Filter out declined users (within cooldown period)
@@ -1003,7 +1033,7 @@ const MapScreen = () => {
       {
         id: "dummy-user-1",
         name: "Sarah Johnson",
-        avatar: "https://i.pravatar.cc/150?img=1",
+        avatar: "https://i.pravatar.cc/150?img=47",
         activity: "running",
         distance: "0.5 km",
         distanceValue: 0.5
@@ -1011,15 +1041,15 @@ const MapScreen = () => {
       {
         id: "dummy-user-2",
         name: "Mike Chen",
-        avatar: "https://i.pravatar.cc/150?img=2",
+        avatar: "https://i.pravatar.cc/150?img=33",
         activity: "cycling",
         distance: "1.2 km",
         distanceValue: 1.2
       },
       {
         id: "dummy-user-3",
-        name: "Emma Davis",
-        avatar: "https://i.pravatar.cc/150?img=3",
+        name: "Emma Wilson",
+        avatar: "https://i.pravatar.cc/150?img=20",
         activity: "walking",
         distance: "0.8 km",
         distanceValue: 0.8
@@ -1027,7 +1057,7 @@ const MapScreen = () => {
       {
         id: "dummy-user-4",
         name: "James Wilson",
-        avatar: "https://i.pravatar.cc/150?img=4",
+        avatar: "https://i.pravatar.cc/150?img=12",
         activity: "running",
         distance: "1.5 km",
         distanceValue: 1.5
@@ -1039,6 +1069,30 @@ const MapScreen = () => {
         activity: "cycling",
         distance: "0.9 km",
         distanceValue: 0.9
+      },
+      {
+        id: "dummy-user-6",
+        name: "Alex Runner",
+        avatar: "https://ui-avatars.com/api/?name=Alex+Runner&size=120&background=4CAF50&color=fff",
+        activity: "running",
+        distance: "1.8 km",
+        distanceValue: 1.8
+      },
+      {
+        id: "dummy-user-7",
+        name: "Sophie Martinez",
+        avatar: "https://i.pravatar.cc/150?img=68",
+        activity: "cycling",
+        distance: "2.1 km",
+        distanceValue: 2.1
+      },
+      {
+        id: "dummy-user-8",
+        name: "David Active",
+        avatar: "https://ui-avatars.com/api/?name=David+Active&size=120&background=E91E63&color=fff",
+        activity: "walking",
+        distance: "1.3 km",
+        distanceValue: 1.3
       }
     ];
     return dummyUsers;
@@ -1390,32 +1444,43 @@ const MapScreen = () => {
     return () => clearTimeout(updateTimer);
   }, [location, isNavigationStyle, userHeading, mapRef, isLoaded, selectedActivity]);
 
-  // Get fixed radius for selected activity
-  const getFixedRadiusForActivity = (activity: "running" | "cycling" | "walking"): number => {
-    switch (activity) {
-      case "cycling":
-        return 10000; // 10km
-      case "running":
-        return 2000;  // 2km
-      case "walking":
-        return 1000;  // 1km
-      default:
-        return 2000;  // Default to running radius
-    }
+  // Get zoom radius for selected activity and zoom level
+  const getZoomRadiusForActivity = (
+    activity: "running" | "cycling" | "walking",
+    zoomLevel: "close" | "medium" | "far"
+  ): number => {
+    const zoomConfig = {
+      running: {
+        close: 200,    // 200m - really close
+        medium: 2000,  // 2km - current default
+        far: 5000      // 5km - wide view
+      },
+      cycling: {
+        close: 500,    // 500m - close
+        medium: 5000,  // 5km - medium
+        far: 15000     // 15km - very wide
+      },
+      walking: {
+        close: 100,    // 100m - really close
+        medium: 1000,  // 1km - current default
+        far: 3000      // 3km - wider view
+      }
+    };
+    return zoomConfig[activity][zoomLevel];
   };
 
-  // Update zoom level based on fixed radius for selected activity
+  // Update zoom level based on activity and zoom level setting
   useEffect(() => {
     if (location && mapRef && isLoaded && window.google && selectedActivity) {
-      const fixedRadius = getFixedRadiusForActivity(selectedActivity);
-      const zoomLevel = calculateZoomFromMeters(fixedRadius);
-      setMapZoom(zoomLevel);
-      mapRef.setZoom(zoomLevel);
+      const radius = getZoomRadiusForActivity(selectedActivity, zoomLevel);
+      const calculatedZoom = calculateZoomFromMeters(radius);
+      setMapZoom(calculatedZoom);
+      mapRef.setZoom(calculatedZoom);
       if (!isNavigationStyle) {
         mapRef.panTo({ lat: location.lat, lng: location.lng });
       }
     }
-  }, [selectedActivity, location, mapRef, isLoaded, isNavigationStyle]);
+  }, [selectedActivity, zoomLevel, location, mapRef, isLoaded, isNavigationStyle]);
 
   // Lock/unlock map when activity selection changes
   useEffect(() => {
@@ -1985,6 +2050,34 @@ const MapScreen = () => {
             <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background">
               {searchFilter === "beginner" ? "B" : searchFilter === "intermediate" ? "I" : "P"}
             </span>
+          )}
+        </motion.button>
+
+        {/* Zoom Level Button */}
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={() => {
+            // Cycle through zoom levels: close → medium → far → close
+            setZoomLevel((current) => {
+              if (current === "close") return "medium";
+              if (current === "medium") return "far";
+              return "close";
+            });
+          }}
+          className={`touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
+            zoomLevel !== "medium"
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-card text-foreground border-border hover:border-primary"
+          }`}
+          style={{ width: 56, height: 56 }}
+          title={`Zoom: ${zoomLevel === "close" ? "Close" : zoomLevel === "medium" ? "Medium" : "Far"}`}
+        >
+          {zoomLevel === "close" ? (
+            <ZoomIn style={{ fontSize: 28 }} />
+          ) : zoomLevel === "medium" ? (
+            <ViewComfy style={{ fontSize: 28 }} />
+          ) : (
+            <ZoomOut style={{ fontSize: 28 }} />
           )}
         </motion.button>
 

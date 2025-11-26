@@ -24,6 +24,7 @@ import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import { EventDetailModal } from "@/components/EventDetailModal";
 import { toast } from "sonner";
 import { format, isSameDay, parseISO } from "date-fns";
+import { generateDummyEvents, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 
 type EventType = "running" | "cycling" | "walking";
 
@@ -72,7 +73,7 @@ const MyEvents = () => {
         const firebaseEvents = await getUserEvents(currentUser.uid);
         
         // Transform and determine if events are past
-        const transformedEvents: Event[] = firebaseEvents.map((event) => {
+        let transformedEvents: Event[] = firebaseEvents.map((event) => {
           const eventDate = new Date(event.date);
           const today = new Date();
           today.setHours(0, 0, 0, 0);
@@ -84,6 +85,33 @@ const MyEvents = () => {
             isPast: eventDate < today,
           };
         });
+        
+        // Add dummy events if enabled and no real events exist
+        if (ENABLE_DUMMY_DATA && transformedEvents.length === 0) {
+          const dummyEvents = generateDummyEvents();
+          // Add current user to some events and filter to only include events where current user is a participant
+          transformedEvents = dummyEvents
+            .map((event, index) => {
+              // Add current user to first 3 events to ensure they show up
+              if (index < 3 && !event.participants.includes(currentUser.uid)) {
+                event.participants.push(currentUser.uid);
+              }
+              return event;
+            })
+            .filter(event => event.participants.includes(currentUser.uid))
+            .map((event) => {
+              const eventDate = new Date(event.date);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              eventDate.setHours(0, 0, 0, 0);
+              
+              return {
+                ...event,
+                isJoined: true,
+                isPast: eventDate < today,
+              };
+            });
+        }
         
         setJoinedEvents(transformedEvents);
       } catch (error) {

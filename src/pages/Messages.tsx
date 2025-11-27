@@ -18,11 +18,9 @@ import { getUserConversations } from "@/services/messageService";
 import { get, ref } from "firebase/database";
 import { database } from "@/services/firebase";
 import { 
-  acceptMessageRequest, 
-  declineMessageRequest, 
-  deleteMessageRequest,
   isUserBlocked,
 } from "@/lib/messageStorage";
+import { markMessagesAsRead, deleteConversation } from "@/services/messageService";
 import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 
@@ -101,9 +99,19 @@ const Messages = () => {
     .map(conv => conv.otherUserId);
   
   // Split conversations into chats and requests
-  // For now, all conversations go to chats (we can add request logic later)
+  // Message requests are conversations with non-friends that have messages
   const allConversations = conversations
     .filter(conv => !blockedUsers.includes(conv.otherUserId)); // Hide blocked users
+  
+  // Separate into chats (with friends) and requests (from non-friends)
+  // Message requests are ALL conversations from people who aren't your friends
+  const chatConversationsFiltered = allConversations.filter(conv => 
+    friends.includes(conv.otherUserId)
+  );
+  
+  const requestConversationsFiltered = allConversations.filter(conv => 
+    !friends.includes(conv.otherUserId)
+  );
   
   // Filter conversations by search query
   const filterConversations = (convs: Conversation[]) => {
@@ -117,22 +125,83 @@ const Messages = () => {
     });
   };
   
-  const chatConversations = filterConversations(allConversations);
-  const requestConversations: Conversation[] = filterConversations([]); // TODO: Implement message requests
+  const chatConversations = filterConversations(chatConversationsFiltered);
+  const requestConversations = filterConversations(requestConversationsFiltered);
 
-  const handleAcceptRequest = (conversation: Conversation, e: React.MouseEvent) => {
+  const handleAcceptRequest = async (conversation: Conversation, e: React.MouseEvent) => {
     e.stopPropagation();
-    acceptMessageRequest(parseInt(conversation.otherUserId));
-    toast.success(`Accepted message from ${conversation.userName}`);
-    // In real app, this would trigger a re-render
+    if (!currentUser?.uid) return;
+    
+    try {
+      // Mark messages as read to "accept" the request
+      await markMessagesAsRead(currentUser.uid, conversation.otherUserId);
+      toast.success(`Accepted message from ${conversation.userName}`);
+      // Refresh conversations to update the list
+      const firebaseConversations = await getUserConversations(currentUser.uid);
+      const conversationsWithUserData = await Promise.all(
+        firebaseConversations.map(async (conv) => {
+          try {
+            const userRef = ref(database, `users/${conv.otherUserId}`);
+            const userSnapshot = await get(userRef);
+            const userData = userSnapshot.exists() ? userSnapshot.val() : null;
+            
+            return {
+              ...conv,
+              userName: userData?.name || "Unknown User",
+              avatar: userData?.photoURL || "",
+            };
+          } catch (error) {
+            return {
+              ...conv,
+              userName: "Unknown User",
+              avatar: "",
+            };
+          }
+        })
+      );
+      setConversations(conversationsWithUserData);
+    } catch (error) {
+      console.error("Error accepting message request:", error);
+      toast.error("Failed to accept message request");
+    }
   };
 
-  const handleDeclineRequest = (conversation: Conversation, e: React.MouseEvent) => {
+  const handleDeclineRequest = async (conversation: Conversation, e: React.MouseEvent) => {
     e.stopPropagation();
-    declineMessageRequest(parseInt(conversation.otherUserId));
-    deleteMessageRequest(parseInt(conversation.otherUserId));
-    toast.success(`Declined message from ${conversation.userName}`);
-    // In real app, this would trigger a re-render
+    if (!currentUser?.uid) return;
+    
+    try {
+      // Delete the conversation
+      await deleteConversation(currentUser.uid, conversation.otherUserId);
+      toast.success(`Declined message from ${conversation.userName}`);
+      // Refresh conversations to update the list
+      const firebaseConversations = await getUserConversations(currentUser.uid);
+      const conversationsWithUserData = await Promise.all(
+        firebaseConversations.map(async (conv) => {
+          try {
+            const userRef = ref(database, `users/${conv.otherUserId}`);
+            const userSnapshot = await get(userRef);
+            const userData = userSnapshot.exists() ? userSnapshot.val() : null;
+            
+            return {
+              ...conv,
+              userName: userData?.name || "Unknown User",
+              avatar: userData?.photoURL || "",
+            };
+          } catch (error) {
+            return {
+              ...conv,
+              userName: "Unknown User",
+              avatar: "",
+            };
+          }
+        })
+      );
+      setConversations(conversationsWithUserData);
+    } catch (error) {
+      console.error("Error declining message request:", error);
+      toast.error("Failed to decline message request");
+    }
   };
 
   const getRelativeTime = (timestamp: number): string => {

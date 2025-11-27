@@ -13,6 +13,8 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import BlockIcon from "@mui/icons-material/Block";
 import ReportIcon from "@mui/icons-material/Report";
 import DeleteIcon from "@mui/icons-material/Delete";
+import CloseIcon from "@mui/icons-material/Close";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import Avatar from "@mui/material/Avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -101,6 +103,7 @@ const Chat = () => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
+  const [isMessageRequest, setIsMessageRequest] = useState(false);
   
   // Get current user location when modal is open
   const { location: currentLocation, isGettingLocation } = useLocationHook(
@@ -179,7 +182,22 @@ const Chat = () => {
     checkBlocked();
   }, [currentUser?.uid, chatUser?.id]);
 
-  // Determine friend status
+  // Determine friend status and check if this is a message request
+  useEffect(() => {
+    if (!chatUser || !currentUser?.uid) {
+      setIsMessageRequest(false);
+      return;
+    }
+    
+    // It's a message request if:
+    // 1. Not friends
+    // 2. Has messages (conversation exists)
+    // When they accept, messages are marked as read, but it's still a request until they become friends
+    const isNotFriend = !friends.includes(chatUser.id);
+    const hasMessages = messages.length > 0;
+    setIsMessageRequest(isNotFriend && hasMessages);
+  }, [chatUser, friends, messages.length, currentUser?.uid]);
+
   const getFriendStatus = () => {
     if (!chatUser) return "not_friends";
     
@@ -187,6 +205,36 @@ const Chat = () => {
     if (friendRequests.incoming.includes(chatUser.id)) return "request_received";
     if (friendRequests.outgoing.includes(chatUser.id)) return "request_pending";
     return "not_friends";
+  };
+
+  // Handle accepting message request
+  const handleAcceptMessageRequest = async () => {
+    if (!currentUser?.uid || !chatUser?.id) return;
+    
+    // Mark messages as read to "accept" the request
+    try {
+      await markMessagesAsRead(currentUser.uid, chatUser.id);
+      setIsMessageRequest(false);
+      toast.success(`Accepted message from ${chatUser.name}`);
+    } catch (error) {
+      console.error("Error accepting message request:", error);
+      toast.error("Failed to accept message request");
+    }
+  };
+
+  // Handle declining message request (delete conversation)
+  const handleDeclineMessageRequest = async () => {
+    if (!currentUser?.uid || !chatUser?.id) return;
+    
+    try {
+      await deleteConversation(currentUser.uid, chatUser.id);
+      setIsMessageRequest(false);
+      toast.success(`Declined message from ${chatUser.name}`);
+      navigate("/messages");
+    } catch (error) {
+      console.error("Error declining message request:", error);
+      toast.error("Failed to decline message request");
+    }
   };
 
   const maxCharacters = 500;
@@ -639,6 +687,42 @@ const Chat = () => {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Message Request Banner */}
+      {isMessageRequest && chatUser && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="border-t border-border p-4 bg-muted/50"
+        >
+          <div className="max-w-2xl mx-auto space-y-3">
+            <div className="text-center space-y-1">
+              <p className="text-sm font-semibold">
+                {chatUser.name} wants to message you
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Accept to continue the conversation
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleDeclineMessageRequest}
+                variant="outline"
+                className="flex-1"
+              >
+                <CloseIcon style={{ fontSize: 16 }} className="mr-2" />
+                Decline
+              </Button>
+              <Button
+                onClick={handleAcceptMessageRequest}
+                className="flex-1"
+              >
+                <CheckCircleIcon style={{ fontSize: 16 }} className="mr-2" />
+                Accept
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* Input Area */}
       {chatUser && (
@@ -654,9 +738,9 @@ const Chat = () => {
                 }
               }}
               onKeyPress={handleKeyPress}
-              placeholder={isBlocked ? "You have been blocked" : "Type message..."}
+              placeholder={isBlocked ? "You have been blocked" : isMessageRequest ? "Accept request to send messages" : "Type message..."}
               rows={1}
-              disabled={isBlocked}
+              disabled={isBlocked || isMessageRequest}
               className="w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 max-h-32"
               style={{
                 minHeight: "44px",
@@ -671,14 +755,14 @@ const Chat = () => {
             onClick={() => setShowLocationModal(true)}
             size="icon"
             variant="outline"
-            disabled={isBlocked}
+            disabled={isBlocked || isMessageRequest}
             className="rounded-full h-11 w-11 flex-shrink-0"
           >
             <LocationOnIcon style={{ fontSize: 20 }} />
           </Button>
           <Button
             onClick={handleSendMessage}
-            disabled={!messageInput.trim() || isBlocked}
+            disabled={!messageInput.trim() || isBlocked || isMessageRequest}
             size="icon"
             className="rounded-full h-11 w-11 flex-shrink-0 bg-primary hover:bg-primary/90"
           >

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { useUser } from "@/contexts/UserContext";
+import { useUser, FitnessLevel } from "@/contexts/UserContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation } from "@/hooks/useLocation";
 import { useMatching } from "@/hooks/useMatching";
@@ -87,7 +87,7 @@ const Index = () => {
   // Memoize visibility object to prevent infinite loops
   const defaultVisibility = useMemo(() => ({
     visibleToAllLevels: true,
-    allowedLevels: ["beginner", "intermediate", "pro"] as const
+    allowedLevels: ["beginner", "intermediate", "pro"] as FitnessLevel[]
   }), []);
   
   const visibility = useMemo(() => 
@@ -288,9 +288,28 @@ const Index = () => {
       return;
     }
 
+    console.log(`[Index] Setting up listener for venues:`, userVenuePreferences.venues);
+    
     const unsubscribe = listenToUsersByVenues(
       userVenuePreferences.venues,
       (usersByVenueData) => {
+        // Force console log - this should always show
+        console.log(`[Index] ===== CALLBACK FIRED =====`);
+        console.log(`[Index] Received venue users data:`, usersByVenueData);
+        console.log(`[Index] Current user ID:`, currentUser?.uid);
+        console.log(`[Index] Venue IDs we're listening to:`, userVenuePreferences.venues);
+        console.log(`[Index] Data type:`, typeof usersByVenueData);
+        console.log(`[Index] Data keys:`, Object.keys(usersByVenueData || {}));
+        
+        // Log each venue's user count
+        userVenuePreferences.venues.forEach((venueId) => {
+          const users = usersByVenueData[venueId] || [];
+          console.log(`[Index] Venue ${venueId} has ${users.length} users:`, users);
+          if (users.length > 0) {
+            console.log(`[Index] First user in ${venueId}:`, users[0]);
+          }
+        });
+        
         // Keep all users including current user
         setUsersByVenue(usersByVenueData);
       }
@@ -809,14 +828,24 @@ const Index = () => {
                       Add location
                     </Button>
                   </div>
+                ) : !profileVisible ? (
+                  <div className="text-center py-8">
+                    <PersonAddIcon className="mx-auto text-muted-foreground" style={{ fontSize: 48 }} />
+                    <p className="text-muted-foreground mt-4">Enable profile discovery to see active users</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Turn on "Make my profile discoverable" above to see other users who have added locations
+                    </p>
+                  </div>
                 ) : (
                   <div className="space-y-6">
                     {userVenuePreferences.venues.map((venueId) => {
                       const venue = getVenueById(venueId);
-                      // Filter out current user and users with profileVisible === false
-                      const venueUsers = (usersByVenue[venueId] || []).filter(
-                        (user) => user.userId !== currentUser?.uid
-                      );
+                      // Include current user so they can confirm their profile is visible
+                      // Users with profileVisible === false are already filtered by the service layer
+                      const venueUsers = usersByVenue[venueId] || [];
+                      
+                      console.log(`[Index] ===== RENDERING VENUE ${venueId} =====`);
+                      console.log(`[Index] Venue ${venueId} (${venue?.name}): ${venueUsers.length} users`);
                       
                       if (!venue) return null;
 
@@ -839,47 +868,78 @@ const Index = () => {
                               <p className="text-sm text-muted-foreground">
                                 No active users in this venue yet
                               </p>
+                              <p className="text-xs text-muted-foreground mt-2">
+                                Other users who have enabled "Make my profile discoverable" and added this venue will appear here
+                              </p>
                             </div>
                           ) : (
                             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                              {venueUsers.map((venueUser) => {
+                              {venueUsers.map((venueUser, index) => {
+                                console.log(`[Index] ===== RENDERING USER CARD ${index} =====`, venueUser);
                                 const activityIcons = {
                                   running: DirectionsRunIcon,
                                   cycling: DirectionsBikeIcon,
                                   walking: DirectionsWalkIcon
                                 };
                                 
+                                // Ensure activities is an array
+                                const activities = Array.isArray(venueUser.activities) 
+                                  ? venueUser.activities 
+                                  : venueUser.activities 
+                                    ? [venueUser.activities] 
+                                    : [];
+                                
+                                const isCurrentUser =
+                                  String(venueUser.userId || "") === String(currentUser?.uid || "");
+                                
+                                console.log(`[Index] User ${venueUser.userId} activities:`, activities);
+                                console.log(`[Index] User ${venueUser.userId} avatar:`, venueUser.avatar);
+                                console.log(`[Index] User ${venueUser.userId} username:`, venueUser.username);
+                                
                                 return (
                                   <motion.div
-                                    key={venueUser.userId}
+                                    key={venueUser.userId || `user-${index}`}
                                     initial={{ opacity: 0, scale: 0.9 }}
                                     animate={{ opacity: 1, scale: 1 }}
-                                    className="flex flex-col items-center p-2 border border-border rounded-lg bg-card hover:bg-secondary transition-colors min-w-[80px] flex-shrink-0"
+                                    className={`flex flex-col items-center p-2 border border-border rounded-lg bg-card hover:bg-secondary transition-colors min-w-[80px] flex-shrink-0 cursor-pointer ${
+                                      isCurrentUser ? "ring-2 ring-primary/60" : ""
+                                    }`}
+                                    onClick={() => {
+                                      console.log(`[Index] Clicked on user:`, venueUser.userId);
+                                    }}
                                   >
                                     <Avatar
-                                      src={venueUser.avatar || `https://ui-avatars.com/api/?name=${venueUser.username}`}
-                                      alt={venueUser.username}
+                                      src={venueUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(venueUser.username || 'User')}`}
+                                      alt={venueUser.username || 'User'}
                                       sx={{ width: 40, height: 40 }}
                                     />
                                     <p className="text-xs font-medium mt-1.5 text-center truncate w-full max-w-[70px]">
-                                      {venueUser.username}
+                                      {isCurrentUser ? "You" : venueUser.username || 'User'}
                                     </p>
-                                    <div className="flex gap-0.5 mt-1">
-                                      {venueUser.activities.map((activity) => {
-                                        const ActivityIcon = activityIcons[activity];
-                                        return (
-                                          <ActivityIcon
-                                            key={activity}
-                                            className={
-                                              activity === "running" ? "text-success" :
-                                              activity === "cycling" ? "text-primary" :
-                                              "text-warning"
-                                            }
-                                            style={{ fontSize: 14 }}
-                                          />
-                                        );
-                                      })}
-                                    </div>
+                                    {isCurrentUser && (
+                                      <span className="text-[10px] uppercase tracking-wide text-primary font-semibold">
+                                        Your profile
+                                      </span>
+                                    )}
+                                    {activities.length > 0 && (
+                                      <div className="flex gap-0.5 mt-1">
+                                        {activities.map((activity) => {
+                                          const ActivityIcon = activityIcons[activity as keyof typeof activityIcons];
+                                          if (!ActivityIcon) return null;
+                                          return (
+                                            <ActivityIcon
+                                              key={activity}
+                                              className={
+                                                activity === "running" ? "text-success" :
+                                                activity === "cycling" ? "text-primary" :
+                                                "text-warning"
+                                              }
+                                              style={{ fontSize: 14 }}
+                                            />
+                                          );
+                                        })}
+                                      </div>
+                                    )}
                                   </motion.div>
                                 );
                               })}

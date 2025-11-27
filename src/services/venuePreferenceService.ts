@@ -153,6 +153,9 @@ export const listenToUsersByVenues = (
         usersByVenue[venueId] = [];
       });
 
+      console.log(`[VenueService] Fetching venue users for ${venueIds.length} venues`);
+      console.log(`[VenueService] Total users with preferences: ${Object.keys(allPreferences).length}`);
+
       // Process each user's preferences
       const userDataPromises: Promise<void>[] = [];
 
@@ -170,9 +173,11 @@ export const listenToUsersByVenues = (
                 if (userData) {
                   // Filter out users with profileVisible === false (default to visible if not set)
                   if (userData.profileVisible === false) {
-                    console.log(`User ${userId} filtered out from venue ${venueId} - profileVisible: false`);
+                    console.log(`[VenueService] User ${userId} filtered out from venue ${venueId} - profileVisible: false`);
                     return;
                   }
+
+                  console.log(`[VenueService] Adding user ${userId} (${userData.username || userData.name}) to venue ${venueId}, profileVisible: ${userData.profileVisible}`);
 
                   const venueUser: VenueUser = {
                     userId,
@@ -185,10 +190,12 @@ export const listenToUsersByVenues = (
                     usersByVenue[venueId] = [];
                   }
                   usersByVenue[venueId].push(venueUser);
+                } else {
+                  console.log(`[VenueService] No user data found for ${userId}`);
                 }
               })
               .catch((error) => {
-                console.error(`Error fetching user data for ${userId}:`, error);
+                console.error(`[VenueService] Error fetching user data for ${userId}:`, error);
               });
 
             userDataPromises.push(promise);
@@ -199,48 +206,52 @@ export const listenToUsersByVenues = (
       // Wait for all user data to be fetched
       await Promise.all(userDataPromises);
 
+      // Log final counts per venue
+      venueIds.forEach(venueId => {
+        const count = usersByVenue[venueId]?.length || 0;
+        console.log(`[VenueService] Venue ${venueId} final count: ${count} users`);
+      });
+      
+      console.log(`[VenueService] Final venue users object:`, usersByVenue);
       callback(usersByVenue);
     };
 
+    // Listener for user profile changes (to refresh when profileVisible changes)
+    let currentPreferences: Record<string, UserVenuePreferences> | null = null;
+    
     // Listener for venue preferences changes
     const unsubscribePreferences = onValue(preferencesRef, async (snapshot: DataSnapshot) => {
       if (!snapshot.exists()) {
+        console.log(`[VenueService] No venue preferences found`);
+        currentPreferences = null;
         callback({});
         return;
       }
 
       const allPreferences = snapshot.val() as Record<string, UserVenuePreferences>;
+      // Cache preferences for user profile change listener
+      currentPreferences = allPreferences;
+      console.log(`[VenueService] Venue preferences changed, fetching users...`);
       await fetchVenueUsers(allPreferences);
     }, (error) => {
       console.error("❌ Error listening to venue preferences:", error);
+      currentPreferences = null;
       callback({});
     });
-
-    // Listener for user profile changes (to refresh when profileVisible changes)
-    let currentPreferences: Record<string, UserVenuePreferences> | null = null;
     
     const unsubscribeUsers = onValue(usersRef, async (snapshot: DataSnapshot) => {
       // Only refresh if we have current preferences cached
       if (currentPreferences) {
+        console.log(`[VenueService] User profile changed, refreshing venue users...`);
         await fetchVenueUsers(currentPreferences);
       }
     }, (error) => {
       console.error("❌ Error listening to user profiles:", error);
     });
 
-    // Cache preferences when they change
-    const cachePreferences = onValue(preferencesRef, (snapshot: DataSnapshot) => {
-      if (snapshot.exists()) {
-        currentPreferences = snapshot.val() as Record<string, UserVenuePreferences>;
-      } else {
-        currentPreferences = null;
-      }
-    });
-
     return () => {
       off(preferencesRef);
       off(usersRef);
-      cachePreferences();
     };
   } catch (error) {
     console.error("❌ Error setting up listener:", error);

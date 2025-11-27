@@ -18,6 +18,13 @@ const config: CapacitorConfig = {
       'ACCESS_COARSE_LOCATION',
       'INTERNET'
     ]
+  },
+  ios: {
+    // Enable location permissions for iOS
+    permissions: [
+      'LOCATION_WHEN_IN_USE',
+      'LOCATION_ALWAYS'
+    ]
   }
 };
 

@@ -58,7 +58,7 @@ import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
 import { updateUserVisibility } from "@/services/locationService";
 import { saveWorkout } from "@/services/workoutService";
-import { listenToFriendRequests, removeFriend } from "@/services/friendService";
+import { listenToFriendRequests, removeFriend, sendFriendRequest } from "@/services/friendService";
 import { getUserConversations } from "@/services/messageService";
 import { listenToPokes, sendPoke, acceptPoke, dismissPoke, hasPokedUser } from "@/services/pokeService";
 import { PokeModal } from "@/components/PokeModal";
@@ -1283,14 +1283,45 @@ const MapScreen = () => {
     }
   };
 
-  const handleAddFriend = (userId: string | number) => {
+  const handleAddFriend = async (userId: string | number, userName?: string) => {
+    if (!user?.uid) {
+      toast.error("Please sign in to add friends");
+      return;
+    }
+
     const id = typeof userId === "number" ? userId.toString() : userId;
-    if (selectedUser) {
+
+    if (!id) {
+      toast.error("Invalid user");
+      return;
+    }
+
+    if (id === user.uid) {
+      toast.error("You can't add yourself");
+      return;
+    }
+
+    // Prevent duplicate requests
+    if (
+      friendStatuses[id]?.status === "request_pending" ||
+      friendRequests.outgoing.includes(id)
+    ) {
+      toast("Friend request already sent");
+      return;
+    }
+
+    try {
+      await sendFriendRequest(user.uid, id);
+
       setFriendStatuses(prev => ({
         ...prev,
         [id]: { status: "request_pending" }
       }));
-      toast.success(`Friend request sent to ${selectedUser.name}`);
+
+      toast.success(`Friend request sent to ${userName || selectedUser?.name || "user"}`);
+    } catch (error) {
+      console.error("Error sending friend request:", error);
+      toast.error("Failed to send friend request. Please try again.");
     }
   };
 
@@ -2382,7 +2413,7 @@ const MapScreen = () => {
               setShowProfileView(false);
               handleSendMessage();
             }}
-            onAddFriend={() => handleAddFriend(selectedUser.id)}
+            onAddFriend={() => handleAddFriend(selectedUser.id, selectedUser.name)}
             onAcceptFriend={() => handleAcceptFriend(selectedUser.id)}
             onDeclineFriend={() => handleDeclineFriend(selectedUser.id)}
             onUnfriend={() => handleUnfriend(selectedUser.id)}
@@ -2427,8 +2458,8 @@ const MapScreen = () => {
             handleSendMessage();
             setShowPokeModal(false);
           }}
-          onAddFriend={() => {
-            handleAddFriend(selectedUser.id);
+            onAddFriend={() => {
+            handleAddFriend(selectedUser.id, selectedUser.name);
             setShowPokeModal(false);
           }}
         />
@@ -2884,7 +2915,7 @@ const MapScreen = () => {
                                   size="sm"
                                   variant="outline"
                                   className="flex-1 h-8 text-xs justify-center"
-                                  onClick={() => handleAddFriend(user.uid)}
+                                  onClick={() => handleAddFriend(user.uid, user.name)}
                                 >
                                   <PersonAddIcon style={{ fontSize: 14 }} className="mr-1" />
                                   Add

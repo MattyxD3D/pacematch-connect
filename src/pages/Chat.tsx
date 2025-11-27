@@ -6,31 +6,57 @@ import SendIcon from "@mui/icons-material/Send";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import NavigationIcon from "@mui/icons-material/Navigation";
+import StopIcon from "@mui/icons-material/Stop";
+import PersonIcon from "@mui/icons-material/Person";
+import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
+import NotificationsIcon from "@mui/icons-material/Notifications";
+import BlockIcon from "@mui/icons-material/Block";
+import ReportIcon from "@mui/icons-material/Report";
+import DeleteIcon from "@mui/icons-material/Delete";
 import Avatar from "@mui/material/Avatar";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { ProfileView } from "./ProfileView";
 import { useUser } from "@/contexts/UserContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation as useLocationHook } from "@/hooks/useLocation";
-import { 
-  getPendingRequests, 
-  sendFriendRequest, 
-  acceptFriendRequest, 
-  declineFriendRequest 
-} from "@/lib/socialStorage";
-import { listenToMessages, sendMessage, sendLocationMessage, markMessagesAsRead, Message as FirebaseMessage } from "@/services/messageService";
-import { generateDummyChatMessages, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
-import LocationSharingModal from "@/components/LocationSharingModal";
 import {
-  startLocationSharing,
-  stopLocationSharing,
-  updateSharedLocation,
-  listenToSharedLocation,
-  SharedLocation,
-} from "@/services/locationSharingService";
+  listenToUserFriends,
+  listenToFriendRequests,
+  sendFriendRequest,
+  acceptFriendRequest,
+  declineFriendRequest,
+} from "@/services/friendService";
+import { listenToMessages, sendMessage, sendLocationMessage, markMessagesAsRead, deleteConversation, Message as FirebaseMessage } from "@/services/messageService";
+import { blockUser, reportUser, isUserBlocked } from "@/services/userService";
+import { ReportUserModal } from "@/components/ReportUserModal";
+import { generateDummyChatMessages, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
+import LocationSharingModal from "@/components/LocationSharingModalSimple";
 import { openGoogleMapsNavigation } from "@/utils/navigation";
 
 interface ChatUser {
@@ -58,23 +84,28 @@ const Chat = () => {
   }, [chatUser, navigate]);
 
   const [messageInput, setMessageInput] = useState("");
-  const [hideLocation, setHideLocation] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [messages, setMessages] = useState<FirebaseMessage[]>([]);
+  const [friends, setFriends] = useState<string[]>([]);
+  const [friendRequests, setFriendRequests] = useState<{ incoming: string[]; outgoing: string[] }>({ incoming: [], outgoing: [] });
   
-  // Location sharing state
+  // Location sharing modal state
   const [showLocationModal, setShowLocationModal] = useState(false);
-  const [selectedDuration, setSelectedDuration] = useState<15 | 30 | 60 | null>(null);
-  const [isSharingLocation, setIsSharingLocation] = useState(false);
-  const [sharingTimer, setSharingTimer] = useState(0);
-  const [sharedLocation, setSharedLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [pendingLocation, setPendingLocation] = useState<{ lat: number; lng: number } | null>(null);
   
-  // Get current user location
-  const { location: currentLocation } = useLocationHook(
+  // Menu state
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showBlockDialog, setShowBlockDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  
+  // Get current user location when modal is open
+  const { location: currentLocation, isGettingLocation } = useLocationHook(
     currentUser?.uid || null,
-    isSharingLocation, // Only track when sharing
+    showLocationModal, // Only track when modal is open
     true
   );
 
@@ -101,15 +132,60 @@ const Chat = () => {
     return () => unsubscribe();
   }, [currentUser?.uid, chatUser?.id]);
 
+  // Listen to friends list from Firebase
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setFriends([]);
+      return;
+    }
+
+    const unsubscribe = listenToUserFriends(currentUser.uid, (friendIds) => {
+      setFriends(friendIds);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.uid]);
+
+  // Listen to friend requests from Firebase
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setFriendRequests({ incoming: [], outgoing: [] });
+      return;
+    }
+
+    const unsubscribe = listenToFriendRequests(currentUser.uid, (requests) => {
+      setFriendRequests(requests);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.uid]);
+
+  // Check if chat is muted (localStorage)
+  useEffect(() => {
+    if (!currentUser?.uid || !chatUser?.id) return;
+    
+    const mutedChats = JSON.parse(localStorage.getItem("mutedChats") || "[]");
+    const conversationId = [currentUser.uid, chatUser.id].sort().join("_");
+    setIsMuted(mutedChats.includes(conversationId));
+  }, [currentUser?.uid, chatUser?.id]);
+
+  // Check if user is blocked
+  useEffect(() => {
+    const checkBlocked = async () => {
+      if (!currentUser?.uid || !chatUser?.id) return;
+      const blocked = await isUserBlocked(currentUser.uid, chatUser.id);
+      setIsBlocked(blocked);
+    };
+    checkBlocked();
+  }, [currentUser?.uid, chatUser?.id]);
+
   // Determine friend status
   const getFriendStatus = () => {
     if (!chatUser) return "not_friends";
-    const friends = userProfile?.friends || [];
-    const { incoming, outgoing } = getPendingRequests();
     
     if (friends.includes(chatUser.id)) return "friends";
-    if (incoming.includes(chatUser.id)) return "request_received";
-    if (outgoing.includes(chatUser.id)) return "request_pending";
+    if (friendRequests.incoming.includes(chatUser.id)) return "request_received";
+    if (friendRequests.outgoing.includes(chatUser.id)) return "request_pending";
     return "not_friends";
   };
 
@@ -140,13 +216,20 @@ const Chat = () => {
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !currentUser?.uid || !chatUser?.id) return;
 
+    // Check if blocked before attempting to send
+    if (isBlocked) {
+      toast.error("You cannot send messages. You have been blocked.");
+      return;
+    }
+
     try {
       await sendMessage(currentUser.uid, chatUser.id, messageInput.trim());
       setMessageInput("");
       toast.success("Message sent!");
     } catch (error) {
       console.error("Error sending message:", error);
-      toast.error("Failed to send message. Please try again.");
+      const errorMessage = error instanceof Error ? error.message : "Failed to send message. Please try again.";
+      toast.error(errorMessage);
     }
   };
 
@@ -157,35 +240,44 @@ const Chat = () => {
     }
   };
 
-  const handleLocationToggle = (checked: boolean) => {
-    setHideLocation(checked);
-    toast.success(
-      checked
-        ? `Hidden your location from ${chatUser.name}`
-        : `Now visible to ${chatUser.name}`
-    );
-  };
-
   // Profile view handlers
-  const handleAddFriend = () => {
+  const handleAddFriend = async () => {
     if (!chatUser || !currentUser?.uid) return;
-    sendFriendRequest(chatUser.id);
-    toast.success(`Friend request sent to ${chatUser.name}`);
-    setShowProfile(false);
+    
+    try {
+      await sendFriendRequest(currentUser.uid, chatUser.id);
+      toast.success(`Friend request sent to ${chatUser.name}`);
+      setShowProfile(false);
+    } catch (error) {
+      console.error("Error sending friend request:", error);
+      toast.error("Failed to send friend request");
+    }
   };
 
-  const handleAcceptFriend = () => {
+  const handleAcceptFriend = async () => {
     if (!chatUser || !currentUser?.uid) return;
-    acceptFriendRequest(chatUser.id);
-    toast.success(`You are now friends with ${chatUser.name}`);
-    setShowProfile(false);
+    
+    try {
+      await acceptFriendRequest(currentUser.uid, chatUser.id);
+      toast.success(`You are now friends with ${chatUser.name}`);
+      setShowProfile(false);
+    } catch (error) {
+      console.error("Error accepting friend request:", error);
+      toast.error("Failed to accept friend request");
+    }
   };
 
-  const handleDeclineFriend = () => {
+  const handleDeclineFriend = async () => {
     if (!chatUser || !currentUser?.uid) return;
-    declineFriendRequest(chatUser.id);
-    toast.success("Friend request declined");
-    setShowProfile(false);
+    
+    try {
+      await declineFriendRequest(currentUser.uid, chatUser.id);
+      toast.success("Friend request declined");
+      setShowProfile(false);
+    } catch (error) {
+      console.error("Error declining friend request:", error);
+      toast.error("Failed to decline friend request");
+    }
   };
 
   const handleSendMessageFromProfile = () => {
@@ -194,113 +286,127 @@ const Chat = () => {
   };
 
   // Location sharing handlers
-  const handleStartSharing = async () => {
-    if (!currentUser?.uid || !chatUser?.id || !selectedDuration || !currentLocation) {
-      toast.error("Unable to start sharing. Please check your location permissions.");
+  const handleShareLocation = () => {
+    if (!currentUser?.uid) {
+      toast.error("You must be logged in to share location");
+      return;
+    }
+    
+    if (!chatUser?.id) {
+      toast.error("No chat user found");
       return;
     }
 
-    try {
-      await startLocationSharing(
-        currentUser.uid,
-        chatUser.id,
-        selectedDuration,
-        currentLocation
-      );
+    // Check if blocked before attempting to share location
+    if (isBlocked) {
+      toast.error("You cannot share location. You have been blocked.");
+      return;
+    }
+    
+    if (!currentLocation) {
+      toast.error("Unable to get your location. Please check your location permissions.");
+      return;
+    }
 
+    // Show confirmation modal
+    setPendingLocation(currentLocation);
+    setShowLocationModal(false);
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmShare = async () => {
+    if (!currentUser?.uid || !chatUser?.id || !pendingLocation) return;
+
+    try {
       // Send location message
       await sendLocationMessage(
         currentUser.uid,
         chatUser.id,
-        currentLocation,
-        `${currentUser.uid}_${chatUser.id}`,
-        Date.now() + (selectedDuration * 60 * 1000)
+        pendingLocation
+      );
+      
+      // Send text message with coordinates
+      await sendMessage(
+        currentUser.uid,
+        chatUser.id,
+        `📍 My current location:\n${pendingLocation.lat.toFixed(6)}, ${pendingLocation.lng.toFixed(6)}`
       );
 
-      setIsSharingLocation(true);
-      setSharingTimer(selectedDuration * 60);
-      setSharedLocation(currentLocation);
-      toast.success(`Sharing location for ${selectedDuration} minutes`);
-
-      // Start timer countdown
-      timerIntervalRef.current = setInterval(() => {
-        setSharingTimer((prev) => {
-          if (prev <= 1) {
-            handleStopSharing();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+      toast.success(`Location sent to ${chatUser.name}`);
+      setShowConfirmModal(false);
+      setPendingLocation(null);
     } catch (error) {
-      console.error("Error starting location sharing:", error);
-      toast.error("Failed to start sharing location");
+      console.error("❌ Error sending location:", error);
+      toast.error("Failed to send location");
     }
   };
 
-  const handleStopSharing = async () => {
+  // Menu handlers
+  const handleToggleMute = () => {
     if (!currentUser?.uid || !chatUser?.id) return;
+    
+    const conversationId = [currentUser.uid, chatUser.id].sort().join("_");
+    const mutedChats = JSON.parse(localStorage.getItem("mutedChats") || "[]");
+    
+    if (isMuted) {
+      const updated = mutedChats.filter((id: string) => id !== conversationId);
+      localStorage.setItem("mutedChats", JSON.stringify(updated));
+      setIsMuted(false);
+      toast.success(`Notifications enabled for ${chatUser.name}`);
+    } else {
+      mutedChats.push(conversationId);
+      localStorage.setItem("mutedChats", JSON.stringify(mutedChats));
+      setIsMuted(true);
+      toast.success(`Notifications muted for ${chatUser.name}`);
+    }
+  };
 
+  const handleBlockUser = async () => {
+    if (!currentUser?.uid || !chatUser?.id) return;
+    
     try {
-      await stopLocationSharing(currentUser.uid, chatUser.id);
-      setIsSharingLocation(false);
-      setSharingTimer(0);
-      setSharedLocation(null);
-      setSelectedDuration(null);
-      setShowLocationModal(false); // Close modal when stopping
-      toast.success("Location sharing stopped");
-
-      // Clear interval
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      }
+      await blockUser(currentUser.uid, chatUser.id);
+      setIsBlocked(true);
+      toast.success(`${chatUser.name} has been blocked`);
+      setShowBlockDialog(false);
+      // Navigate back to messages after blocking
+      setTimeout(() => navigate("/messages"), 1000);
     } catch (error) {
-      console.error("Error stopping location sharing:", error);
-      toast.error("Failed to stop sharing location");
+      console.error("❌ Error blocking user:", error);
+      toast.error("Failed to block user");
     }
   };
 
-  // Update shared location when current location changes (while sharing)
-  useEffect(() => {
-    if (isSharingLocation && currentLocation && currentUser?.uid && chatUser?.id) {
-      updateSharedLocation(currentUser.uid, chatUser.id, currentLocation).catch(console.error);
-      setSharedLocation(currentLocation);
-    }
-  }, [currentLocation?.lat, currentLocation?.lng, isSharingLocation, currentUser?.uid, chatUser?.id]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-      }
-    };
-  }, []);
-
-  // Listen to shared location from friend
-  useEffect(() => {
+  const handleReportUser = async (reason: string, details?: string) => {
     if (!currentUser?.uid || !chatUser?.id) return;
-
-    const unsubscribe = listenToSharedLocation(
-      chatUser.id,
-      currentUser.uid,
-      (location: SharedLocation | null) => {
-        if (location) {
-          // Friend is sharing location with us
-          // This will be displayed in the message bubble
-        }
-      }
-    );
-
-    return () => unsubscribe();
-  }, [currentUser?.uid, chatUser?.id]);
-
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    
+    try {
+      await reportUser(currentUser.uid, chatUser.id, reason, details);
+      toast.success("Thank you for your report. We'll review it soon.");
+      setShowReportModal(false);
+    } catch (error) {
+      console.error("❌ Error reporting user:", error);
+      toast.error("Failed to submit report");
+      throw error;
+    }
   };
+
+  const handleDeleteConversation = async () => {
+    if (!currentUser?.uid || !chatUser?.id) return;
+    
+    try {
+      await deleteConversation(currentUser.uid, chatUser.id);
+      toast.success("Conversation deleted");
+      setShowDeleteDialog(false);
+      // Navigate back to messages after deletion
+      navigate("/messages");
+    } catch (error) {
+      console.error("❌ Error deleting conversation:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to delete conversation";
+      toast.error(errorMessage);
+    }
+  };
+
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -335,12 +441,58 @@ const Chat = () => {
               </motion.button>
             )}
           </div>
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            className="touch-target p-2 rounded-full hover:bg-accent transition-colors flex-shrink-0"
-          >
-            <MoreVertIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
-          </motion.button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                className="touch-target p-2 rounded-full hover:bg-accent transition-colors flex-shrink-0"
+              >
+                <MoreVertIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
+              </motion.button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => setShowProfile(true)}>
+                <PersonIcon style={{ fontSize: 18 }} className="mr-2" />
+                View Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleToggleMute}>
+                {isMuted ? (
+                  <>
+                    <NotificationsIcon style={{ fontSize: 18 }} className="mr-2" />
+                    Unmute Notifications
+                  </>
+                ) : (
+                  <>
+                    <NotificationsOffIcon style={{ fontSize: 18 }} className="mr-2" />
+                    Mute Notifications
+                  </>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                onClick={() => setShowReportModal(true)}
+                className="text-orange-600 focus:text-orange-600"
+              >
+                <ReportIcon style={{ fontSize: 18 }} className="mr-2" />
+                Report User
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={() => setShowBlockDialog(true)}
+                className="text-red-600 focus:text-red-600"
+              >
+                <BlockIcon style={{ fontSize: 18 }} className="mr-2" />
+                Block User
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                onClick={() => setShowDeleteDialog(true)}
+                className="text-red-600 focus:text-red-600"
+              >
+                <DeleteIcon style={{ fontSize: 18 }} className="mr-2" />
+                Delete Conversation
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -349,6 +501,14 @@ const Chat = () => {
         {!chatUser ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-muted-foreground">No user selected</p>
+          </div>
+        ) : isBlocked ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center space-y-2">
+              <BlockIcon className="mx-auto text-red-500" style={{ fontSize: 48 }} />
+              <p className="text-lg font-semibold">You have been blocked</p>
+              <p className="text-sm text-muted-foreground">You cannot send messages to this user.</p>
+            </div>
           </div>
         ) : messages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
@@ -479,54 +639,6 @@ const Chat = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Privacy Toggle */}
-      {chatUser && (
-        <div className="border-t border-border px-4 py-3 bg-background">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                🔒 Hide my location from {chatUser.name}
-              </span>
-            </div>
-            <Switch
-              checked={hideLocation}
-              onCheckedChange={handleLocationToggle}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Location Display on Screen */}
-      {isSharingLocation && sharedLocation && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="fixed bottom-24 left-4 right-4 z-20 sm:left-auto sm:right-4 sm:w-80"
-        >
-          <Card className="p-4 bg-card border-2 border-primary shadow-lg">
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <LocationOnIcon className="text-success" style={{ fontSize: 24 }} />
-                <p className="font-semibold">I'm here</p>
-              </div>
-              <div className="text-2xl font-bold text-primary">
-                {formatTime(sharingTimer)}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {sharedLocation.lat.toFixed(6)}, {sharedLocation.lng.toFixed(6)}
-              </p>
-              <Button
-                onClick={() => openGoogleMapsNavigation(sharedLocation.lat, sharedLocation.lng)}
-                className="w-full"
-                size="sm"
-              >
-                <NavigationIcon style={{ fontSize: 16 }} className="mr-2" />
-                Start navigation using Google Maps
-              </Button>
-            </div>
-          </Card>
-        </motion.div>
-      )}
 
       {/* Input Area */}
       {chatUser && (
@@ -542,8 +654,9 @@ const Chat = () => {
                 }
               }}
               onKeyPress={handleKeyPress}
-              placeholder="Type message..."
+              placeholder={isBlocked ? "You have been blocked" : "Type message..."}
               rows={1}
+              disabled={isBlocked}
               className="w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 max-h-32"
               style={{
                 minHeight: "44px",
@@ -558,13 +671,14 @@ const Chat = () => {
             onClick={() => setShowLocationModal(true)}
             size="icon"
             variant="outline"
+            disabled={isBlocked}
             className="rounded-full h-11 w-11 flex-shrink-0"
           >
             <LocationOnIcon style={{ fontSize: 20 }} />
           </Button>
           <Button
             onClick={handleSendMessage}
-            disabled={!messageInput.trim()}
+            disabled={!messageInput.trim() || isBlocked}
             size="icon"
             className="rounded-full h-11 w-11 flex-shrink-0 bg-primary hover:bg-primary/90"
           >
@@ -578,14 +692,50 @@ const Chat = () => {
       <LocationSharingModal
         open={showLocationModal}
         onOpenChange={setShowLocationModal}
-        selectedDuration={selectedDuration}
-        onDurationSelect={setSelectedDuration}
-        onStartSharing={handleStartSharing}
-        onStopSharing={handleStopSharing}
-        isSharing={isSharingLocation}
-        remainingSeconds={sharingTimer}
+        onShareLocation={handleShareLocation}
         currentLocation={currentLocation}
+        isGettingLocation={isGettingLocation}
       />
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && pendingLocation && chatUser && (
+        <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Share Your Location?</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <p className="text-sm text-muted-foreground">
+                You're about to share your current location with <span className="font-semibold">{chatUser.name}</span>
+              </p>
+              <div className="bg-muted p-3 rounded-lg">
+                <p className="text-xs font-mono">
+                  📍 {pendingLocation.lat.toFixed(6)}, {pendingLocation.lng.toFixed(6)}
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setShowConfirmModal(false);
+                    setPendingLocation(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={handleConfirmShare}
+                >
+                  <LocationOnIcon className="mr-2" style={{ fontSize: 18 }} />
+                  Send Location
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Profile View Modal */}
       {showProfile && chatUser && (
@@ -606,6 +756,58 @@ const Chat = () => {
           onDeclineFriend={handleDeclineFriend}
         />
       )}
+
+      {/* Report User Modal */}
+      {chatUser && (
+        <ReportUserModal
+          open={showReportModal}
+          onOpenChange={setShowReportModal}
+          userName={chatUser.name}
+          onReport={handleReportUser}
+        />
+      )}
+
+      {/* Block User Confirmation Dialog */}
+      <AlertDialog open={showBlockDialog} onOpenChange={setShowBlockDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Block {chatUser?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will prevent {chatUser?.name} from sending you messages and you won't see them on the map. You can unblock them later from settings.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBlockUser}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Block
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Conversation Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete all messages with {chatUser?.name}. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConversation}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

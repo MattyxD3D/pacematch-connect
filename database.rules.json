@@ -3,7 +3,7 @@
     "users": {
       ".read": "auth != null",
       "$uid": {
-        ".read": "$uid === auth.uid || (auth != null && (data.child('visible').val() == true || !data.child('visible').exists()))",
+        ".read": "$uid === auth.uid || (auth != null && (data.child('visible').val() == true || !data.child('visible').exists()) && data.child('timestamp').exists() && (now - data.child('timestamp').val()) <= 180000)",
         ".write": "$uid === auth.uid",
         ".validate": "newData.hasChildren(['name', 'email']) || !newData.exists()"
       }
@@ -56,7 +56,7 @@
         ".write": "auth != null && root.child('conversations').child($conversationId).child('participants').child(auth.uid).exists()",
         "$messageId": {
           ".read": "auth != null && root.child('conversations').child($conversationId).child('participants').child(auth.uid).exists()",
-          ".write": "auth != null && (data.child('senderId').val() === auth.uid || newData.child('senderId').val() === auth.uid)"
+          ".write": "auth != null && root.child('conversations').child($conversationId).child('participants').child(auth.uid).exists() && (data.child('senderId').val() === auth.uid || newData.child('senderId').val() === auth.uid) && !root.child('blockedUsers').child(newData.child('receiverId').val()).child(newData.child('senderId').val()).exists()"
         }
       }
     },
@@ -69,11 +69,13 @@
       }
     },
     "userConversations": {
+      ".write": "auth != null",
       "$userId": {
         ".read": "$userId === auth.uid",
         "$conversationId": {
           ".read": "$userId === auth.uid",
-          ".write": "auth != null && ($userId === auth.uid || root.child('conversations').child($conversationId).child('participants').child(auth.uid).exists())"
+          ".write": "auth != null && ($userId === auth.uid || root.child('conversations').child($conversationId).child('participants').child(auth.uid).exists())",
+          ".validate": "newData.hasChildren(['conversationId', 'otherUserId', 'lastMessage', 'lastMessageTime']) && root.child('conversations').child($conversationId).child('participants').hasChild(auth.uid)"
         }
       }
     },
@@ -146,6 +148,45 @@
       "$userId": {
         ".read": "auth != null",
         ".write": "$userId === auth.uid"
+      }
+    },
+    "notifications": {
+      "$userId": {
+        ".read": "$userId === auth.uid",
+        ".write": "auth != null",
+        "$notificationId": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid || newData.child('fromUserId').val() === auth.uid"
+        }
+      }
+    },
+    "locationSharing": {
+      "$sharerUserId": {
+        ".read": "$sharerUserId === auth.uid",
+        ".write": "$sharerUserId === auth.uid",
+        "$recipientUserId": {
+          ".read": "$sharerUserId === auth.uid || $recipientUserId === auth.uid",
+          ".write": "$sharerUserId === auth.uid"
+        }
+      }
+    },
+    "blockedUsers": {
+      "$userId": {
+        ".read": "$userId === auth.uid",
+        ".write": "$userId === auth.uid",
+        "$blockedUserId": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid"
+        }
+      }
+    },
+    "reports": {
+      ".read": false,
+      ".write": "auth != null",
+      "$reportId": {
+        ".read": false,
+        ".write": "auth != null && newData.child('reporterId').val() === auth.uid",
+        ".validate": "newData.hasChildren(['reporterId', 'reportedUserId', 'reason', 'reportedAt']) && newData.child('reporterId').val() === auth.uid && newData.child('reportedUserId').val() != null && newData.child('reason').val() != null && newData.child('reportedAt').val() > 0"
       }
     }
   }

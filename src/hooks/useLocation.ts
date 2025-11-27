@@ -1,6 +1,6 @@
 // Custom hook for GPS location tracking
 // Works in web browsers
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { updateUserLocation } from "../services/locationService";
 
 export interface Location {
@@ -25,14 +25,19 @@ export const useLocation = (
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const browserWatchIdRef = useRef<number | null>(null);
 
+  const stopTracking = useCallback(() => {
+    if (browserWatchIdRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(browserWatchIdRef.current);
+      browserWatchIdRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     // Always track if userId exists and isTracking is true
     if (!userId || !isTracking) {
       // Stop tracking if no user or tracking disabled
-      if (browserWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(browserWatchIdRef.current);
-        browserWatchIdRef.current = null;
-      }
+      stopTracking();
+      setIsGettingLocation(false);
       return;
     }
 
@@ -127,13 +132,17 @@ export const useLocation = (
 
     // Cleanup
     return () => {
-      if (browserWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(browserWatchIdRef.current);
-        browserWatchIdRef.current = null;
-      }
+      stopTracking();
     };
-  }, [userId, isTracking, visible]);
+  }, [userId, isTracking, visible, stopTracking]);
 
-  return { location, error, isGettingLocation };
+  // Ensure tracking stops on unmount
+  useEffect(() => {
+    return () => {
+      stopTracking();
+    };
+  }, [stopTracking]);
+
+  return { location, error, isGettingLocation, stopTracking };
 };
 

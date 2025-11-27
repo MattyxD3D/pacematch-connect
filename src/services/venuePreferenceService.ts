@@ -66,6 +66,35 @@ export const getUserVenuePreferences = async (
 };
 
 /**
+ * Subscribe to a user's venue preferences in real-time
+ */
+export const listenToUserVenuePreferences = (
+  userId: string,
+  callback: (preferences: UserVenuePreferences | null) => void
+): (() => void) => {
+  const preferencesRef = ref(database, `userVenuePreferences/${userId}`);
+
+  const handleValue = (snapshot: DataSnapshot) => {
+    if (snapshot.exists()) {
+      callback(snapshot.val() as UserVenuePreferences);
+    } else {
+      callback(null);
+    }
+  };
+
+  const handleError = (error: Error) => {
+    console.error("❌ Error listening to venue preferences:", error);
+    callback(null);
+  };
+
+  onValue(preferencesRef, handleValue, handleError);
+
+  return () => {
+    off(preferencesRef, "value", handleValue);
+  };
+};
+
+/**
  * Get users who have selected specific venues
  */
 export const getUsersByVenues = async (

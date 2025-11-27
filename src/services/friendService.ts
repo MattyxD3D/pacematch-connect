@@ -1,6 +1,8 @@
 // Friend service for Firebase - manages friend requests and friendships
 import { ref, set, get, onValue, off, remove, DataSnapshot } from "firebase/database";
 import { database } from "./firebase";
+import { createNotification } from "./notificationService";
+import { getUserData } from "./authService";
 
 /**
  * Send a friend request
@@ -25,6 +27,22 @@ export const sendFriendRequest = async (
       createdAt: Date.now()
     });
     console.log(`✅ Friend request sent from ${fromUserId} to ${toUserId}`);
+    
+    // Create notification for recipient
+    try {
+      const fromUserData = await getUserData(fromUserId);
+      if (fromUserData) {
+        await createNotification(toUserId, {
+          type: "friend_request",
+          fromUserId,
+          fromUserName: fromUserData.name || fromUserData.username || "Someone",
+          fromUserAvatar: fromUserData.photoURL || "",
+        });
+      }
+    } catch (notificationError) {
+      // Don't fail the friend request if notification fails
+      console.error("❌ Error creating friend request notification:", notificationError);
+    }
   } catch (error) {
     console.error("❌ Error sending friend request:", error);
     throw error;
@@ -62,6 +80,22 @@ export const acceptFriendRequest = async (
     await remove(outgoingRef);
     
     console.log(`✅ Friend request accepted: ${userId} and ${fromUserId} are now friends`);
+    
+    // Create notification for requester (the person who sent the request)
+    try {
+      const accepterData = await getUserData(userId);
+      if (accepterData) {
+        await createNotification(fromUserId, {
+          type: "friend_accepted",
+          fromUserId: userId,
+          fromUserName: accepterData.name || accepterData.username || "Someone",
+          fromUserAvatar: accepterData.photoURL || "",
+        });
+      }
+    } catch (notificationError) {
+      // Don't fail the accept if notification fails
+      console.error("❌ Error creating friend accepted notification:", notificationError);
+    }
   } catch (error) {
     console.error("❌ Error accepting friend request:", error);
     throw error;

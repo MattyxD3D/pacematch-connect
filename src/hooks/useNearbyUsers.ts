@@ -116,11 +116,12 @@ export const useNearbyUsers = (
 
       console.log(`Visibility filter: ${beforeVisibility} → ${filtered.length}`);
 
-      // Filter by active workout status - only show users with recent location updates (within 5 minutes)
+      // Filter by active workout status - only show users with recent location updates (within 3 minutes)
       // This ensures users are only visible when they have an active workout session
+      // Inactive locations automatically terminate after 3 minutes
       const beforeActiveFilter = filtered.length;
       const now = Date.now();
-      const activeThreshold = 5 * 60 * 1000; // 5 minutes in milliseconds
+      const activeThreshold = 3 * 60 * 1000; // 3 minutes in milliseconds
       
       filtered = filtered.filter((user) => {
         // User must have a timestamp indicating recent location update
@@ -129,12 +130,12 @@ export const useNearbyUsers = (
           return false;
         }
         
-        // Check if timestamp is recent (within 5 minutes)
+        // Check if timestamp is recent (within 3 minutes)
         const timeDiff = now - user.timestamp;
         const isActive = timeDiff <= activeThreshold;
         
         if (!isActive) {
-          console.log(`User ${user.id} filtered out - timestamp too old (${Math.round(timeDiff / 1000)}s ago, threshold: 5min)`);
+          console.log(`User ${user.id} filtered out - timestamp too old (${Math.round(timeDiff / 1000)}s ago, threshold: 3min)`);
         }
         
         return isActive;

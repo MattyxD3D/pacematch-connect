@@ -1,5 +1,6 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useNotifications, Notification } from "@/components/NotificationSystem";
+import { useAuth } from "@/hooks/useAuth";
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -16,7 +17,8 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export const NotificationProvider = ({ children }: { children: ReactNode }) => {
-  const notificationState = useNotifications();
+  const { user } = useAuth();
+  const notificationState = useNotifications(user?.uid || null);
 
   return (
     <NotificationContext.Provider value={notificationState}>

@@ -231,7 +231,7 @@ export const EventDetailModal = ({ event, onClose, onJoin, onEdit, onDelete }: E
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
+        className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[80] flex items-center justify-center p-0 md:p-4"
       >
         <motion.div
           initial={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -239,9 +239,9 @@ export const EventDetailModal = ({ event, onClose, onJoin, onEdit, onDelete }: E
           exit={{ scale: 0.95, opacity: 0, y: 20 }}
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
           onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-3xl my-8"
+          className="w-full h-full md:h-auto md:max-w-3xl my-0 md:my-8 flex"
         >
-          <Card className="overflow-hidden shadow-elevation-4 border-2 border-border/50">
+          <Card className="flex flex-col h-full md:h-auto overflow-hidden shadow-elevation-4 border-2 border-border/50 w-full">
             {/* Header */}
             <div className="relative bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 p-6 border-b border-border">
               <button
@@ -336,105 +336,164 @@ export const EventDetailModal = ({ event, onClose, onJoin, onEdit, onDelete }: E
             </div>
 
             {/* Tabs Content */}
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="w-full grid grid-cols-4 rounded-none border-b border-border h-auto">
-                <TabsTrigger value="details" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
-                  <EventIcon className="mr-2" style={{ fontSize: 18 }} />
-                  Details
-                </TabsTrigger>
-                <TabsTrigger value="checkins" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
-                  <CheckCircleIcon className="mr-2" style={{ fontSize: 18 }} />
-                  Check-ins ({checkIns.length + eventCheckIns.length})
-                </TabsTrigger>
-                <TabsTrigger value="participants" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
-                  <PeopleIcon className="mr-2" style={{ fontSize: 18 }} />
-                  Participants ({participantsCount})
-                </TabsTrigger>
-                <TabsTrigger value="comments" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
-                  <ChatBubbleOutlineIcon className="mr-2" style={{ fontSize: 18 }} />
-                  Comments ({comments.length})
-                </TabsTrigger>
-              </TabsList>
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex-1 flex flex-col overflow-hidden">
+                <TabsList className="w-full grid grid-cols-4 rounded-none border-b border-border h-auto">
+                  <TabsTrigger value="details" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
+                    <EventIcon className="mr-2" style={{ fontSize: 18 }} />
+                    Details
+                  </TabsTrigger>
+                  <TabsTrigger value="checkins" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
+                    <CheckCircleIcon className="mr-2" style={{ fontSize: 18 }} />
+                    Check-ins ({checkIns.length + eventCheckIns.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="participants" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
+                    <PeopleIcon className="mr-2" style={{ fontSize: 18 }} />
+                    Participants ({participantsCount})
+                  </TabsTrigger>
+                  <TabsTrigger value="comments" className="py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
+                    <ChatBubbleOutlineIcon className="mr-2" style={{ fontSize: 18 }} />
+                    Comments ({comments.length})
+                  </TabsTrigger>
+                </TabsList>
 
-              {/* Details Tab */}
-              <TabsContent value="details" className="p-6 space-y-6">
-                {/* Location */}
-                <div className="space-y-3">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <LocationOnIcon style={{ fontSize: 20 }} />
-                    Location
-                  </h3>
-                  <div className="bg-muted rounded-xl p-4">
-                    <p className="font-semibold">{event.location}</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {event.distance} from your location
-                    </p>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="mt-3"
-                      onClick={() => {
-                        if (event.lat && event.lng) {
-                          openGoogleMapsNavigation(event.lat, event.lng);
-                        } else {
-                          toast.error("Location not available");
-                        }
-                      }}
-                    >
-                      <NavigationIcon className="mr-2" style={{ fontSize: 16 }} />
-                      View on Map
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Event Info */}
-                <div className="space-y-3">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <EventIcon style={{ fontSize: 20 }} />
-                    Event Information
-                  </h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-muted rounded-xl p-4">
-                      <p className="text-sm text-muted-foreground">Activity Type</p>
-                      <p className="font-semibold capitalize mt-1">{event.type}</p>
+                <div className="flex-1 overflow-y-auto">
+                  {/* Details Tab */}
+                  <TabsContent value="details" className="p-6 space-y-6">
+                    {/* Location */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-bold flex items-center gap-2">
+                        <LocationOnIcon style={{ fontSize: 20 }} />
+                        Location
+                      </h3>
+                      <div className="bg-muted rounded-xl p-4">
+                        <p className="font-semibold">{event.location}</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {event.distance} from your location
+                        </p>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="mt-3"
+                          onClick={() => {
+                            if (event.lat && event.lng) {
+                              openGoogleMapsNavigation(event.lat, event.lng);
+                            } else {
+                              toast.error("Location not available");
+                            }
+                          }}
+                        >
+                          <NavigationIcon className="mr-2" style={{ fontSize: 16 }} />
+                          View on Map
+                        </Button>
+                      </div>
                     </div>
-                    <div className="bg-muted rounded-xl p-4">
-                      <p className="text-sm text-muted-foreground">Participants</p>
-                      <p className="font-semibold mt-1">
-                        {participantsCount}
-                        {event.maxParticipants ? ` / ${event.maxParticipants}` : ""}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </TabsContent>
 
-              {/* Check-ins Tab */}
-              <TabsContent value="checkins" className="p-6 space-y-6">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold flex items-center gap-2">
-                      <CheckCircleIcon style={{ fontSize: 20 }} />
-                      Currently Here
-                    </h3>
-                    {(checkIns.length > 0 || eventCheckIns.length > 0) && (
-                      <Badge className="bg-primary/20 text-primary border-primary/30">
-                        {checkIns.length + eventCheckIns.length} checked in
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  {venue && (
-                    <div className="bg-muted rounded-xl p-4 space-y-3">
-                      <p className="text-sm text-muted-foreground">
-                        This event is at <span className="font-semibold">{venue.name}</span>
-                      </p>
+                    {/* Event Info */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-bold flex items-center gap-2">
+                        <EventIcon style={{ fontSize: 20 }} />
+                        Event Information
+                      </h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-muted rounded-xl p-4">
+                          <p className="text-sm text-muted-foreground">Activity Type</p>
+                          <p className="font-semibold capitalize mt-1">{event.type}</p>
+                        </div>
+                        <div className="bg-muted rounded-xl p-4">
+                          <p className="text-sm text-muted-foreground">Participants</p>
+                          <p className="font-semibold mt-1">
+                            {participantsCount}
+                            {event.maxParticipants ? ` / ${event.maxParticipants}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  {/* Check-ins Tab */}
+                  <TabsContent value="checkins" className="p-6 space-y-6">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-bold flex items-center gap-2">
+                          <CheckCircleIcon style={{ fontSize: 20 }} />
+                          Currently Here
+                        </h3>
+                        {(checkIns.length > 0 || eventCheckIns.length > 0) && (
+                          <Badge className="bg-primary/20 text-primary border-primary/30">
+                            {checkIns.length + eventCheckIns.length} checked in
+                          </Badge>
+                        )}
+                      </div>
                       
-                      {checkIns.length > 0 ? (
-                        <div className="space-y-2">
-                          <p className="text-sm font-semibold">People checked in at this venue:</p>
+                      {venue && (
+                        <div className="bg-muted rounded-xl p-4 space-y-3">
+                          <p className="text-sm text-muted-foreground">
+                            This event is at <span className="font-semibold">{venue.name}</span>
+                          </p>
+                          
+                          {checkIns.length > 0 ? (
+                            <div className="space-y-2">
+                              <p className="text-sm font-semibold">People checked in at this venue:</p>
+                              <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                                {checkIns.map((checkIn) => (
+                                  <div
+                                    key={checkIn.userId}
+                                    className="flex items-center gap-3 p-2 bg-background rounded-lg"
+                                  >
+                                    <Avatar
+                                      src={checkIn.userAvatar}
+                                      alt={checkIn.userName}
+                                      sx={{ width: 32, height: 32 }}
+                                    />
+                                    <div className="flex-1">
+                                      <p className="text-sm font-semibold">{checkIn.userName}</p>
+                                      <p className="text-xs text-muted-foreground capitalize">
+                                        {checkIn.activity}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">No one checked in yet</p>
+                          )}
+
+                          {user && (
+                            <Button
+                              onClick={isCheckedIn ? checkOut : () => {
+                                if (venue) {
+                                  checkIn(venue.id, { id: venue.id, name: venue.name }, event.type)
+                                    .then(() => toast.success("Checked in!"))
+                                    .catch((err) => toast.error(err.message));
+                                }
+                              }}
+                              variant={isCheckedIn ? "outline" : "default"}
+                              className="w-full mt-3"
+                              disabled={isCheckingIn}
+                            >
+                              {isCheckedIn ? (
+                                <>
+                                  <CheckCircleIcon className="mr-2" style={{ fontSize: 18 }} />
+                                  Checked In - Check Out
+                                </>
+                              ) : (
+                                <>
+                                  <LocationOnIcon className="mr-2" style={{ fontSize: 18 }} />
+                                  Check In Here
+                                </>
+                              )}
+                            </Button>
+                          )}
+                        </div>
+                      )}
+
+                      {eventCheckIns.length > 0 && (
+                        <div className="bg-muted rounded-xl p-4 space-y-3">
+                          <p className="text-sm font-semibold">People checked in at event location:</p>
                           <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                            {checkIns.map((checkIn) => (
+                            {eventCheckIns.map((checkIn: any) => (
                               <div
                                 key={checkIn.userId}
                                 className="flex items-center gap-3 p-2 bg-background rounded-lg"
@@ -454,188 +513,133 @@ export const EventDetailModal = ({ event, onClose, onJoin, onEdit, onDelete }: E
                             ))}
                           </div>
                         </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">No one checked in yet</p>
                       )}
 
-                      {user && (
-                        <Button
-                          onClick={isCheckedIn ? checkOut : () => {
-                            if (venue) {
-                              checkIn(venue.id, { id: venue.id, name: venue.name }, event.type)
-                                .then(() => toast.success("Checked in!"))
-                                .catch((err) => toast.error(err.message));
-                            }
-                          }}
-                          variant={isCheckedIn ? "outline" : "default"}
-                          className="w-full mt-3"
-                          disabled={isCheckingIn}
-                        >
-                          {isCheckedIn ? (
-                            <>
-                              <CheckCircleIcon className="mr-2" style={{ fontSize: 18 }} />
-                              Checked In - Check Out
-                            </>
-                          ) : (
-                            <>
+                      {!venue && eventCheckIns.length === 0 && (
+                        <div className="bg-muted rounded-xl p-4 text-center">
+                          <p className="text-sm text-muted-foreground">
+                            No check-ins yet. Be the first to check in!
+                          </p>
+                          {user && (
+                            <Button
+                              onClick={handleEventCheckIn}
+                              variant="outline"
+                              className="w-full mt-3"
+                              disabled={isCheckingIn}
+                            >
                               <LocationOnIcon className="mr-2" style={{ fontSize: 18 }} />
-                              Check In Here
-                            </>
+                              {isCheckingIn ? "Checking in..." : "Check In Here"}
+                            </Button>
                           )}
-                        </Button>
+                        </div>
                       )}
                     </div>
-                  )}
 
-                  {eventCheckIns.length > 0 && (
-                    <div className="bg-muted rounded-xl p-4 space-y-3">
-                      <p className="text-sm font-semibold">People checked in at event location:</p>
-                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                        {eventCheckIns.map((checkIn: any) => (
-                          <div
-                            key={checkIn.userId}
-                            className="flex items-center gap-3 p-2 bg-background rounded-lg"
-                          >
-                            <Avatar
-                              src={checkIn.userAvatar}
-                              alt={checkIn.userName}
-                              sx={{ width: 32, height: 32 }}
-                            />
-                            <div className="flex-1">
-                              <p className="text-sm font-semibold">{checkIn.userName}</p>
-                              <p className="text-xs text-muted-foreground capitalize">
-                                {checkIn.activity}
-                              </p>
+                    {/* Host/Sponsor */}
+                    {event.category === "user" && event.hostName ? (
+                      <div className="space-y-3">
+                        <h3 className="text-lg font-bold">Hosted By</h3>
+                        <div className="flex items-center gap-3 bg-muted rounded-xl p-4">
+                          <Avatar src={event.hostAvatar} alt={event.hostName} sx={{ width: 48, height: 48 }} />
+                          <div className="flex-1">
+                            <p className="font-semibold">{event.hostName}</p>
+                            <p className="text-sm text-muted-foreground">Event Organizer</p>
+                          </div>
+                          <Button variant="outline" size="sm">
+                            View Profile
+                          </Button>
+                        </div>
+                      </div>
+                    ) : event.sponsorLogo ? (
+                      <div className="space-y-3">
+                        <h3 className="text-lg font-bold">Official Sponsor</h3>
+                        <div className="flex items-center gap-3 bg-muted rounded-xl p-4">
+                          <img src={event.sponsorLogo} alt="Sponsor" className="w-12 h-12 rounded" />
+                          <div className="flex-1">
+                            <p className="font-semibold">Sponsored Event</p>
+                            <p className="text-sm text-muted-foreground">Official Brand Partnership</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                  </TabsContent>
+
+                  {/* Participants Tab */}
+                  <TabsContent value="participants" className="p-6">
+                    <div className="space-y-3">
+                      {participants.map((participant, index) => (
+                        <motion.div
+                          key={participant.id}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="flex items-center justify-between p-3 bg-muted rounded-xl hover:bg-accent transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <Avatar src={participant.avatar} alt={participant.name} sx={{ width: 40, height: 40 }} />
+                            <div>
+                              <p className="font-semibold">{participant.name}</p>
+                              <p className="text-xs text-muted-foreground">Joined {participant.joinedAt}</p>
                             </div>
                           </div>
-                        ))}
-                      </div>
+                          <Button variant="outline" size="sm">
+                            View
+                          </Button>
+                        </motion.div>
+                      ))}
                     </div>
-                  )}
+                  </TabsContent>
 
-                  {!venue && eventCheckIns.length === 0 && (
-                    <div className="bg-muted rounded-xl p-4 text-center">
-                      <p className="text-sm text-muted-foreground">
-                        No check-ins yet. Be the first to check in!
-                      </p>
-                      {user && (
-                        <Button
-                          onClick={handleEventCheckIn}
-                          variant="outline"
-                          className="w-full mt-3"
-                          disabled={isCheckingIn}
+                  {/* Comments Tab */}
+                  <TabsContent value="comments" className="p-6 space-y-4">
+                    {/* Comments List */}
+                    <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                      {comments.map((comment, index) => (
+                        <motion.div
+                          key={comment.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="flex gap-3"
                         >
-                          <LocationOnIcon className="mr-2" style={{ fontSize: 18 }} />
-                          {isCheckingIn ? "Checking in..." : "Check In Here"}
+                          <Avatar src={comment.userAvatar} alt={comment.userName} sx={{ width: 40, height: 40 }} />
+                          <div className="flex-1 bg-muted rounded-xl p-3">
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="font-semibold text-sm">{comment.userName}</p>
+                              <p className="text-xs text-muted-foreground">{comment.timestamp}</p>
+                            </div>
+                            <p className="text-sm">{comment.text}</p>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    {/* Add Comment */}
+                    <div className="flex gap-2 pt-4 border-t border-border">
+                      <Avatar src="https://i.pravatar.cc/150?img=10" alt="You" sx={{ width: 40, height: 40 }} />
+                      <div className="flex-1 flex gap-2">
+                        <Input
+                          value={commentText}
+                          onChange={(e) => setCommentText(e.target.value)}
+                          placeholder="Add a comment..."
+                          className="flex-1"
+                          onKeyPress={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              handleAddComment();
+                            }
+                          }}
+                        />
+                        <Button onClick={handleAddComment} disabled={!commentText.trim()}>
+                          <SendIcon style={{ fontSize: 20 }} />
                         </Button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Host/Sponsor */}
-                {event.category === "user" && event.hostName ? (
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">Hosted By</h3>
-                    <div className="flex items-center gap-3 bg-muted rounded-xl p-4">
-                      <Avatar src={event.hostAvatar} alt={event.hostName} sx={{ width: 48, height: 48 }} />
-                      <div className="flex-1">
-                        <p className="font-semibold">{event.hostName}</p>
-                        <p className="text-sm text-muted-foreground">Event Organizer</p>
-                      </div>
-                      <Button variant="outline" size="sm">
-                        View Profile
-                      </Button>
-                    </div>
-                  </div>
-                ) : event.sponsorLogo ? (
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">Official Sponsor</h3>
-                    <div className="flex items-center gap-3 bg-muted rounded-xl p-4">
-                      <img src={event.sponsorLogo} alt="Sponsor" className="w-12 h-12 rounded" />
-                      <div className="flex-1">
-                        <p className="font-semibold">Sponsored Event</p>
-                        <p className="text-sm text-muted-foreground">Official Brand Partnership</p>
                       </div>
                     </div>
-                  </div>
-                ) : null}
-
-              </TabsContent>
-
-              {/* Participants Tab */}
-              <TabsContent value="participants" className="p-6">
-                <div className="space-y-3">
-                  {participants.map((participant, index) => (
-                    <motion.div
-                      key={participant.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex items-center justify-between p-3 bg-muted rounded-xl hover:bg-accent transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Avatar src={participant.avatar} alt={participant.name} sx={{ width: 40, height: 40 }} />
-                        <div>
-                          <p className="font-semibold">{participant.name}</p>
-                          <p className="text-xs text-muted-foreground">Joined {participant.joinedAt}</p>
-                        </div>
-                      </div>
-                      <Button variant="outline" size="sm">
-                        View
-                      </Button>
-                    </motion.div>
-                  ))}
+                  </TabsContent>
                 </div>
-              </TabsContent>
-
-              {/* Comments Tab */}
-              <TabsContent value="comments" className="p-6 space-y-4">
-                {/* Comments List */}
-                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
-                  {comments.map((comment, index) => (
-                    <motion.div
-                      key={comment.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex gap-3"
-                    >
-                      <Avatar src={comment.userAvatar} alt={comment.userName} sx={{ width: 40, height: 40 }} />
-                      <div className="flex-1 bg-muted rounded-xl p-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="font-semibold text-sm">{comment.userName}</p>
-                          <p className="text-xs text-muted-foreground">{comment.timestamp}</p>
-                        </div>
-                        <p className="text-sm">{comment.text}</p>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-
-                {/* Add Comment */}
-                <div className="flex gap-2 pt-4 border-t border-border">
-                  <Avatar src="https://i.pravatar.cc/150?img=10" alt="You" sx={{ width: 40, height: 40 }} />
-                  <div className="flex-1 flex gap-2">
-                    <Input
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      placeholder="Add a comment..."
-                      className="flex-1"
-                      onKeyPress={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          handleAddComment();
-                        }
-                      }}
-                    />
-                    <Button onClick={handleAddComment} disabled={!commentText.trim()}>
-                      <SendIcon style={{ fontSize: 20 }} />
-                    </Button>
-                  </div>
-                </div>
-              </TabsContent>
-            </Tabs>
+              </Tabs>
+            </div>
           </Card>
         </motion.div>
       </motion.div>

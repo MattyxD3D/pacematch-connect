@@ -26,8 +26,10 @@ import MapIcon from "@mui/icons-material/Map";
 import SearchIcon from "@mui/icons-material/Search";
 import { toast } from "sonner";
 import { z } from "zod";
+import type { Event as FirebaseEvent } from "@/services/eventService";
 
 const libraries: ("places")[] = ["places"];
+const defaultMapCenter = { lat: 14.5995, lng: 120.9842 };
 
 // Validation schema
 const createEventSchema = z.object({
@@ -66,20 +68,51 @@ const createEventSchema = z.object({
     .optional(),
 });
 
-type CreateEventFormData = z.infer<typeof createEventSchema>;
+export type CreateEventFormData = z.infer<typeof createEventSchema>;
 
 interface CreateEventModalProps {
+  mode?: "create" | "edit";
+  eventToEdit?: FirebaseEvent | null;
   onClose: () => void;
-  onCreateEvent: (eventData: CreateEventFormData) => void;
+  onCreateEvent?: (eventData: CreateEventFormData) => Promise<void> | void;
+  onUpdateEvent?: (eventId: string, eventData: CreateEventFormData) => Promise<void> | void;
   initialLocation?: { lat: number; lng: number } | null;
 }
 
-export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: CreateEventModalProps) => {
-  const [formData, setFormData] = useState<Partial<CreateEventFormData>>({
-    activityType: "running",
-    maxParticipants: undefined,
-    lat: initialLocation?.lat,
-    lng: initialLocation?.lng,
+export const CreateEventModal = ({
+  mode = "create",
+  eventToEdit,
+  onClose,
+  onCreateEvent,
+  onUpdateEvent,
+  initialLocation,
+}: CreateEventModalProps) => {
+  const isEditMode = mode === "edit" && !!eventToEdit;
+  const determineInitialMapCenter = () => ({
+    lat: eventToEdit?.lat || initialLocation?.lat || defaultMapCenter.lat,
+    lng: eventToEdit?.lng || initialLocation?.lng || defaultMapCenter.lng,
+  });
+  const [formData, setFormData] = useState<Partial<CreateEventFormData>>(() => {
+    if (isEditMode && eventToEdit) {
+      return {
+        title: eventToEdit.title,
+        description: eventToEdit.description,
+        activityType: (eventToEdit.type as CreateEventFormData["activityType"]) || "running",
+        date: eventToEdit.date,
+        time: eventToEdit.time,
+        location: eventToEdit.location,
+        maxParticipants: eventToEdit.maxParticipants,
+        lat: eventToEdit.lat,
+        lng: eventToEdit.lng,
+      };
+    }
+
+    return {
+      activityType: "running",
+      maxParticipants: undefined,
+      lat: initialLocation?.lat,
+      lng: initialLocation?.lng,
+    };
   });
   const [errors, setErrors] = useState<Partial<Record<keyof CreateEventFormData, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -87,11 +120,36 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
   // Map picker state
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number; address?: string } | null>(null);
-  const [mapPickerCenter, setMapPickerCenter] = useState<{ lat: number; lng: number }>({ lat: 14.5995, lng: 120.9842 });
+  const [mapPickerCenter, setMapPickerCenter] = useState<{ lat: number; lng: number }>(determineInitialMapCenter);
+  const [liveMapCenter, setLiveMapCenter] = useState<{ lat: number; lng: number } | null>(determineInitialMapCenter);
   const [mapPickerZoom, setMapPickerZoom] = useState(13);
-  const [mapPickerRef, setMapPickerRef] = useState<any>(null);
+  const [mapPickerRef, setMapPickerRef] = useState<google.maps.Map | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
+  
+  useEffect(() => {
+    if (isEditMode && eventToEdit) {
+      setFormData({
+        title: eventToEdit.title,
+        description: eventToEdit.description,
+        activityType: (eventToEdit.type as CreateEventFormData["activityType"]) || "running",
+        date: eventToEdit.date,
+        time: eventToEdit.time,
+        location: eventToEdit.location,
+        maxParticipants: eventToEdit.maxParticipants,
+        lat: eventToEdit.lat,
+        lng: eventToEdit.lng,
+      });
+      setSelectedLocation(null);
+      const updatedCenter = {
+        lat: eventToEdit.lat || initialLocation?.lat || defaultMapCenter.lat,
+        lng: eventToEdit.lng || initialLocation?.lng || defaultMapCenter.lng,
+      };
+      setMapPickerCenter(updatedCenter);
+      setLiveMapCenter(updatedCenter);
+    }
+  }, [isEditMode, eventToEdit, initialLocation]);
   
   // Google Maps API loader - Use same ID as Events page to avoid loader conflict
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -113,6 +171,7 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
           setUserLocation(loc);
           if (showMapPicker) {
             setMapPickerCenter(loc);
+            setLiveMapCenter(loc);
           }
         },
         (error) => {
@@ -121,6 +180,21 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
       );
     }
   }, [showMapPicker]);
+
+  useEffect(() => {
+    if (
+      isMapLoaded &&
+      !geocoderRef.current &&
+      typeof window !== "undefined" &&
+      window.google?.maps?.Geocoder
+    ) {
+      geocoderRef.current = new window.google.maps.Geocoder();
+    }
+  }, [isMapLoaded]);
+
+  useEffect(() => {
+    setLiveMapCenter(mapPickerCenter);
+  }, [mapPickerCenter]);
   
   // Detect mobile viewport - use initial check only, avoid re-renders during typing
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
@@ -148,16 +222,33 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
   // Handle opening map picker
   const handleOpenMapPicker = useCallback(() => {
     setShowMapPicker(true);
+
+    if (formData.lat && formData.lng) {
+      const existingSelection = {
+        lat: formData.lat,
+        lng: formData.lng,
+        address: formData.location,
+      };
+      setSelectedLocation(existingSelection);
+      const coords = { lat: formData.lat, lng: formData.lng };
+      setMapPickerCenter(coords);
+      setLiveMapCenter(coords);
+      setMapPickerZoom(15);
+      return;
+    }
+
     setSelectedLocation(null);
     // Center map on user location if available, otherwise use initialLocation or default
     if (userLocation) {
       setMapPickerCenter(userLocation);
+      setLiveMapCenter(userLocation);
+      setMapPickerZoom(14);
     } else if (initialLocation) {
       setMapPickerCenter(initialLocation);
-    } else if (formData.lat && formData.lng) {
-      setMapPickerCenter({ lat: formData.lat, lng: formData.lng });
+      setLiveMapCenter(initialLocation);
+      setMapPickerZoom(14);
     }
-  }, [userLocation, initialLocation, formData.lat, formData.lng]);
+  }, [userLocation, initialLocation, formData.lat, formData.lng, formData.location]);
 
   // Handle closing map picker
   const handleCloseMapPicker = useCallback(() => {
@@ -165,37 +256,105 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
     setSelectedLocation(null);
   }, []);
 
+  /**
+   * Reverse geocodes coordinates to provide a friendlier address label.
+   */
+  const resolveAddressFromCoords = useCallback(
+    ({ lat, lng }: { lat: number; lng: number }) =>
+      new Promise<string | undefined>((resolve) => {
+        if (!geocoderRef.current) {
+          resolve(undefined);
+          return;
+        }
+
+        geocoderRef.current.geocode(
+          { location: { lat, lng } },
+          (results, status) => {
+            if (status === "OK" && results && results.length > 0) {
+              resolve(results[0].formatted_address);
+            } else {
+              console.warn("Reverse geocoding failed:", status);
+              resolve(undefined);
+            }
+          }
+        );
+      }),
+    []
+  );
+
+  /**
+   * Updates local state with the provided coordinates and enriches them
+   * with a resolved address when the Maps API returns one.
+   */
+  const updateLocationFromCoordinates = useCallback(
+    ({ lat, lng, address }: { lat: number; lng: number; address?: string }) => {
+      setSelectedLocation(address ? { lat, lng, address } : { lat, lng });
+
+      if (!address) {
+        resolveAddressFromCoords({ lat, lng }).then((resolvedAddress) => {
+          if (!resolvedAddress) return;
+          setSelectedLocation((prev) => {
+            if (!prev || prev.lat !== lat || prev.lng !== lng) {
+              return prev;
+            }
+            return { lat, lng, address: resolvedAddress };
+          });
+        });
+      }
+
+      if (mapPickerRef) {
+        mapPickerRef.panTo({ lat, lng });
+        mapPickerRef.setZoom(15);
+      } else {
+        setMapPickerCenter({ lat, lng });
+        setMapPickerZoom(15);
+        setLiveMapCenter({ lat, lng });
+      }
+    },
+    [resolveAddressFromCoords, mapPickerRef]
+  );
+
   // Handle map click to select location
-  const handleMapClick = useCallback((e: google.maps.MapMouseEvent) => {
-    if (e.latLng) {
+  const handleMapClick = useCallback(
+    (e: google.maps.MapMouseEvent) => {
+      if (!e.latLng) return;
       const lat = e.latLng.lat();
       const lng = e.latLng.lng();
-      setSelectedLocation({ lat, lng });
-    }
-  }, []);
+      updateLocationFromCoordinates({ lat, lng });
+    },
+    [updateLocationFromCoordinates]
+  );
+
+  /**
+   * Snapshot the current visible center so the user can drop a pin there.
+   */
+  const handleMapIdle = useCallback(() => {
+    if (!mapPickerRef) return;
+    const center = mapPickerRef.getCenter();
+    if (!center) return;
+    setLiveMapCenter({
+      lat: center.lat(),
+      lng: center.lng(),
+    });
+  }, [mapPickerRef]);
+
+  const handleCenterPinDrop = useCallback(() => {
+    if (!liveMapCenter) return;
+    updateLocationFromCoordinates(liveMapCenter);
+  }, [liveMapCenter, updateLocationFromCoordinates]);
 
   // Handle place selection from Autocomplete
   const handlePlaceSelect = useCallback(() => {
-    if (autocompleteRef.current) {
-      const place = autocompleteRef.current.getPlace();
-      if (place.geometry?.location) {
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        const address = place.formatted_address || place.name || '';
-        
-        setSelectedLocation({ lat, lng, address });
-        
-        // Center map on selected place
-        if (mapPickerRef) {
-          mapPickerRef.panTo({ lat, lng });
-          mapPickerRef.setZoom(15);
-        } else {
-          setMapPickerCenter({ lat, lng });
-          setMapPickerZoom(15);
-        }
-      }
-    }
-  }, [mapPickerRef]);
+    if (!autocompleteRef.current) return;
+    const place = autocompleteRef.current.getPlace();
+    if (!place.geometry?.location) return;
+
+    updateLocationFromCoordinates({
+      lat: place.geometry.location.lat(),
+      lng: place.geometry.location.lng(),
+      address: place.formatted_address || place.name || "",
+    });
+  }, [updateLocationFromCoordinates]);
 
   // Handle confirming selected location
   const handleConfirmLocation = useCallback(() => {
@@ -219,11 +378,10 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
     setErrors({});
 
     try {
-      // If initialLocation is provided, use coordinates as location string
-      // Otherwise, use formData.location (which may be from map picker or manual entry)
-      const locationValue = initialLocation 
+      // Decide which location string to validate with
+      const locationValue = !isEditMode && initialLocation
         ? `${initialLocation.lat.toFixed(6)}, ${initialLocation.lng.toFixed(6)}`
-        : formData.location || "";
+        : formData.location || eventToEdit?.location || "";
       
       // Validate form data
       const validatedData = createEventSchema.parse({
@@ -234,17 +392,39 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
           : undefined,
       });
 
-      // Include selected location coordinates (prioritize initialLocation, then formData lat/lng)
+      const resolvedLat = isEditMode
+        ? formData.lat ?? eventToEdit?.lat
+        : initialLocation?.lat ?? formData.lat;
+      const resolvedLng = isEditMode
+        ? formData.lng ?? eventToEdit?.lng
+        : initialLocation?.lng ?? formData.lng;
+
+      // Include selected location coordinates (prioritize context-specific fallbacks)
       const eventDataWithLocation = {
         ...validatedData,
-        lat: initialLocation?.lat || formData.lat,
-        lng: initialLocation?.lng || formData.lng,
+        lat: resolvedLat,
+        lng: resolvedLng,
       };
       
-      // Call the create event handler
-      onCreateEvent(eventDataWithLocation);
-      
-      toast.success("Event created successfully!");
+      if (isEditMode) {
+        if (!eventToEdit?.id) {
+          throw new Error("Missing event identifier");
+        }
+        if (!onUpdateEvent) {
+          toast.error("Update handler not available");
+          return;
+        }
+        await Promise.resolve(onUpdateEvent(eventToEdit.id, eventDataWithLocation));
+        toast.success("Event updated successfully!");
+      } else {
+        if (!onCreateEvent) {
+          toast.error("Create handler not available");
+          return;
+        }
+        await Promise.resolve(onCreateEvent(eventDataWithLocation));
+        toast.success("Event created successfully!");
+      }
+
       onClose();
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -257,7 +437,7 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
         setErrors(fieldErrors);
         toast.error("Please fix the form errors");
       } else {
-        toast.error("Failed to create event");
+        toast.error(isEditMode ? "Failed to update event" : "Failed to create event");
       }
     } finally {
       setIsSubmitting(false);
@@ -284,7 +464,7 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                   <div>
                     <DrawerTitle className="text-lg">Select Location</DrawerTitle>
                     <DrawerDescription className="text-xs">
-                      Search or tap on the map to select a location
+                      Search, click, or use the center crosshair to drop a pin
                     </DrawerDescription>
                   </div>
                   <Button
@@ -343,17 +523,35 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                     zoom={mapPickerZoom}
                     onLoad={(map) => {
                       setMapPickerRef(map);
+                      if (
+                        typeof window !== "undefined" &&
+                        window.google?.maps?.Geocoder &&
+                        !geocoderRef.current
+                      ) {
+                        geocoderRef.current = new window.google.maps.Geocoder();
+                      }
+                      const currentCenter = map.getCenter();
+                      if (currentCenter) {
+                        setLiveMapCenter({
+                          lat: currentCenter.lat(),
+                          lng: currentCenter.lng(),
+                        });
+                      }
                       if (userLocation) {
                         map.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+                        map.setZoom(15);
                       }
                     }}
                     onClick={handleMapClick}
+                    onIdle={handleMapIdle}
                     options={{
                       disableDefaultUI: true,
                       zoomControl: true,
                       streetViewControl: false,
                       mapTypeControl: false,
                       fullscreenControl: false,
+                      gestureHandling: "greedy",
+                      draggableCursor: "crosshair",
                     }}
                   >
                     {/* User Location Marker */}
@@ -382,8 +580,18 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                   </GoogleMap>
                 )}
 
+                {isMapLoaded && !mapLoadError && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
+                    <div className="relative h-14 w-14 flex items-center justify-center">
+                      <span className="absolute left-1/2 top-0 h-14 w-[2px] -translate-x-1/2 bg-primary/70"></span>
+                      <span className="absolute top-1/2 left-0 w-14 h-[2px] -translate-y-1/2 bg-primary/70"></span>
+                      <div className="w-6 h-6 rounded-full border-2 border-primary/80 bg-background/60 backdrop-blur-sm shadow-md"></div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Selected Location Info and Actions */}
-                <div className="absolute bottom-0 left-0 right-0 bg-card/95 backdrop-blur-sm border-t border-border p-4">
+                <div className="absolute bottom-0 left-0 right-0 bg-card/95 backdrop-blur-sm border-t border-border p-4 z-20">
                   {selectedLocation ? (
                     <div className="space-y-3">
                       <div>
@@ -409,10 +617,23 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                       </div>
                     </div>
                   ) : (
-                    <div className="text-center">
+                    <div className="space-y-3 text-center">
                       <p className="text-sm text-muted-foreground">
-                        Tap on the map or search to select a location
+                        Click anywhere on the map or align the crosshair, then drop the pin.
                       </p>
+                      <Button
+                        variant="secondary"
+                        onClick={handleCenterPinDrop}
+                        className="w-full h-10"
+                        disabled={!isMapLoaded}
+                      >
+                        Drop Pin Here
+                      </Button>
+                      {liveMapCenter && (
+                        <p className="text-xs text-muted-foreground">
+                          Map center: {liveMapCenter.lat.toFixed(5)}, {liveMapCenter.lng.toFixed(5)}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -443,7 +664,7 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                   <div>
                     <h3 className="text-xl font-bold">Select Location</h3>
                     <p className="text-sm text-muted-foreground">
-                      Search or click on the map to select a location
+                      Search, click, or use the center crosshair to drop a pin
                     </p>
                   </div>
                   <Button
@@ -501,17 +722,35 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                     zoom={mapPickerZoom}
                     onLoad={(map) => {
                       setMapPickerRef(map);
+                      if (
+                        typeof window !== "undefined" &&
+                        window.google?.maps?.Geocoder &&
+                        !geocoderRef.current
+                      ) {
+                        geocoderRef.current = new window.google.maps.Geocoder();
+                      }
+                      const currentCenter = map.getCenter();
+                      if (currentCenter) {
+                        setLiveMapCenter({
+                          lat: currentCenter.lat(),
+                          lng: currentCenter.lng(),
+                        });
+                      }
                       if (userLocation) {
                         map.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+                        map.setZoom(15);
                       }
                     }}
                     onClick={handleMapClick}
+                    onIdle={handleMapIdle}
                     options={{
                       disableDefaultUI: true,
                       zoomControl: true,
                       streetViewControl: false,
                       mapTypeControl: false,
                       fullscreenControl: false,
+                      gestureHandling: "greedy",
+                      draggableCursor: "crosshair",
                     }}
                   >
                     {/* User Location Marker */}
@@ -538,6 +777,15 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                       />
                     )}
                   </GoogleMap>
+                )}
+                {isMapLoaded && !mapLoadError && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
+                    <div className="relative h-14 w-14 flex items-center justify-center">
+                      <span className="absolute left-1/2 top-0 h-14 w-[2px] -translate-x-1/2 bg-primary/70"></span>
+                      <span className="absolute top-1/2 left-0 w-14 h-[2px] -translate-y-1/2 bg-primary/70"></span>
+                      <div className="w-6 h-6 rounded-full border-2 border-primary/80 bg-background/60 backdrop-blur-sm shadow-md"></div>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -568,10 +816,23 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center">
+                  <div className="space-y-3 text-center">
                     <p className="text-sm text-muted-foreground">
-                      Click on the map or search to select a location
+                      Click anywhere on the map or align the crosshair, then drop the pin.
                     </p>
+                    <Button
+                      variant="secondary"
+                      onClick={handleCenterPinDrop}
+                      className="w-full sm:w-auto h-10"
+                      disabled={!isMapLoaded}
+                    >
+                      Drop Pin Here
+                    </Button>
+                    {liveMapCenter && (
+                      <p className="text-xs text-muted-foreground">
+                        Map center: {liveMapCenter.lat.toFixed(5)}, {liveMapCenter.lng.toFixed(5)}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -581,6 +842,19 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
       </AnimatePresence>
     );
   };
+
+  const submitButtonLabel = isEditMode
+    ? isSubmitting
+      ? "Saving..."
+      : "Save Changes"
+    : isSubmitting
+    ? "Creating..."
+    : "Create Event";
+
+  const modalTitle = isEditMode ? "Edit Event" : "Create New Event";
+  const modalDescription = isEditMode
+    ? "Adjust the details for your existing event"
+    : "Share your activity with the community";
 
   // Shared form content - extracted to reduce re-renders
   const renderFormContent = () => (
@@ -735,15 +1009,18 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
           <Input
             id="location"
             placeholder={initialLocation ? `Location: ${initialLocation.lat.toFixed(6)}, ${initialLocation.lng.toFixed(6)}` : "e.g., Central Park, New York"}
-            value={formData.location || (initialLocation ? `Lat: ${initialLocation.lat.toFixed(6)}, Lng: ${initialLocation.lng.toFixed(6)}` : "")}
-            onChange={(e) => {
-              if (!initialLocation) {
-                handleInputChange("location", e.target.value);
-              }
-            }}
-            readOnly={!!initialLocation}
-            disabled={!!initialLocation}
-            className={`flex-1 h-11 sm:h-12 ${errors.location ? "border-destructive" : ""} ${initialLocation ? "bg-muted cursor-not-allowed" : ""}`}
+            value={
+              formData.location ||
+              (initialLocation
+                ? `Lat: ${initialLocation.lat.toFixed(6)}, Lng: ${initialLocation.lng.toFixed(6)}`
+                : formData.lat && formData.lng
+                ? `Lat: ${formData.lat.toFixed(6)}, Lng: ${formData.lng.toFixed(6)}`
+                : "")
+            }
+            readOnly
+            disabled
+            className={`flex-1 h-11 sm:h-12 bg-muted cursor-not-allowed ${errors.location ? "border-destructive" : ""}`}
+            title="Use the pin button to pick a location"
             maxLength={200}
           />
           {!initialLocation && (
@@ -751,7 +1028,7 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
               type="button"
               variant="outline"
               onClick={handleOpenMapPicker}
-              className="h-11 sm:h-12 px-3 sm:px-4"
+              className="h-11 sm:h-12 px-3 sm:px-4 border-primary text-primary bg-primary/10 hover:bg-primary/20 shadow-elevation-2"
               title="Pin location on map"
             >
               <MapIcon style={{ fontSize: 20 }} />
@@ -824,7 +1101,7 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
           className="w-full sm:flex-1 h-11 sm:h-12 font-semibold"
           disabled={isSubmitting}
         >
-          {isSubmitting ? "Creating..." : "Create Event"}
+          {submitButtonLabel}
         </Button>
       </div>
     </>
@@ -845,9 +1122,9 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                       <EventIcon className="text-primary" style={{ fontSize: 24 }} />
                     </div>
                     <div>
-                      <DrawerTitle className="text-xl">Create New Event</DrawerTitle>
+                      <DrawerTitle className="text-xl">{modalTitle}</DrawerTitle>
                       <DrawerDescription className="text-xs">
-                        Share your activity with the community
+                        {modalDescription}
                       </DrawerDescription>
                     </div>
                   </div>
@@ -907,9 +1184,9 @@ export const CreateEventModal = ({ onClose, onCreateEvent, initialLocation }: Cr
                       <EventIcon className="text-primary" style={{ fontSize: 28 }} />
                     </div>
                     <div>
-                      <h2 className="text-2xl font-bold">Create New Event</h2>
+                      <h2 className="text-2xl font-bold">{modalTitle}</h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Share your activity with the community
+                        {modalDescription}
                       </p>
                     </div>
                   </div>

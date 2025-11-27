@@ -45,7 +45,7 @@ import { Avatar } from "@mui/material";
 import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 import { QuickCheckInModal } from "@/components/QuickCheckInModal";
-import { getUserVenuePreferences, listenToUsersByVenues, VenueUser } from "@/services/venuePreferenceService";
+import { listenToUserVenuePreferences, listenToUsersByVenues, VenueUser } from "@/services/venuePreferenceService";
 import { getAllVenues, getVenueById } from "@/services/venueService";
 
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
@@ -71,7 +71,7 @@ const Index = () => {
   // TODO: Set to false in production - this is for preview/demo purposes
   const [showDummyData, setShowDummyData] = useState(true);
   const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
-  const [profileVisible, setProfileVisible] = useState(true);
+  const [profileVisible, setProfileVisible] = useState(false);
   const [generalLocation, setGeneralLocation] = useState<string>("");
   const [isEditingLocation, setIsEditingLocation] = useState(false);
   const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
@@ -252,7 +252,7 @@ const Index = () => {
     }
   }, [showNotificationDrawer, unreadCount, markAllAsRead]);
 
-  // Load user venue preferences and listen to users by venues
+  // Load user venue preferences in real-time so Meet New People updates without refresh
   useEffect(() => {
     if (!currentUser?.uid) {
       setUsersByVenue({});
@@ -260,25 +260,23 @@ const Index = () => {
       return;
     }
 
-    const loadPreferences = async () => {
-      try {
-        const preferences = await getUserVenuePreferences(currentUser.uid);
-        if (preferences && preferences.venues && preferences.venues.length > 0) {
-          setUserVenuePreferences({
-            venues: preferences.venues,
-            activities: preferences.activities
-          });
-        } else {
-          setUserVenuePreferences(null);
-          setUsersByVenue({});
-        }
-      } catch (error) {
-        console.error("Error loading venue preferences:", error);
+    const unsubscribe = listenToUserVenuePreferences(currentUser.uid, (preferences) => {
+      if (preferences && preferences.venues && preferences.venues.length > 0) {
+        setUserVenuePreferences({
+          venues: preferences.venues,
+          activities: preferences.activities
+        });
+      } else {
         setUserVenuePreferences(null);
+        setUsersByVenue({});
+      }
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
       }
     };
-
-    loadPreferences();
   }, [currentUser?.uid]);
 
   // Listen to users by venues when preferences are set

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { getUserEvents, Event as FirebaseEvent, leaveEvent } from "@/services/eventService";
+import { getUserEvents, Event as FirebaseEvent, leaveEvent, updateEvent } from "@/services/eventService";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,11 +22,12 @@ import HistoryIcon from "@mui/icons-material/History";
 import ExploreIcon from "@mui/icons-material/Explore";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import { EventDetailModal } from "@/components/EventDetailModal";
+import { CreateEventModal, type CreateEventFormData } from "@/components/CreateEventModal";
 import { toast } from "sonner";
 import { format, isSameDay, parseISO } from "date-fns";
 import { generateDummyEvents, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 
-type EventType = "running" | "cycling" | "walking";
+type EventType = "running" | "cycling" | "walking" | "others";
 
 interface Event {
   id: string;
@@ -58,6 +59,8 @@ const MyEvents = () => {
   const [activeTab, setActiveTab] = useState("upcoming");
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
+  const [showEditEvent, setShowEditEvent] = useState(false);
+  const [eventBeingEdited, setEventBeingEdited] = useState<Event | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [joinedEvents, setJoinedEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -209,6 +212,98 @@ const MyEvents = () => {
     } catch (error: any) {
       console.error("Error leaving event:", error);
       toast.error(error.message || "Failed to leave event");
+    }
+  };
+
+  const handleEditEvent = (eventId: string) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to edit events");
+      return;
+    }
+
+    const targetEvent = joinedEvents.find((event) => event.id === eventId);
+    if (!targetEvent) {
+      toast.error("Event not found");
+      return;
+    }
+
+    if (targetEvent.hostId !== currentUser.uid) {
+      toast.error("Only the event creator can edit this event");
+      return;
+    }
+
+    setEventBeingEdited(targetEvent);
+    setShowEditEvent(true);
+  };
+
+  const handleCloseEditModal = () => {
+    setShowEditEvent(false);
+    setEventBeingEdited(null);
+  };
+
+  const handleUpdateEvent = async (eventId: string, updatedData: CreateEventFormData) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to edit events");
+      return;
+    }
+
+    const existingEvent = joinedEvents.find((event) => event.id === eventId);
+
+    try {
+      await updateEvent(eventId, currentUser.uid, {
+        title: updatedData.title,
+        description: updatedData.description,
+        type: updatedData.activityType,
+        date: updatedData.date,
+        time: updatedData.time,
+        location: updatedData.location,
+        lat: updatedData.lat ?? existingEvent?.lat,
+        lng: updatedData.lng ?? existingEvent?.lng,
+        maxParticipants: updatedData.maxParticipants,
+      });
+
+      toast.success("Event updated successfully");
+
+      setJoinedEvents((prev) =>
+        prev.map((event) =>
+          event.id === eventId
+            ? {
+                ...event,
+                title: updatedData.title,
+                description: updatedData.description,
+                type: updatedData.activityType as EventType,
+                date: updatedData.date,
+                time: updatedData.time,
+                location: updatedData.location,
+                lat: updatedData.lat ?? event.lat,
+                lng: updatedData.lng ?? event.lng,
+                maxParticipants: updatedData.maxParticipants,
+              }
+            : event
+        )
+      );
+
+      setSelectedEvent((prev) =>
+        prev && prev.id === eventId
+          ? {
+              ...prev,
+              title: updatedData.title,
+              description: updatedData.description,
+              type: updatedData.activityType as EventType,
+              date: updatedData.date,
+              time: updatedData.time,
+              location: updatedData.location,
+              lat: updatedData.lat ?? prev.lat,
+              lng: updatedData.lng ?? prev.lng,
+              maxParticipants: updatedData.maxParticipants,
+            }
+          : prev
+      );
+
+      handleCloseEditModal();
+    } catch (error: any) {
+      console.error("Error updating event:", error);
+      toast.error(error.message || "Failed to update event");
     }
   };
 
@@ -611,6 +706,16 @@ const MyEvents = () => {
             setSelectedEvent(null);
           }}
           onJoin={handleLeaveEvent}
+          onEdit={handleEditEvent}
+        />
+      )}
+
+      {showEditEvent && eventBeingEdited && (
+        <CreateEventModal
+          mode="edit"
+          eventToEdit={eventBeingEdited}
+          onClose={handleCloseEditModal}
+          onUpdateEvent={handleUpdateEvent}
         />
       )}
     </div>

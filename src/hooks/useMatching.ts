@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { listenToAllUsers } from "@/services/locationService";
 import { matchUsers, MatchingUser, MatchResult, Activity, FitnessLevel, RadiusPreference, VisibilitySettings, SearchFilter } from "@/services/matchingService";
-import { getUserData } from "@/services/authService";
+import { listenToUserProfile } from "@/services/authService";
 
 export interface UseMatchingOptions {
   currentUserId: string;
@@ -57,18 +57,17 @@ export const useMatching = (options: UseMatchingOptions): UseMatchingResult => {
 
   // Load current user's matching preferences
   useEffect(() => {
-    if (!currentUserId) return;
-    
-    const loadUserData = async () => {
-      try {
-        const data = await getUserData(currentUserId);
-        setUserData(data);
-      } catch (err) {
-        console.error("Error loading user data:", err);
-        setError("Failed to load user data");
-      }
-    };
-    loadUserData();
+    if (!currentUserId) {
+      setUserData(null);
+      return;
+    }
+
+    setLoading(true);
+    const unsubscribe = listenToUserProfile(currentUserId, (data) => {
+      setUserData(data);
+    });
+
+    return () => unsubscribe();
   }, [currentUserId]);
 
   // Perform matching when location or user data changes
@@ -79,10 +78,25 @@ export const useMatching = (options: UseMatchingOptions): UseMatchingResult => {
       return;
     }
 
-    if (!userData && currentUserId) {
+    if (!currentUserId) {
+      setMatches([]);
+      setLoading(false);
+      return;
+    }
+
+    if (!userData) {
       setLoading(true);
       return;
     }
+
+    if (userData?.profileVisible === false) {
+      setMatches([]);
+      setError("Profile discovery is disabled");
+      setLoading(false);
+      return;
+    }
+
+    setError(null);
 
     // Use user data from Firebase or fallback to provided options
     const effectiveFitnessLevel = userData?.fitnessLevel || fitnessLevel;
@@ -101,7 +115,8 @@ export const useMatching = (options: UseMatchingOptions): UseMatchingResult => {
       pace: effectivePace || 0,
       visibility: effectiveVisibility,
       searchFilter: effectiveSearchFilter,
-      radiusPreference: effectiveRadiusPreference
+      radiusPreference: effectiveRadiusPreference,
+      profileVisible: userData?.profileVisible !== false
     };
 
     const unsubscribe = listenToAllUsers((allUsers) => {

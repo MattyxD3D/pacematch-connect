@@ -36,7 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 import { EventDetailModal } from "@/components/EventDetailModal";
-import { CreateEventModal } from "@/components/CreateEventModal";
+import { CreateEventModal, type CreateEventFormData } from "@/components/CreateEventModal";
 import { EventsTopBar } from "@/components/EventsTopBar";
 import { EventDetailsPanel } from "@/components/EventDetailsPanel";
 import BottomNavigation from "@/components/BottomNavigation";
@@ -153,6 +153,8 @@ const Events = () => {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [showEditEvent, setShowEditEvent] = useState(false);
+  const [eventBeingEdited, setEventBeingEdited] = useState<Event | null>(null);
   const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,10 +165,6 @@ const Events = () => {
   const [mapZoom, setMapZoom] = useState(13);
   const [mapRef, setMapRef] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
-  
-  // Pin drop state for event creation
-  const [pendingEventLocation, setPendingEventLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [tempMarkerPosition, setTempMarkerPosition] = useState<{ lat: number; lng: number } | null>(null);
   
   // Google Maps API loader
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -464,9 +462,77 @@ const Events = () => {
   };
 
   const handleEditEvent = (eventId: string) => {
-    // Navigate to edit page or open edit modal
-    // For now, just show a toast - you can implement full edit functionality later
-    toast.info("Edit functionality coming soon!");
+    if (!currentUser?.uid) {
+      toast.error("Please log in to edit events");
+      return;
+    }
+
+    const targetEvent = events.find((event) => event.id === eventId);
+    if (!targetEvent) {
+      toast.error("Event not found");
+      return;
+    }
+
+    if (targetEvent.hostId !== currentUser.uid) {
+      toast.error("Only the event creator can edit this event");
+      return;
+    }
+
+    setEventBeingEdited(targetEvent);
+    setShowEditEvent(true);
+    setShowEventDetail(false);
+  };
+
+  const handleCloseEditModal = () => {
+    setShowEditEvent(false);
+    setEventBeingEdited(null);
+  };
+
+  const handleUpdateEvent = async (eventId: string, updatedData: CreateEventFormData) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to edit events");
+      return;
+    }
+
+    const existingEvent = events.find((event) => event.id === eventId);
+
+    try {
+      await updateEvent(eventId, currentUser.uid, {
+        title: updatedData.title,
+        description: updatedData.description,
+        type: updatedData.activityType,
+        date: updatedData.date,
+        time: updatedData.time,
+        location: updatedData.location,
+        lat: updatedData.lat ?? existingEvent?.lat,
+        lng: updatedData.lng ?? existingEvent?.lng,
+        maxParticipants: updatedData.maxParticipants,
+      });
+
+      toast.success("Event updated successfully");
+
+      setSelectedEvent((prev) =>
+        prev && prev.id === eventId
+          ? {
+              ...prev,
+              title: updatedData.title,
+              description: updatedData.description,
+              type: updatedData.activityType as EventType,
+              date: updatedData.date,
+              time: updatedData.time,
+              location: updatedData.location,
+              lat: updatedData.lat ?? prev.lat,
+              lng: updatedData.lng ?? prev.lng,
+              maxParticipants: updatedData.maxParticipants,
+            }
+          : prev
+      );
+
+      handleCloseEditModal();
+    } catch (error: any) {
+      console.error("Error updating event:", error);
+      toast.error(error.message || "Failed to update event");
+    }
   };
 
   const handleDeleteEvent = async (eventId: string) => {
@@ -617,22 +683,11 @@ const Events = () => {
                         map.panTo({ lat: userLocation.lat, lng: userLocation.lng });
                       }
                     }}
-                    onClick={(e) => {
+                    onClick={() => {
                       // Close event details panel when clicking on empty map space
                       if (showEventDetail) {
                         setShowEventDetail(false);
                         setSelectedEvent(null);
-                      }
-                      
-                      // Allow clicking anywhere on the map to drop a pin for event creation
-                      // Don't handle clicks if clicking on markers (they have their own handlers)
-                      if (e.latLng && !e.placeId) {
-                        const lat = e.latLng.lat();
-                        const lng = e.latLng.lng();
-                        setTempMarkerPosition({ lat, lng });
-                        setPendingEventLocation({ lat, lng });
-                        // Clear any selected event marker when placing new pin
-                        setSelectedMarkerEvent(null);
                       }
                     }}
                     options={{
@@ -652,24 +707,6 @@ const Events = () => {
                           scaledSize: new window.google.maps.Size(32, 32),
                         }}
                         title="Your location"
-                      />
-                    )}
-
-                    {/* Temporary Marker for Create Mode */}
-                    {tempMarkerPosition && (
-                      <Marker
-                        position={{ lat: tempMarkerPosition.lat, lng: tempMarkerPosition.lng }}
-                        icon={{
-                          url: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
-                          scaledSize: new window.google.maps.Size(48, 48),
-                        }}
-                        title="Event location"
-                        onClick={(e) => {
-                          // Prevent map click from firing when clicking marker
-                          if (e && (e as any).stopPropagation) {
-                            (e as any).stopPropagation();
-                          }
-                        }}
                       />
                     )}
 
@@ -693,11 +730,6 @@ const Events = () => {
                               onClick={() => {
                                 handleEventClick(event);
                                 setSelectedMarkerEvent(event);
-                                // Clear temp marker if clicking on existing event while in create mode
-                                if (tempMarkerPosition) {
-                                  setTempMarkerPosition(null);
-                                  setPendingEventLocation(null);
-                                }
                               }}
                             />
                           </div>
@@ -705,54 +737,8 @@ const Events = () => {
                       );
                     })}
 
-                    {/* InfoWindow for temporary marker (Create Mode) */}
-                    {tempMarkerPosition && !showCreateEvent && (
-                      <InfoWindow
-                        position={{ lat: tempMarkerPosition.lat, lng: tempMarkerPosition.lng }}
-                        onCloseClick={() => {
-                          setTempMarkerPosition(null);
-                          setPendingEventLocation(null);
-                        }}
-                      >
-                        <div className="p-3 min-w-[200px]">
-                          <h3 className="font-bold text-base mb-2">Create Event Here</h3>
-                          <div className="space-y-2 text-sm">
-                            <div className="text-muted-foreground">
-                              <p>Location selected:</p>
-                              <p className="font-mono text-xs">
-                                {tempMarkerPosition.lat.toFixed(6)}, {tempMarkerPosition.lng.toFixed(6)}
-                              </p>
-                            </div>
-                            <div className="flex gap-2 mt-3">
-                              <Button
-                                onClick={() => {
-                                  // Remove the pin
-                                  setTempMarkerPosition(null);
-                                  setPendingEventLocation(null);
-                                }}
-                                variant="outline"
-                                className="flex-1 h-8 text-xs"
-                                size="sm"
-                              >
-                                Cancel
-                              </Button>
-                              <Button
-                                onClick={() => {
-                                  setShowCreateEvent(true);
-                                }}
-                                className="flex-1 h-8 text-xs"
-                                size="sm"
-                              >
-                                Create Event Here
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      </InfoWindow>
-                    )}
-
                     {/* InfoWindow for selected marker */}
-                    {selectedMarkerEvent && !tempMarkerPosition && (
+                    {selectedMarkerEvent && (
                       <InfoWindow
                         position={{ lat: selectedMarkerEvent.lat, lng: selectedMarkerEvent.lng }}
                         onCloseClick={() => setSelectedMarkerEvent(null)}
@@ -920,6 +906,8 @@ const Events = () => {
             setSelectedEvent(null);
           }}
           onJoin={handleJoinEvent}
+          onEdit={handleEditEvent}
+          onDelete={handleDeleteEvent}
         />
       )}
 
@@ -928,12 +916,18 @@ const Events = () => {
         <CreateEventModal
           onClose={() => {
             setShowCreateEvent(false);
-            // Clear temp marker when modal closes
-            setTempMarkerPosition(null);
-            setPendingEventLocation(null);
           }}
           onCreateEvent={handleCreateEvent}
-          initialLocation={pendingEventLocation}
+        />
+      )}
+
+      {/* Edit Event Modal */}
+      {showEditEvent && eventBeingEdited && (
+        <CreateEventModal
+          mode="edit"
+          eventToEdit={eventBeingEdited}
+          onClose={handleCloseEditModal}
+          onUpdateEvent={handleUpdateEvent}
         />
       )}
 

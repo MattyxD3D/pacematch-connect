@@ -8,19 +8,23 @@ import CloseIcon from "@mui/icons-material/Close";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import { 
+  Notification as FirebaseNotification, 
+  NotificationType,
+  listenToNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  createNotification
+} from "@/services/notificationService";
 
-export type NotificationType = "message" | "friend_request" | "friend_accepted" | "poke" | "workout_complete" | "achievement";
+export type { NotificationType };
 
-export interface Notification {
-  id: string;
-  type: NotificationType;
-  userId: number;
-  userName: string;
-  userAvatar: string;
-  message?: string;
-  timestamp: number;
-  read: boolean;
-  workoutId?: string; // Optional workout ID for workout_complete notifications
+// Extended notification interface with backward compatibility
+export interface Notification extends FirebaseNotification {
+  // Backward compatibility fields (computed from fromUserId, fromUserName, fromUserAvatar)
+  userId?: number | string; // Computed from fromUserId
+  userName?: string; // Alias for fromUserName
+  userAvatar?: string; // Alias for fromUserAvatar
 }
 
 interface NotificationSystemProps {
@@ -68,16 +72,16 @@ export const NotificationSystem = ({
             onClick={() => onTap(notification)}
             className="bg-card/95 backdrop-blur-xl rounded-2xl shadow-elevation-4 border-2 border-border/50 overflow-hidden cursor-pointer"
           >
-            <div className="p-4 flex items-center gap-3">
+              <div className="p-4 flex items-center gap-3">
               {/* Icon/Avatar */}
               <div className="flex-shrink-0 relative">
                 <Avatar
-                  src={notification.userAvatar}
-                  alt={notification.userName}
+                  src={notification.fromUserAvatar || notification.userAvatar}
+                  alt={notification.fromUserName || notification.userName || "User"}
                   sx={{ width: 48, height: 48 }}
                 />
                 <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center ${
-                  notification.type === "message"
+                  notification.type === "message" || notification.type === "message_request"
                     ? "bg-primary"
                     : notification.type === "friend_request"
                     ? "bg-warning"
@@ -87,9 +91,11 @@ export const NotificationSystem = ({
                     ? "bg-success"
                     : notification.type === "achievement"
                     ? "bg-warning"
+                    : notification.type === "friend_accepted"
+                    ? "bg-success"
                     : "bg-success"
                 }`}>
-                  {notification.type === "message" && (
+                  {(notification.type === "message" || notification.type === "message_request") && (
                     <MailIcon style={{ fontSize: 14 }} className="text-white" />
                   )}
                   {notification.type === "friend_request" && (
@@ -99,7 +105,7 @@ export const NotificationSystem = ({
                     <TouchAppIcon style={{ fontSize: 14 }} className="text-white" />
                   )}
                   {notification.type === "friend_accepted" && (
-                    <span className="text-white text-xs font-bold">✓</span>
+                    <CheckCircleIcon style={{ fontSize: 14 }} className="text-white" />
                   )}
                   {notification.type === "workout_complete" && (
                     <CheckCircleIcon style={{ fontSize: 14 }} className="text-white" />
@@ -113,14 +119,14 @@ export const NotificationSystem = ({
               {/* Content */}
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm text-foreground truncate">
-                  {notification.userName}
+                  {notification.fromUserName || notification.userName || "User"}
                 </p>
                 <p className="text-sm text-muted-foreground truncate">
-                  {notification.type === "message" && (
+                  {(notification.type === "message" || notification.type === "message_request") && (
                     notification.message || "Sent you a message"
                   )}
                   {notification.type === "friend_request" && "wants to add you as a friend"}
-                  {notification.type === "poke" && "poked you! They're interested in matching"}
+                  {notification.type === "poke" && (notification.message || "poked you! They're interested in matching")}
                   {notification.type === "friend_accepted" && "accepted your friend request"}
                   {notification.type === "workout_complete" && (
                     notification.message || "Workout completed successfully!"
@@ -215,42 +221,87 @@ export const BadgeCounter = ({
 };
 
 // Hook to manage notifications
-export const useNotifications = () => {
+export const useNotifications = (currentUserId?: string | null) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const navigate = useNavigate();
 
-  const addNotification = (notification: Omit<Notification, "id" | "timestamp" | "read">) => {
-    const newNotification: Notification = {
-      ...notification,
-      id: `${Date.now()}-${Math.random()}`,
-      timestamp: Date.now(),
-      read: false,
-    };
-    setNotifications(prev => [newNotification, ...prev]);
+  // Listen to Firebase notifications
+  useEffect(() => {
+    if (!currentUserId) {
+      setNotifications([]);
+      return;
+    }
+
+    const unsubscribe = listenToNotifications(currentUserId, (firebaseNotifications) => {
+      // Convert Firebase notifications to extended format with backward compatibility
+      const extendedNotifications: Notification[] = firebaseNotifications.map((notif) => ({
+        ...notif,
+        // Backward compatibility fields
+        userId: notif.fromUserId,
+        userName: notif.fromUserName,
+        userAvatar: notif.fromUserAvatar,
+      }));
+      setNotifications(extendedNotifications);
+    });
+
+    return () => unsubscribe();
+  }, [currentUserId]);
+
+  const addNotification = async (notification: Omit<Notification, "id" | "timestamp" | "read">) => {
+    if (!currentUserId) return;
+    
+    try {
+      // Convert to Firebase format
+      const firebaseNotification = {
+        type: notification.type,
+        fromUserId: notification.fromUserId || (notification.userId as string),
+        fromUserName: notification.fromUserName || notification.userName || "User",
+        fromUserAvatar: notification.fromUserAvatar || notification.userAvatar || "",
+        message: notification.message,
+        workoutId: notification.workoutId,
+        linkType: notification.linkType,
+      };
+      
+      await createNotification(currentUserId, firebaseNotification);
+    } catch (error) {
+      console.error("Error adding notification:", error);
+    }
   };
 
-  const dismissNotification = (id: string) => {
-    setNotifications(prev =>
-      prev.map(n => n.id === id ? { ...n, read: true } : n)
-    );
+  const dismissNotification = async (id: string) => {
+    if (!currentUserId) return;
+    
+    try {
+      await markNotificationAsRead(currentUserId, id);
+    } catch (error) {
+      console.error("Error dismissing notification:", error);
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev =>
-      prev.map(n => ({ ...n, read: true }))
-    );
+  const markAllAsRead = async () => {
+    if (!currentUserId) return;
+    
+    try {
+      await markAllNotificationsAsRead(currentUserId);
+    } catch (error) {
+      console.error("Error marking all as read:", error);
+    }
   };
 
   const handleNotificationTap = (notification: Notification) => {
     dismissNotification(notification.id);
     
-    if (notification.type === "message") {
+    const userId = notification.fromUserId || notification.userId;
+    const userName = notification.fromUserName || notification.userName;
+    const userAvatar = notification.fromUserAvatar || notification.userAvatar;
+    
+    if (notification.type === "message" || notification.type === "message_request") {
       navigate("/chat", {
         state: {
           user: {
-            id: notification.userId,
-            name: notification.userName,
-            avatar: notification.userAvatar,
+            id: userId,
+            name: userName,
+            avatar: userAvatar,
           },
         },
       });
@@ -258,8 +309,21 @@ export const useNotifications = () => {
       // Navigate to friends page with requests tab
       navigate("/friends", { state: { tab: "requests" } });
     } else if (notification.type === "poke") {
-      // Navigate to map to see the user who poked
-      navigate("/map");
+      // Navigate to map, optionally with workout context if workoutId exists
+      if (notification.workoutId) {
+        navigate("/map", {
+          state: {
+            workoutId: notification.workoutId,
+            focusUserId: userId,
+          },
+        });
+      } else {
+        navigate("/map", {
+          state: {
+            focusUserId: userId,
+          },
+        });
+      }
     } else if (notification.type === "friend_accepted") {
       navigate("/friends", { state: { tab: "friends" } });
     } else if (notification.type === "workout_complete") {
@@ -275,7 +339,7 @@ export const useNotifications = () => {
 
   const unreadCount = notifications.filter(n => !n.read).length;
   const unreadMessageCount = notifications.filter(
-    n => !n.read && n.type === "message"
+    n => !n.read && (n.type === "message" || n.type === "message_request")
   ).length;
   const unreadFriendRequestCount = notifications.filter(
     n => !n.read && n.type === "friend_request"

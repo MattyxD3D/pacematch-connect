@@ -74,6 +74,10 @@ export const updateUserVisibility = async (userId: string, visible: boolean): Pr
   }
 };
 
+// Track last cleanup time to throttle cleanup operations
+let lastCleanupTime = 0;
+const CLEANUP_INTERVAL = 60 * 1000; // Run cleanup every 60 seconds
+
 /**
  * Listen to all users' locations
  * @param {Function} callback - Callback function that receives users object
@@ -89,7 +93,7 @@ export const listenToAllUsers = (callback: (users: Record<string, any>) => void)
   
   const unsubscribe = onValue(
     usersRef,
-    (snapshot: DataSnapshot) => {
+    async (snapshot: DataSnapshot) => {
       if (!snapshot.exists()) {
         // Security: Only log in development mode
         if (process.env.NODE_ENV === 'development') {
@@ -106,6 +110,16 @@ export const listenToAllUsers = (callback: (users: Record<string, any>) => void)
       // Logging user names, locations, and IDs is a privacy/security risk
       if (process.env.NODE_ENV === 'development') {
         console.log(`📊 Firebase listener triggered - ${userCount} user(s) in database`);
+      }
+      
+      // Periodically clean up inactive locations (throttled to every 60 seconds)
+      const now = Date.now();
+      if (now - lastCleanupTime >= CLEANUP_INTERVAL) {
+        lastCleanupTime = now;
+        // Run cleanup in background (don't await to avoid blocking)
+        cleanupInactiveLocations(users).catch((error) => {
+          console.error("Background cleanup error:", error);
+        });
       }
       
       callback(users);
@@ -153,6 +167,80 @@ export const getUserLocation = async (userId: string): Promise<{
   } catch (error) {
     console.error("Error getting user location:", error);
     throw error;
+  }
+};
+
+/**
+ * Clear user's location data (used when user logs out or becomes inactive)
+ * This removes location data and sets user as invisible
+ * @param {string} userId - User ID
+ */
+export const clearUserLocation = async (userId: string): Promise<void> => {
+  try {
+    const userRef = ref(database, `users/${userId}`);
+    
+    // Get existing user data
+    const snapshot = await get(userRef);
+    if (!snapshot.exists()) {
+      return; // User doesn't exist, nothing to clear
+    }
+    
+    const userData = snapshot.val();
+    
+    // Remove location data while preserving other user data
+    const updateData = {
+      ...userData,
+      lat: null,
+      lng: null,
+      visible: false,
+      timestamp: null
+    };
+
+    await set(userRef, updateData);
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`✅ Location cleared for user`);
+    }
+  } catch (error) {
+    console.error("❌ Error clearing user location:", error);
+    throw error;
+  }
+};
+
+/**
+ * Clean up inactive user locations (locations older than 3 minutes)
+ * This should be called periodically to remove stale location data
+ * @param {Record<string, any>} users - All users from Firebase
+ * @returns {Promise<void>}
+ */
+export const cleanupInactiveLocations = async (users: Record<string, any>): Promise<void> => {
+  try {
+    const now = Date.now();
+    const inactiveThreshold = 3 * 60 * 1000; // 3 minutes in milliseconds
+    const cleanupPromises: Promise<void>[] = [];
+
+    for (const [userId, userData] of Object.entries(users)) {
+      // Check if user has a timestamp
+      if (userData.timestamp) {
+        const timeDiff = now - userData.timestamp;
+        
+        // If location is older than 3 minutes, clear it
+        if (timeDiff > inactiveThreshold) {
+          cleanupPromises.push(clearUserLocation(userId));
+        }
+      }
+    }
+
+    // Execute all cleanup operations in parallel
+    if (cleanupPromises.length > 0) {
+      await Promise.all(cleanupPromises);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🧹 Cleaned up ${cleanupPromises.length} inactive location(s)`);
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error cleaning up inactive locations:", error);
+    // Don't throw - this is a background cleanup operation
   }
 };
 

@@ -22,6 +22,7 @@ export interface MatchingUser {
   visibility: VisibilitySettings;
   searchFilter?: SearchFilter; // Who do I want to find? (Beginner/Intermediate/Pro/All)
   radiusPreference?: RadiusPreference;
+  profileVisible?: boolean;
   [key: string]: any; // Allow other user properties
 }
 
@@ -145,6 +146,10 @@ export function matchUsers(
   allUsers: Record<string, any>,
   nearbyCount?: number
 ): MatchResult[] {
+  if (user.profileVisible === false) {
+    return [];
+  }
+
   // Get fixed radius based on activity type
   const radius = computeRadius(user, nearbyCount);
   const radiusKm = radius / 1000; // Convert to km for filterUsersByDistance
@@ -169,6 +174,8 @@ export function matchUsers(
         visibleToAllLevels: true,
         allowedLevels: ["beginner", "intermediate", "pro"]
       };
+      const candidateProfileVisible = candidate.profileVisible !== false;
+      const candidateSearchFilter: SearchFilter = candidate.searchFilter || "all";
 
       // Only match users with same activity
       if (candidateActivity !== user.activity) {
@@ -178,6 +185,14 @@ export function matchUsers(
       // Check if user's search filter matches candidate's fitness level
       const userSearchFilter = user.searchFilter || "all";
       if (userSearchFilter !== "all" && candidateFitnessLevel !== userSearchFilter) {
+        return null;
+      }
+
+      if (!candidateProfileVisible) {
+        return null;
+      }
+
+      if (candidateSearchFilter !== "all" && candidateSearchFilter !== user.fitnessLevel) {
         return null;
       }
 
@@ -214,6 +229,7 @@ export function matchUsers(
           visibleToAllLevels: true,
           allowedLevels: ["beginner", "intermediate", "pro"]
         },
+        profileVisible: candidate.profileVisible !== false,
         radiusPreference: candidate.radiusPreference,
         ...candidate
       };

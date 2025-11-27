@@ -11,6 +11,7 @@ import Avatar from "@mui/material/Avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import BottomNavigation from "@/components/BottomNavigation";
 import { getUserConversations } from "@/services/messageService";
@@ -24,7 +25,6 @@ import {
 } from "@/lib/messageStorage";
 import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
-import { generateDummyConversations, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 
 interface Conversation {
   conversationId: string;
@@ -44,6 +44,8 @@ const Messages = () => {
   const [activeTab, setActiveTab] = useState<"chats" | "requests">("chats");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
   
   // Fetch conversations from Firebase
   useEffect(() => {
@@ -80,11 +82,6 @@ const Messages = () => {
           })
         );
         
-        // Add dummy conversations if enabled and no real conversations exist
-        if (ENABLE_DUMMY_DATA && conversationsWithUserData.length === 0) {
-          conversationsWithUserData = generateDummyConversations(currentUser.uid);
-        }
-        
         setConversations(conversationsWithUserData);
       } catch (error) {
         console.error("Error loading conversations:", error);
@@ -108,8 +105,20 @@ const Messages = () => {
   const allConversations = conversations
     .filter(conv => !blockedUsers.includes(conv.otherUserId)); // Hide blocked users
   
-  const chatConversations = allConversations;
-  const requestConversations: Conversation[] = []; // TODO: Implement message requests
+  // Filter conversations by search query
+  const filterConversations = (convs: Conversation[]) => {
+    if (!searchQuery.trim()) return convs;
+    
+    const query = searchQuery.toLowerCase().trim();
+    return convs.filter(conv => {
+      const userName = (conv.userName || "").toLowerCase();
+      const lastMessage = (conv.lastMessage || "").toLowerCase();
+      return userName.includes(query) || lastMessage.includes(query);
+    });
+  };
+  
+  const chatConversations = filterConversations(allConversations);
+  const requestConversations: Conversation[] = filterConversations([]); // TODO: Implement message requests
 
   const handleAcceptRequest = (conversation: Conversation, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -160,6 +169,7 @@ const Messages = () => {
     });
   };
 
+  // Calculate unread counts from filtered conversations
   const totalUnread = chatConversations.reduce((sum, conv) => sum + conv.unreadCount, 0);
   const requestsCount = requestConversations.length;
 
@@ -193,7 +203,7 @@ const Messages = () => {
       <div className="divide-y divide-border">
         {conversations.map((conversation, index) => (
           <motion.div
-            key={conversation.id}
+            key={conversation.conversationId || conversation.otherUserId}
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
@@ -274,22 +284,48 @@ const Messages = () => {
       {/* Header */}
       <div className="sticky top-0 z-10 bg-background border-b border-border">
         <div className="flex items-center justify-between p-4">
-          <div className="flex items-center gap-3">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Messages</h1>
-              {totalUnread > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  {totalUnread} unread {totalUnread === 1 ? "message" : "messages"}
-                </p>
-              )}
+          {!showSearch ? (
+            <>
+              <div className="flex items-center gap-3">
+                <div>
+                  <h1 className="text-2xl font-bold text-foreground">Messages</h1>
+                  {totalUnread > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      {totalUnread} unread {totalUnread === 1 ? "message" : "messages"}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setShowSearch(true)}
+                className="touch-target p-2 rounded-full hover:bg-accent transition-colors"
+              >
+                <SearchIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
+              </motion.button>
+            </>
+          ) : (
+            <div className="flex items-center gap-2 w-full">
+              <Input
+                type="text"
+                placeholder="Search conversations..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="flex-1"
+                autoFocus
+              />
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  setShowSearch(false);
+                  setSearchQuery("");
+                }}
+                className="touch-target p-2 rounded-full hover:bg-accent transition-colors"
+              >
+                <CloseIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
+              </motion.button>
             </div>
-          </div>
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            className="touch-target p-2 rounded-full hover:bg-accent transition-colors"
-          >
-            <SearchIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
-          </motion.button>
+          )}
         </div>
 
         {/* Tabs */}

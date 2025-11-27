@@ -310,11 +310,18 @@ const MapScreen = () => {
   });
 
   // Get user's current location - tracking controlled by activity button
-  const { location, error: locationError, isGettingLocation } = useLocation(
+  const { location, error: locationError, isGettingLocation, stopTracking } = useLocation(
     user?.uid || null,
     isActive, // Use isActive instead of isActivityActive
     visible
   );
+
+  // Ensure GPS tracking is fully stopped whenever workout is inactive
+  useEffect(() => {
+    if (!isActive) {
+      stopTracking();
+    }
+  }, [isActive, stopTracking]);
   
   // Calculate bearing (direction) between two points
   const calculateBearing = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -472,6 +479,32 @@ const MapScreen = () => {
     return () => unsubscribe();
   }, [user?.uid]);
 
+  // Restore poke notifications history so we don't alert repeatedly after reload
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("notifiedPokes");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          notifiedPokesRef.current = new Set(parsed);
+        }
+      }
+    } catch (error) {
+      console.error("Error restoring notified pokes:", error);
+    }
+  }, []);
+
+  const persistNotifiedPokes = () => {
+    try {
+      localStorage.setItem(
+        "notifiedPokes",
+        JSON.stringify(Array.from(notifiedPokesRef.current))
+      );
+    } catch (error) {
+      console.error("Error persisting notified pokes:", error);
+    }
+  };
+
   // Listen to pokes
   useEffect(() => {
     if (!user?.uid) return;
@@ -479,44 +512,45 @@ const MapScreen = () => {
     const unsubscribe = listenToPokes(user.uid, (pokeUserIds) => {
       setPokes(pokeUserIds);
       
-      // Only process pokes and create notifications when workout is active
-      if (isActive) {
-        // Track pokes received during workout
-        setWorkoutPokes(prev => {
-          const newPokes = pokeUserIds.filter(id => !prev.includes(id));
-          return [...prev, ...newPokes];
-        });
-        
-        // Create notifications only for NEW pokes (not already notified) during active workout
-        if (pokeUserIds.length > 0 && addNotification) {
-          const newPokeUserIds = pokeUserIds.filter(id => !notifiedPokesRef.current.has(id));
-          
-          // Mark all current pokes as notified
-          pokeUserIds.forEach(id => notifiedPokesRef.current.add(id));
-          
-          // Get user data for new pokes and create notifications
-          newPokeUserIds.forEach(async (pokeUserId) => {
-            try {
-              const { getUserData } = await import("@/services/authService");
-              const userData = await getUserData(pokeUserId);
-              if (userData) {
-                addNotification({
-                  type: "poke",
-                  userId: parseInt(pokeUserId) || 0,
-                  userName: userData.name || "Someone",
-                  userAvatar: userData.photoURL || ""
-                });
-              }
-            } catch (error) {
-              console.error("Error fetching poke user data:", error);
-            }
+      const pokeSet = new Set(pokeUserIds);
+      let removed = false;
+      notifiedPokesRef.current.forEach((id) => {
+        if (!pokeSet.has(id)) {
+          notifiedPokesRef.current.delete(id);
+          removed = true;
+        }
+      });
+      if (removed) {
+        persistNotifiedPokes();
+      }
+
+      // Track pokes received during workout (for summary)
+      if (pokeUserIds.length > 0) {
+        const newPokeUserIds = pokeUserIds.filter(
+          (id) => !notifiedPokesRef.current.has(id)
+        );
+
+        // Track pokes received during workout (for summary) but only add new ones
+        if (isActive) {
+          setWorkoutPokes((prev) => {
+            const newPokes = newPokeUserIds.filter((id) => !prev.includes(id));
+            return newPokes.length > 0 ? [...prev, ...newPokes] : prev;
           });
+        }
+
+        // Note: Poke notifications are now created in pokeService when poke is sent
+        // No need to create notifications here to avoid duplicates
+        if (newPokeUserIds.length > 0) {
+          newPokeUserIds.forEach((pokeUserId) => {
+            notifiedPokesRef.current.add(pokeUserId);
+          });
+          persistNotifiedPokes();
         }
       }
     });
 
     return () => unsubscribe();
-  }, [user?.uid, isActive]);
+  }, [user?.uid, isActive, addNotification]);
 
   // Fetch user data for friend requests
   useEffect(() => {
@@ -793,8 +827,9 @@ const MapScreen = () => {
     
     // Additional safety filter: Only show users with active workouts (recent timestamp)
     // This ensures users are only visible when they have an active workout session
+    // Inactive locations automatically terminate after 3 minutes
     const now = Date.now();
-    const activeThreshold = 5 * 60 * 1000; // 5 minutes in milliseconds
+    const activeThreshold = 3 * 60 * 1000; // 3 minutes in milliseconds
     
     otherUsers = otherUsers.filter((userData: any) => {
       // User must have a timestamp indicating recent location update
@@ -802,7 +837,7 @@ const MapScreen = () => {
         return false;
       }
       
-      // Check if timestamp is recent (within 5 minutes)
+      // Check if timestamp is recent (within 3 minutes)
       const timeDiff = now - userData.timestamp;
       return timeDiff <= activeThreshold;
     });
@@ -1113,6 +1148,8 @@ const MapScreen = () => {
   };
 
   const handleConfirmStop = () => {
+    // Force-stop GPS watcher immediately
+    stopTracking();
     // Stop activity - show summary
     setIsActive(false);
     setIsPaused(false);
@@ -1133,6 +1170,15 @@ const MapScreen = () => {
     }, 300);
   };
   
+  const blockingModalOpen =
+    showMessageModal ||
+    showFriendRequestModal ||
+    showPokeModal ||
+    showProfileView ||
+    showMatchesDrawer ||
+    showFilterModal ||
+    showNotificationDrawer;
+
   const handlePause = () => {
     if (!isPaused) {
       // Pausing - record pause start time
@@ -1374,12 +1420,6 @@ const MapScreen = () => {
           ...userProfile,
           friends: updatedFriends
         });
-      }
-      
-      // Also remove from localStorage socialStorage
-      const { unfriend: unfriendLocal } = await import("@/lib/socialStorage");
-      if (typeof userId === "number") {
-        unfriendLocal(userId);
       }
       
       toast.success(`Unfriended ${selectedUser?.name || "user"}`);
@@ -2487,7 +2527,7 @@ const MapScreen = () => {
       </AlertDialog>
       {/* Combined Minimalistic Control - Active State */}
       <AnimatePresence>
-        {isActive && (
+        {isActive && !blockingModalOpen && (
           <motion.div
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -2825,6 +2865,18 @@ const MapScreen = () => {
                       const distanceKm = match.distance / 1000;
                       const isPoked = pokes.includes(user.uid);
                       const userData = nearbyUsers.find((u: any) => u.id === user.uid);
+                      const fallbackUserData = userData || {
+                        id: user.uid,
+                        name: user.name || "User",
+                        distance: formatDistance(distanceKm),
+                        distanceValue: distanceKm,
+                        activity: user.activity || "Running",
+                        avatar: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || "User")}&size=150`,
+                        photos: user.photos || [],
+                        bio: user.bio || "",
+                        lat: (user as any)?.location?.lat ?? null,
+                        lng: (user as any)?.location?.lng ?? null,
+                      };
 
                       return (
                         <motion.div
@@ -2841,11 +2893,9 @@ const MapScreen = () => {
                             {/* Avatar */}
                             <button
                               onClick={() => {
-                                if (userData) {
-                                  setSelectedUser(userData);
-                                  setShowProfileView(true);
-                                  setShowMatchesDrawer(false);
-                                }
+                                setSelectedUser(fallbackUserData);
+                                setShowProfileView(true);
+                                setShowMatchesDrawer(false);
                               }}
                               className="cursor-pointer hover:opacity-80 transition-opacity"
                             >
@@ -2925,11 +2975,9 @@ const MapScreen = () => {
                                   variant="outline"
                                   className="flex-1 h-8 text-xs justify-center"
                                   onClick={() => {
-                                    if (userData) {
-                                      setSelectedUser(userData);
-                                      handleSendMessage();
-                                      setShowMatchesDrawer(false);
-                                    }
+                                    setSelectedUser(fallbackUserData);
+                                    handleSendMessage();
+                                    setShowMatchesDrawer(false);
                                   }}
                                 >
                                   <SendIcon style={{ fontSize: 14 }} className="mr-1" />

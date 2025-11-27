@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Card } from "@/components/ui/card";
@@ -6,13 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar } from "@mui/material";
-import { mockUsers, getMockUserById } from "@/lib/mockData";
 import { ProfileView } from "@/pages/ProfileView";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation as useLocationHook } from "@/hooks/useLocation";
 import { useMatching } from "@/hooks/useMatching";
 import { useUser } from "@/contexts/UserContext";
-import { formatDistance } from "@/utils/distance";
+import { formatDistance, calculateDistance } from "@/utils/distance";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -21,15 +20,18 @@ import SendIcon from "@mui/icons-material/Send";
 import { sendPoke } from "@/services/pokeService";
 import { isWorkoutActive } from "@/utils/workoutState";
 import {
-  getPendingRequests,
+  listenToUserFriends,
+  listenToFriendRequests,
   sendFriendRequest,
   acceptFriendRequest,
   declineFriendRequest,
   cancelFriendRequest,
-  unfriend,
+  removeFriend,
+} from "@/services/friendService";
+import { getUserData } from "@/services/authService";
+import {
   getLocationSharingSettings,
   setLocationSharing as saveLocationSharing,
-  canFriendSeeLocation,
 } from "@/lib/socialStorage";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import SearchIcon from "@mui/icons-material/Search";
@@ -53,85 +55,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Dummy friend data for preview - enhanced with more variety
-const dummyFriends = [
-  {
-    id: 1,
-    username: "Alex Runner",
-    avatar: "https://ui-avatars.com/api/?name=Alex+Runner&size=120&background=4CAF50&color=fff",
-    bio: "Marathon enthusiast • Training for my 5th race",
-    activities: ["running", "walking"],
-    photos: ["https://ui-avatars.com/api/?name=Alex+Runner&size=120&background=4CAF50&color=fff"],
-  },
-  {
-    id: 2,
-    username: "Sarah Cyclist",
-    avatar: "https://ui-avatars.com/api/?name=Sarah+Cyclist&size=120&background=2196F3&color=fff",
-    bio: "Cycling through the city every morning",
-    activities: ["cycling", "running"],
-    photos: ["https://ui-avatars.com/api/?name=Sarah+Cyclist&size=120&background=2196F3&color=fff"],
-  },
-  {
-    id: 3,
-    username: "Mike Walker",
-    avatar: "https://ui-avatars.com/api/?name=Mike+Walker&size=120&background=FF9800&color=fff",
-    bio: "Love long walks in nature",
-    activities: ["walking"],
-    photos: ["https://ui-avatars.com/api/?name=Mike+Walker&size=120&background=FF9800&color=fff"],
-  },
-  {
-    id: 4,
-    username: "Emma Fitness",
-    avatar: "https://ui-avatars.com/api/?name=Emma+Fitness&size=120&background=9C27B0&color=fff",
-    bio: "Fitness coach • Always up for a challenge",
-    activities: ["running", "cycling", "walking"],
-    photos: ["https://ui-avatars.com/api/?name=Emma+Fitness&size=120&background=9C27B0&color=fff"],
-  },
-  {
-    id: 5,
-    username: "David Active",
-    avatar: "https://ui-avatars.com/api/?name=David+Active&size=120&background=E91E63&color=fff",
-    bio: "Weekend warrior • Let's hit the trails!",
-    activities: ["running", "walking"],
-    photos: ["https://ui-avatars.com/api/?name=David+Active&size=120&background=E91E63&color=fff"],
-  },
-  {
-    id: 6,
-    username: "Lisa Speed",
-    avatar: "https://ui-avatars.com/api/?name=Lisa+Speed&size=120&background=00BCD4&color=fff",
-    bio: "Speed training specialist",
-    activities: ["running", "cycling"],
-    photos: ["https://ui-avatars.com/api/?name=Lisa+Speed&size=120&background=00BCD4&color=fff"],
-  },
-  {
-    id: 7,
-    username: "James Wilson",
-    avatar: "https://i.pravatar.cc/150?img=12",
-    bio: "Early morning runner • Coffee enthusiast",
-    activities: ["running"],
-    photos: ["https://i.pravatar.cc/150?img=12"],
-  },
-  {
-    id: 8,
-    username: "Sophie Martinez",
-    avatar: "https://i.pravatar.cc/150?img=68",
-    bio: "Triathlete in training • Always pushing limits",
-    activities: ["cycling", "running"],
-    photos: ["https://i.pravatar.cc/150?img=68"],
-  },
-];
-
 const Friends = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
   const { userProfile } = useUser();
   const [searchQuery, setSearchQuery] = useState("");
-  const [requests, setRequests] = useState(getPendingRequests());
-  const [friends, setFriends] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8]); // Mock friend list IDs (enhanced)
+  const [requests, setRequests] = useState<{ incoming: string[]; outgoing: string[] }>({ incoming: [], outgoing: [] });
+  const [friends, setFriends] = useState<string[]>([]);
+  const [friendsData, setFriendsData] = useState<Record<string, any>>({});
+  const [requestsData, setRequestsData] = useState<Record<string, any>>({});
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
-  const [locationSharing, setLocationSharing] = useState<Record<number, boolean>>(getLocationSharingSettings());
-  const [unfriendDialog, setUnfriendDialog] = useState<{ open: boolean; friendId: number | null; friendName: string }>({
+  const [locationSharing, setLocationSharing] = useState<Record<string, boolean>>(getLocationSharingSettings());
+  const [unfriendDialog, setUnfriendDialog] = useState<{ open: boolean; friendId: string | null; friendName: string }>({
     open: false,
     friendId: null,
     friendName: "",
@@ -159,11 +95,73 @@ const Friends = () => {
     radiusPreference: userProfile?.radiusPreference || "normal"
   });
   
+  // Listen to friends list from Firebase
+  useEffect(() => {
+    if (!user?.uid) {
+      setFriends([]);
+      setFriendsData({});
+      return;
+    }
+
+    const unsubscribeFriends = listenToUserFriends(user.uid, async (friendIds) => {
+      setFriends(friendIds);
+      
+      // Fetch friend data for each friend
+      const friendsDataMap: Record<string, any> = {};
+      for (const friendId of friendIds) {
+        try {
+          const friendData = await getUserData(friendId);
+          if (friendData) {
+            friendsDataMap[friendId] = friendData;
+          }
+        } catch (error) {
+          console.error(`Error fetching friend data for ${friendId}:`, error);
+        }
+      }
+      setFriendsData(friendsDataMap);
+    });
+
+    return () => unsubscribeFriends();
+  }, [user?.uid]);
+
+  // Listen to friend requests from Firebase
+  useEffect(() => {
+    if (!user?.uid) {
+      setRequests({ incoming: [], outgoing: [] });
+      setRequestsData({});
+      return;
+    }
+
+    const unsubscribe = listenToFriendRequests(user.uid, async (requestData) => {
+      setRequests(requestData);
+      
+      // Fetch user data for incoming and outgoing requests
+      const requestsDataMap: Record<string, any> = {};
+      const allRequestIds = [...requestData.incoming, ...requestData.outgoing];
+      
+      for (const requestId of allRequestIds) {
+        if (!requestsDataMap[requestId]) {
+          try {
+            const userData = await getUserData(requestId);
+            if (userData) {
+              requestsDataMap[requestId] = userData;
+            }
+          } catch (error) {
+            console.error(`Error fetching request user data for ${requestId}:`, error);
+          }
+        }
+      }
+      setRequestsData(requestsDataMap);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
   // Format nearby users for display (exclude friends)
   const nearbyUsersForDiscover = useMemo(() => {
     if (!matches || matches.length === 0) return [];
     
-    const friendIds = new Set(friends.map(f => String(f)));
+    const friendIds = new Set(friends);
     
     return matches
       .filter(match => !friendIds.has(match.user.uid))
@@ -179,51 +177,78 @@ const Friends = () => {
         matchScore: match.score,
         fitnessLevel: match.user.fitnessLevel,
         pace: match.user.pace,
-        bio: "",
-        photos: []
+        bio: match.user.bio || "",
+        photos: match.user.photos || []
       }));
   }, [matches, friends]);
 
-  const handleSendRequest = (userId: number | string, username: string) => {
-    const userIdNum = typeof userId === 'string' ? parseInt(userId) || 0 : userId;
-    sendFriendRequest(userIdNum);
-    setRequests(getPendingRequests());
-    toast.success(`Friend request sent to ${username}!`);
-  };
-
-  const handleAcceptRequest = (userId: number) => {
-    const user = getMockUserById(userId);
-    acceptFriendRequest(userId);
-    setRequests(getPendingRequests());
-    toast.success(`You are now friends with ${user?.username}!`);
-  };
-
-  const handleDeclineRequest = (userId: number) => {
-    declineFriendRequest(userId);
-    setRequests(getPendingRequests());
-    toast.success("Request declined");
-  };
-
-  const handleCancelRequest = (userId: number) => {
-    cancelFriendRequest(userId);
-    setRequests(getPendingRequests());
-    toast.success("Request cancelled");
-  };
-
-  const handleUnfriend = (friendId: number, friendName: string) => {
-    setUnfriendDialog({ open: true, friendId, friendName });
-  };
-
-  const confirmUnfriend = () => {
-    if (unfriendDialog.friendId) {
-      unfriend(unfriendDialog.friendId);
-      setFriends(prev => prev.filter(id => id !== unfriendDialog.friendId));
-      setUnfriendDialog({ open: false, friendId: null, friendName: "" });
-      toast.success(`Unfriended ${unfriendDialog.friendName}`);
+  const handleSendRequest = async (userId: string, username: string) => {
+    if (!user?.uid) return;
+    
+    try {
+      await sendFriendRequest(user.uid, userId);
+      toast.success(`Friend request sent to ${username}!`);
+    } catch (error) {
+      console.error("Error sending friend request:", error);
+      toast.error("Failed to send friend request");
     }
   };
 
-  const handleLocationSharingToggle = (friendId: number, enabled: boolean) => {
+  const handleAcceptRequest = async (userId: string) => {
+    if (!user?.uid) return;
+    
+    try {
+      await acceptFriendRequest(user.uid, userId);
+      const userData = requestsData[userId];
+      toast.success(`You are now friends with ${userData?.name || userData?.username || "user"}!`);
+    } catch (error) {
+      console.error("Error accepting friend request:", error);
+      toast.error("Failed to accept friend request");
+    }
+  };
+
+  const handleDeclineRequest = async (userId: string) => {
+    if (!user?.uid) return;
+    
+    try {
+      await declineFriendRequest(user.uid, userId);
+      toast.success("Request declined");
+    } catch (error) {
+      console.error("Error declining friend request:", error);
+      toast.error("Failed to decline friend request");
+    }
+  };
+
+  const handleCancelRequest = async (userId: string) => {
+    if (!user?.uid) return;
+    
+    try {
+      await cancelFriendRequest(user.uid, userId);
+      toast.success("Request cancelled");
+    } catch (error) {
+      console.error("Error cancelling friend request:", error);
+      toast.error("Failed to cancel friend request");
+    }
+  };
+
+  const handleUnfriend = (friendId: string, friendName: string) => {
+    setUnfriendDialog({ open: true, friendId, friendName });
+  };
+
+  const confirmUnfriend = async () => {
+    if (!unfriendDialog.friendId || !user?.uid) return;
+    
+    try {
+      await removeFriend(user.uid, unfriendDialog.friendId);
+      setUnfriendDialog({ open: false, friendId: null, friendName: "" });
+      toast.success(`Unfriended ${unfriendDialog.friendName}`);
+    } catch (error) {
+      console.error("Error removing friend:", error);
+      toast.error("Failed to unfriend user");
+    }
+  };
+
+  const handleLocationSharingToggle = (friendId: string, enabled: boolean) => {
     // Update local state
     setLocationSharing(prev => {
       const updated = { ...prev };
@@ -234,8 +259,12 @@ const Friends = () => {
       }
       return updated;
     });
-    // Save to storage
-    saveLocationSharing(friendId, enabled);
+    // Save to storage (using friendId as string, but socialStorage expects number - we'll keep this for now)
+    // TODO: Migrate location sharing to Firebase in future
+    const friendIdNum = parseInt(friendId);
+    if (!isNaN(friendIdNum)) {
+      saveLocationSharing(friendIdNum, enabled);
+    }
     toast.success(
       enabled 
         ? "Friend will see your location during workouts" 
@@ -290,13 +319,6 @@ const Friends = () => {
     }
   };
 
-  const filteredUsers = mockUsers.filter(user =>
-    user.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const discoverUsers = mockUsers.filter(
-    user => !friends.includes(user.id) && !requests.outgoing.includes(user.id)
-  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-success/5 pb-20">
@@ -357,88 +379,109 @@ const Friends = () => {
                 </p>
               </Card>
             ) : (
-              friends.map((friendId, index) => {
-                // Use dummy data for preview
-                const friend = dummyFriends.find(f => f.id === friendId) || getMockUserById(friendId);
-                if (!friend) return null;
+              friends
+                .filter(friendId => {
+                  const friend = friendsData[friendId];
+                  if (!friend) return false;
+                  const friendName = friend.name || friend.username || "";
+                  return !searchQuery || friendName.toLowerCase().includes(searchQuery.toLowerCase());
+                })
+                .map((friendId, index) => {
+                  const friend = friendsData[friendId];
+                  if (!friend) return null;
 
-                return (
-                  <motion.div
-                    key={friendId}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                  >
-                    <Card 
-                      className="p-4 hover:shadow-elevation-2 transition-shadow"
+                  const friendName = friend.name || friend.username || "User";
+                  const friendAvatar = friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&size=150`;
+                  const friendBio = friend.bio || "Fitness enthusiast";
+                  const friendActivities = friend.activities || (friend.activity ? [friend.activity] : []);
+
+                  return (
+                    <motion.div
+                      key={friendId}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.05 }}
                     >
-                      <div className="flex items-center gap-3 mb-3">
-                        <Avatar 
-                          src={friend.avatar} 
-                          alt={friend.username} 
-                          sx={{ width: 56, height: 56 }}
-                          className="cursor-pointer"
-                          onClick={() => setSelectedUser(friendId)}
-                        />
-                        <div 
-                          className="flex-1 cursor-pointer"
-                          onClick={() => setSelectedUser(friendId)}
-                        >
-                          <h3 className="font-bold">{friend.username}</h3>
-                          <p className="text-sm text-muted-foreground">{friend.bio || "Fitness enthusiast"}</p>
-                          <div className="flex gap-1 mt-1">
-                            {friend.activities.map(activity => (
-                              <span
-                                key={activity}
-                                className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary capitalize"
-                              >
-                                {activity}
-                              </span>
-                            ))}
+                      <Card 
+                        className="p-4 hover:shadow-elevation-2 transition-shadow"
+                      >
+                        <div className="flex items-center gap-3 mb-3">
+                          <Avatar 
+                            src={friendAvatar} 
+                            alt={friendName} 
+                            sx={{ width: 56, height: 56 }}
+                            className="cursor-pointer"
+                            onClick={() => setSelectedUser(friendId)}
+                          />
+                          <div 
+                            className="flex-1 cursor-pointer"
+                            onClick={() => setSelectedUser(friendId)}
+                          >
+                            <h3 className="font-bold">{friendName}</h3>
+                            <p className="text-sm text-muted-foreground">{friendBio}</p>
+                            {friendActivities.length > 0 && (
+                              <div className="flex gap-1 mt-1">
+                                {friendActivities.map((activity: string) => (
+                                  <span
+                                    key={activity}
+                                    className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary capitalize"
+                                  >
+                                    {activity}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate("/chat", {
+                                state: {
+                                  user: {
+                                    id: friendId,
+                                    name: friendName,
+                                    avatar: friendAvatar
+                                  }
+                                }
+                              });
+                            }}
+                          >
+                            <ChatIcon style={{ fontSize: 18 }} className="mr-1" />
+                            Message
+                          </Button>
                         </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate("/messages");
-                          }}
-                        >
-                          <ChatIcon style={{ fontSize: 18 }} className="mr-1" />
-                          Message
-                        </Button>
-                      </div>
-                      
-                      {/* Location Sharing Toggle */}
-                      <div className="flex items-center justify-between pt-3 border-t border-border/50">
-                        <div className="flex items-center gap-2 flex-1">
-                          {locationSharing[friendId] ? (
-                            <LocationOnIcon className="text-success" style={{ fontSize: 20 }} />
-                          ) : (
-                            <LocationOffIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
-                          )}
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">
-                              Share location during workouts
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {locationSharing[friendId] 
-                                ? "Friend can see your location when you're active" 
-                                : "Location only shared during active workouts"}
-                            </p>
+                        
+                        {/* Location Sharing Toggle */}
+                        <div className="flex items-center justify-between pt-3 border-t border-border/50">
+                          <div className="flex items-center gap-2 flex-1">
+                            {locationSharing[friendId] ? (
+                              <LocationOnIcon className="text-success" style={{ fontSize: 20 }} />
+                            ) : (
+                              <LocationOffIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
+                            )}
+                            <div className="flex-1">
+                              <p className="text-sm font-medium">
+                                Share location during workouts
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {locationSharing[friendId] 
+                                  ? "Friend can see your location when you're active" 
+                                  : "Location only shared during active workouts"}
+                              </p>
+                            </div>
                           </div>
+                          <Switch
+                            checked={locationSharing[friendId] || false}
+                            onCheckedChange={(checked) => handleLocationSharingToggle(friendId, checked)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
                         </div>
-                        <Switch
-                          checked={locationSharing[friendId] || false}
-                          onCheckedChange={(checked) => handleLocationSharingToggle(friendId, checked)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </div>
-                    </Card>
-                  </motion.div>
-                );
-              })
+                      </Card>
+                    </motion.div>
+                  );
+                })
             )}
           </TabsContent>
 
@@ -454,16 +497,20 @@ const Friends = () => {
               ) : (
                 <div className="space-y-3">
                   {requests.incoming.map(userId => {
-                    const user = dummyFriends.find(f => f.id === userId) || getMockUserById(userId);
+                    const user = requestsData[userId];
                     if (!user) return null;
+
+                    const userName = user.name || user.username || "User";
+                    const userAvatar = user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&size=150`;
+                    const userBio = user.bio || "Fitness enthusiast";
 
                     return (
                       <Card key={userId} className="p-4">
                         <div className="flex items-center gap-3">
-                          <Avatar src={user.avatar} alt={user.username} sx={{ width: 56, height: 56 }} />
+                          <Avatar src={userAvatar} alt={userName} sx={{ width: 56, height: 56 }} />
                           <div className="flex-1">
-                            <h3 className="font-bold">{user.username}</h3>
-                            <p className="text-sm text-muted-foreground">{user.bio}</p>
+                            <h3 className="font-bold">{userName}</h3>
+                            <p className="text-sm text-muted-foreground">{userBio}</p>
                           </div>
                           <div className="flex gap-2">
                             <Button
@@ -498,15 +545,18 @@ const Friends = () => {
               ) : (
                 <div className="space-y-3">
                   {requests.outgoing.map(userId => {
-                    const user = dummyFriends.find(f => f.id === userId) || getMockUserById(userId);
+                    const user = requestsData[userId];
                     if (!user) return null;
+
+                    const userName = user.name || user.username || "User";
+                    const userAvatar = user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&size=150`;
 
                     return (
                       <Card key={userId} className="p-4">
                         <div className="flex items-center gap-3">
-                          <Avatar src={user.avatar} alt={user.username} sx={{ width: 56, height: 56 }} />
+                          <Avatar src={userAvatar} alt={userName} sx={{ width: 56, height: 56 }} />
                           <div className="flex-1">
-                            <h3 className="font-bold">{user.username}</h3>
+                            <h3 className="font-bold">{userName}</h3>
                             <p className="text-sm text-muted-foreground">Request pending</p>
                           </div>
                           <Button
@@ -545,7 +595,7 @@ const Friends = () => {
                   user.name.toLowerCase().includes(searchQuery.toLowerCase())
                 )
                 .map((user, index) => {
-                  const isRequestPending = requests.outgoing.some(id => String(id) === String(user.id));
+                  const isRequestPending = requests.outgoing.includes(user.id);
                   const hasPoked = hasPokedUsers[user.id] || false;
                   
                   return (
@@ -659,9 +709,9 @@ const Friends = () => {
       {/* Profile View Modal */}
       <AnimatePresence>
         {selectedUser && (() => {
-          // Check if selectedUser is from discover (has id as string) or friends list (number)
+          // Check if selectedUser is from discover (has id as string) or friends list (string)
           const isDiscoverUser = typeof selectedUser === 'object' && selectedUser.id;
-          const isFriendId = typeof selectedUser === 'number';
+          const isFriendId = typeof selectedUser === 'string';
           
           let userData: any = null;
           let friendStatus: "not_friends" | "request_pending" | "request_received" | "friends" | "denied" = "not_friends";
@@ -669,26 +719,40 @@ const Friends = () => {
           if (isDiscoverUser) {
             // User from discover tab
             userData = selectedUser;
-            if (requests.outgoing.some(id => String(id) === String(userData.id))) {
+            if (requests.outgoing.includes(userData.id)) {
               friendStatus = "request_pending";
-            } else if (friends.some(f => String(f) === String(userData.id))) {
+            } else if (friends.includes(userData.id)) {
               friendStatus = "friends";
+            } else if (requests.incoming.includes(userData.id)) {
+              friendStatus = "request_received";
             } else {
               friendStatus = "not_friends";
             }
           } else if (isFriendId) {
             // User from friends list
-            const friend = dummyFriends.find(f => f.id === selectedUser) || getMockUserById(selectedUser);
+            const friend = friendsData[selectedUser];
             if (!friend) return null;
+            
+            const friendName = friend.name || friend.username || "User";
+            const friendAvatar = friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&size=150`;
+            const friendActivities = friend.activities || (friend.activity ? [friend.activity] : []);
+            
             userData = {
-              id: friend.id,
-              name: friend.username,
-              distance: "2.5 km",
-              activity: friend.activities && friend.activities.length > 0 
-                ? friend.activities[0].charAt(0).toUpperCase() + friend.activities[0].slice(1)
-                : "Running",
-              avatar: friend.avatar,
-              photos: friend.photos,
+              id: selectedUser,
+              name: friendName,
+              distance: friend.lat && friend.lng && currentLocation?.lat && currentLocation?.lng
+                ? formatDistance(calculateDistance(
+                    currentLocation.lat,
+                    currentLocation.lng,
+                    friend.lat,
+                    friend.lng
+                  ))
+                : "Unknown",
+              activity: friendActivities.length > 0 
+                ? friendActivities[0].charAt(0).toUpperCase() + friendActivities[0].slice(1)
+                : (friend.activity ? friend.activity.charAt(0).toUpperCase() + friend.activity.slice(1) : "Running"),
+              avatar: friendAvatar,
+              photos: friend.photos || [friendAvatar],
               bio: friend.bio,
             };
             friendStatus = "friends";
@@ -705,7 +769,15 @@ const Friends = () => {
                 if (isDiscoverUser) {
                   handleSendMessageFromDiscover(userData);
                 } else {
-                  navigate("/messages");
+                  navigate("/chat", {
+                    state: {
+                      user: {
+                        id: userData.id,
+                        name: userData.name,
+                        avatar: userData.avatar
+                      }
+                    }
+                  });
                 }
                 setSelectedUser(null);
               }}
@@ -714,11 +786,21 @@ const Friends = () => {
                   handleSendRequest(userData.id, userData.name);
                 }
               }}
-              onAcceptFriend={() => {}}
-              onDeclineFriend={() => {}}
+              onAcceptFriend={() => {
+                if (isDiscoverUser && requests.incoming.includes(userData.id)) {
+                  handleAcceptRequest(userData.id);
+                }
+              }}
+              onDeclineFriend={() => {
+                if (isDiscoverUser && requests.incoming.includes(userData.id)) {
+                  handleDeclineRequest(userData.id);
+                }
+              }}
               onUnfriend={() => {
                 if (isFriendId) {
-                  confirmUnfriend();
+                  const friend = friendsData[selectedUser];
+                  const friendName = friend?.name || friend?.username || "User";
+                  handleUnfriend(selectedUser, friendName);
                 }
               }}
               onPoke={isWorkoutActive() ? () => {

@@ -1,11 +1,14 @@
 // Poke service for Firebase - manages pokes between users
 import { ref, set, get, onValue, off, remove, DataSnapshot } from "firebase/database";
 import { database } from "./firebase";
+import { createNotification } from "./notificationService";
+import { getUserData } from "./authService";
 
 /**
  * Check if user has an active workout session
- * This checks if user has recent location updates (within last 5 minutes)
+ * This checks if user has recent location updates (within last 3 minutes)
  * which indicates they're actively tracking a workout
+ * Inactive locations automatically terminate after 3 minutes
  */
 const isUserActive = async (userId: string): Promise<boolean> => {
   try {
@@ -23,9 +26,9 @@ const isUserActive = async (userId: string): Promise<boolean> => {
       return false;
     }
     
-    // Consider user active if location was updated within last 5 minutes
-    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-    return timestamp > fiveMinutesAgo;
+    // Consider user active if location was updated within last 3 minutes
+    const threeMinutesAgo = Date.now() - (3 * 60 * 1000);
+    return timestamp > threeMinutesAgo;
   } catch (error) {
     console.error("❌ Error checking user activity:", error);
     // If we can't check, allow the poke (fail open, frontend validation is primary)
@@ -40,7 +43,8 @@ const isUserActive = async (userId: string): Promise<boolean> => {
  */
 export const sendPoke = async (
   fromUserId: string,
-  toUserId: string
+  toUserId: string,
+  workoutId?: string
 ): Promise<void> => {
   try {
     // Optional backend validation: Check if sender has active workout
@@ -55,9 +59,29 @@ export const sendPoke = async (
       fromUserId,
       toUserId,
       status: "pending",
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      workoutId: workoutId || null
     });
     console.log(`✅ Poke sent from ${fromUserId} to ${toUserId}`);
+    
+    // Create notification for recipient
+    try {
+      const fromUserData = await getUserData(fromUserId);
+      if (fromUserData) {
+        await createNotification(toUserId, {
+          type: "poke",
+          fromUserId,
+          fromUserName: fromUserData.name || fromUserData.username || "Someone",
+          fromUserAvatar: fromUserData.photoURL || "",
+          message: "poked you! They're interested in matching",
+          workoutId: workoutId,
+          linkType: workoutId ? "workout" : "map",
+        });
+      }
+    } catch (notificationError) {
+      // Don't fail the poke if notification fails
+      console.error("❌ Error creating poke notification:", notificationError);
+    }
   } catch (error) {
     console.error("❌ Error sending poke:", error);
     throw error;

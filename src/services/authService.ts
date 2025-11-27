@@ -14,8 +14,9 @@ import {
   sendPasswordResetEmail,
   updateProfile
 } from "firebase/auth";
-import { ref, set, get } from "firebase/database";
+import { ref, set, get, onValue } from "firebase/database";
 import { auth, googleProvider, database } from "./firebase";
+import { clearUserLocation } from "./locationService";
 
 // Export ConfirmationResult type for use in components
 export type { ConfirmationResult };
@@ -206,9 +207,24 @@ export const handleRedirectResult = async (): Promise<UserData | null> => {
  */
 export const signOut = async (): Promise<void> => {
   try {
+    // Get current user ID before signing out (needed to clear location)
+    const currentUser = auth.currentUser;
+    const userId = currentUser?.uid;
+
     // Clean up reCAPTCHA before signing out
     // This allows reCAPTCHA to be properly reinitialized on next login
     cleanupRecaptcha();
+    
+    // Clear user's location data before signing out
+    // This ensures the user becomes invisible to others immediately
+    if (userId) {
+      try {
+        await clearUserLocation(userId);
+      } catch (locationError) {
+        // Log but don't fail sign out if location cleanup fails
+        console.error("Error clearing location on sign out:", locationError);
+      }
+    }
     
     // Clear user-specific localStorage data before signing out
     localStorage.removeItem("userProfile");
@@ -255,8 +271,8 @@ const saveUserToDatabase = async (user: User): Promise<void> => {
         },
         searchFilter: "all", // Who do I want to find? (Beginner/Intermediate/Pro/All)
         radiusPreference: "normal",
-        // Profile discovery settings
-        profileVisible: true, // Allow profile to be discovered by others
+        // Profile discovery settings (opt-in by default)
+        profileVisible: false, // Keep profile hidden until user enables discovery
         generalLocation: null // General location (e.g., "Pasig", "UP Diliman")
       });
     } else {
@@ -277,7 +293,7 @@ const saveUserToDatabase = async (user: User): Promise<void> => {
         searchFilter: existingData.searchFilter || "all",
         radiusPreference: existingData.radiusPreference || "normal",
         // Ensure profile discovery fields exist with defaults if missing
-        profileVisible: existingData.profileVisible !== undefined ? existingData.profileVisible : true,
+        profileVisible: existingData.profileVisible !== undefined ? existingData.profileVisible : false,
         generalLocation: existingData.generalLocation || null
       });
     }
@@ -305,6 +321,36 @@ export const getUserData = async (userId: string): Promise<any> => {
     console.error("Error getting user data:", error);
     throw error;
   }
+};
+
+/**
+ * Subscribe to realtime updates for a user's profile
+ * @param {string} userId - User ID
+ * @param {(data: any | null) => void} callback - Handler invoked with latest data
+ * @returns {() => void} Unsubscribe function
+ */
+export const listenToUserProfile = (
+  userId: string,
+  callback: (data: any | null) => void
+): (() => void) => {
+  const userRef = ref(database, `users/${userId}`);
+
+  const unsubscribe = onValue(
+    userRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        callback(snapshot.val());
+      } else {
+        callback(null);
+      }
+    },
+    (error) => {
+      console.error("Error listening to user profile:", error);
+      callback(null);
+    }
+  );
+
+  return () => unsubscribe();
 };
 
 /**

@@ -8,6 +8,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import { 
   Notification as FirebaseNotification, 
   NotificationType,
@@ -81,8 +82,10 @@ export const NotificationSystem = ({
                   sx={{ width: 48, height: 48 }}
                 />
                 <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center ${
-                  notification.type === "message" || notification.type === "message_request"
+                  notification.type === "message"
                     ? "bg-primary"
+                    : notification.type === "message_request"
+                    ? "bg-blue-500"
                     : notification.type === "friend_request"
                     ? "bg-warning"
                     : notification.type === "poke"
@@ -93,10 +96,13 @@ export const NotificationSystem = ({
                     ? "bg-warning"
                     : notification.type === "friend_accepted"
                     ? "bg-success"
-                    : "bg-success"
+                    : "bg-gray-500"
                 }`}>
-                  {(notification.type === "message" || notification.type === "message_request") && (
+                  {notification.type === "message" && (
                     <MailIcon style={{ fontSize: 14 }} className="text-white" />
+                  )}
+                  {notification.type === "message_request" && (
+                    <ChatBubbleIcon style={{ fontSize: 14 }} className="text-white" />
                   )}
                   {notification.type === "friend_request" && (
                     <PersonAddIcon style={{ fontSize: 14 }} className="text-white" />
@@ -122,8 +128,11 @@ export const NotificationSystem = ({
                   {notification.fromUserName || notification.userName || "User"}
                 </p>
                 <p className="text-sm text-muted-foreground truncate">
-                  {(notification.type === "message" || notification.type === "message_request") && (
+                  {notification.type === "message" && (
                     notification.message || "Sent you a message"
+                  )}
+                  {notification.type === "message_request" && (
+                    notification.message || "wants to start a conversation with you"
                   )}
                   {notification.type === "friend_request" && "wants to add you as a friend"}
                   {notification.type === "poke" && (notification.message || "poked you! They're interested in matching")}
@@ -157,6 +166,8 @@ export const NotificationSystem = ({
               className={`h-1 ${
                 notification.type === "message"
                   ? "bg-primary"
+                  : notification.type === "message_request"
+                  ? "bg-blue-500"
                   : notification.type === "friend_request"
                   ? "bg-warning"
                   : notification.type === "poke"
@@ -165,7 +176,9 @@ export const NotificationSystem = ({
                   ? "bg-success"
                   : notification.type === "achievement"
                   ? "bg-warning"
-                  : "bg-success"
+                  : notification.type === "friend_accepted"
+                  ? "bg-success"
+                  : "bg-gray-500"
               }`}
             />
           </div>

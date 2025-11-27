@@ -48,6 +48,7 @@ import { useLocation } from "@/hooks/useLocation";
 import { useNearbyUsers } from "@/hooks/useNearbyUsers";
 import { useMatching } from "@/hooks/useMatching";
 import { useAuth } from "@/hooks/useAuth";
+import { useMovementDetection } from "@/hooks/useMovementDetection";
 import { formatDistance } from "@/utils/distance";
 import { SearchFilter } from "@/services/matchingService";
 import { isWorkoutActive } from "@/utils/workoutState";
@@ -98,9 +99,12 @@ import { NotificationBanner } from "@/components/NotificationBanner";
 import { MessageModal } from "@/components/MessageModal";
 import { FriendRequestModal } from "@/components/FriendRequestModal";
 import { ProfileView } from "@/pages/ProfileView";
+import { InactivityWarningModal } from "@/components/InactivityWarningModal";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 import { BadgeCounter } from "@/components/NotificationSystem";
+import { NotificationBell } from "@/components/NotificationBell";
 import { WorkoutSummaryModal } from "@/components/WorkoutSummaryModal";
+import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
@@ -235,6 +239,8 @@ const MapScreen = () => {
   const [showSummary, setShowSummary] = useState(false);
   const [showSpeedNotPace, setShowSpeedNotPace] = useState(true);
   const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
+  const [showInactivityWarning, setShowInactivityWarning] = useState(false);
+  const [pausedDueToInactivity, setPausedDueToInactivity] = useState(false);
   const lastDistanceRef = useRef(0);
   const lastTimeRef = useRef(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -322,6 +328,35 @@ const MapScreen = () => {
       stopTracking();
     }
   }, [isActive, stopTracking]);
+
+  // Movement detection for inactivity warning
+  const handleStationaryDetected = useCallback(() => {
+    // Only show warning if workout is active and not already paused
+    if (isActive && !isPaused) {
+      setShowInactivityWarning(true);
+    }
+  }, [isActive, isPaused]);
+
+  const handleMovementDetected = useCallback(() => {
+    // If paused due to inactivity and movement detected, show resume prompt
+    if (pausedDueToInactivity && isPaused) {
+      toast.success("Movement detected! Tap Resume to continue your workout.", {
+        duration: 5000,
+      });
+    }
+    // Reset inactivity flag
+    setPausedDueToInactivity(false);
+  }, [pausedDueToInactivity, isPaused]);
+
+  useMovementDetection({
+    location: location ? { lat: location.lat, lng: location.lng } : null,
+    isActive,
+    isPaused,
+    onStationary: handleStationaryDetected,
+    onMovementDetected: handleMovementDetected,
+    distanceThreshold: 10, // 10 meters
+    detectionWindowMinutes: 5, // 5 minutes
+  });
   
   // Calculate bearing (direction) between two points
   const calculateBearing = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -1127,6 +1162,8 @@ const MapScreen = () => {
       toast.success("Activity started! GPS tracking enabled.");
       setIsActive(true);
       setIsPaused(false);
+      setPausedDueToInactivity(false); // Reset inactivity state
+      setShowInactivityWarning(false); // Close warning if open
       setStartTime(new Date());
       setElapsedTime(0);
       setDistance(0);
@@ -1154,7 +1191,9 @@ const MapScreen = () => {
     setIsActive(false);
     setIsPaused(false);
     setPauseStartTime(null);
+    setPausedDueToInactivity(false); // Reset inactivity state
     setShowStopConfirmation(false);
+    setShowInactivityWarning(false); // Close warning if open
     
     // Log real Firebase users detected during workout
     if (workoutNearbyUsers.length > 0) {
@@ -1185,6 +1224,8 @@ const MapScreen = () => {
       setPauseStartTime(new Date());
       setIsPaused(true);
       toast("Activity paused");
+      // Close warning modal if open
+      setShowInactivityWarning(false);
     } else {
       // Resuming - calculate and add paused duration
       if (pauseStartTime) {
@@ -1193,8 +1234,24 @@ const MapScreen = () => {
         setPauseStartTime(null);
       }
       setIsPaused(false);
+      setPausedDueToInactivity(false); // Reset inactivity flag on manual resume
       toast("Activity resumed");
     }
+  };
+
+  const handleInactivityPause = () => {
+    // Auto-pause due to inactivity
+    setPauseStartTime(new Date());
+    setIsPaused(true);
+    setPausedDueToInactivity(true);
+    setShowInactivityWarning(false);
+    toast("Workout paused due to inactivity");
+  };
+
+  const handleDismissInactivityWarning = () => {
+    // User dismissed warning - reset movement detection
+    setShowInactivityWarning(false);
+    // The movement detection will continue monitoring
   };
   
   const handleSaveWorkout = async () => {
@@ -2276,29 +2333,25 @@ const MapScreen = () => {
         pokes={workoutPokes}
       />
 
+      {/* Inactivity Warning Modal */}
+      <InactivityWarningModal
+        open={showInactivityWarning}
+        onOpenChange={setShowInactivityWarning}
+        onDismiss={handleDismissInactivityWarning}
+        onPause={handleInactivityPause}
+        autoPauseSeconds={120} // 2 minutes
+      />
+
       {/* Top Bar - Beacon Mode Header - Only visible when workout is not active */}
       {!isActive && (
         <div className="absolute top-0 left-0 right-0 z-[60] bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Beacon Mode</h2>
-          <motion.button
-            whileTap={{ scale: 0.95 }}
+          {/* Notification Bell - Yellow when there are notifications */}
+          <NotificationBell 
+            unreadCount={unreadCount}
             onClick={() => setShowNotificationDrawer(true)}
-            className={`relative touch-target bg-transparent rounded-full hover:bg-gray-700 transition-all ${
-              unreadCount > 0 ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-gray-800' : ''
-            }`}
-            style={{ width: 40, height: 40 }}
-            title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : "Notifications"}
-          >
-            <NotificationsIcon 
-              style={{ fontSize: 24 }} 
-              className={unreadCount > 0 ? 'text-red-400' : 'text-white'}
-            />
-            {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center border-2 border-gray-800 shadow-lg animate-pulse z-10">
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            )}
-          </motion.button>
+            variant="dark"
+          />
         </div>
       )}
 
@@ -3173,6 +3226,8 @@ const MapScreen = () => {
                         switch (notification.type) {
                           case "message":
                             return <MailIcon style={{ fontSize: 20 }} className="text-primary" />;
+                          case "message_request":
+                            return <ChatBubbleIcon style={{ fontSize: 20 }} className="text-blue-500" />;
                           case "friend_request":
                             return <PersonAddIcon style={{ fontSize: 20 }} className="text-warning" />;
                           case "poke":
@@ -3191,6 +3246,8 @@ const MapScreen = () => {
                       const getNotificationTitle = () => {
                         switch (notification.type) {
                           case "message":
+                            return notification.userName;
+                          case "message_request":
                             return notification.userName;
                           case "friend_request":
                             return notification.userName;
@@ -3211,6 +3268,8 @@ const MapScreen = () => {
                         switch (notification.type) {
                           case "message":
                             return notification.message || "Sent you a message";
+                          case "message_request":
+                            return "wants to start a conversation with you";
                           case "friend_request":
                             return "wants to add you as a friend";
                           case "poke":
@@ -3258,6 +3317,8 @@ const MapScreen = () => {
                             <div className={`flex-shrink-0 p-2 rounded-full ${
                               notification.type === "message"
                                 ? "bg-primary/15"
+                                : notification.type === "message_request"
+                                ? "bg-blue-500/15"
                                 : notification.type === "friend_request"
                                 ? "bg-warning/15"
                                 : notification.type === "poke"
@@ -3266,7 +3327,9 @@ const MapScreen = () => {
                                 ? "bg-success/15"
                                 : notification.type === "achievement"
                                 ? "bg-warning/15"
-                                : "bg-success/15"
+                                : notification.type === "friend_accepted"
+                                ? "bg-success/15"
+                                : "bg-gray-500/15"
                             }`}>
                               {getNotificationIcon()}
                             </div>

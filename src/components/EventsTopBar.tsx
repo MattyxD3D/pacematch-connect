@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,6 +21,8 @@ interface EventsTopBarProps {
   onActivityFilterChange: (filter: EventType | "all") => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  /** Optional element to render on the right side (e.g., notification bell) */
+  rightSlot?: ReactNode;
 }
 
 export const EventsTopBar = ({
@@ -28,6 +30,7 @@ export const EventsTopBar = ({
   onActivityFilterChange,
   searchQuery,
   onSearchChange,
+  rightSlot,
 }: EventsTopBarProps) => {
   const getActivityIcon = (type: EventType | "all") => {
     switch (type) {
@@ -158,6 +161,13 @@ export const EventsTopBar = ({
               </button>
             )}
           </div>
+
+          {/* Right Slot (e.g., Notification Bell) */}
+          {rightSlot && (
+            <div className="flex-shrink-0">
+              {rightSlot}
+            </div>
+          )}
         </div>
       </div>
     </motion.div>

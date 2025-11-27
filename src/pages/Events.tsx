@@ -30,7 +30,9 @@ import MailIcon from "@mui/icons-material/Mail";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import Avatar from "@mui/material/Avatar";
+import { NotificationBell } from "@/components/NotificationBell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -642,6 +644,13 @@ const Events = () => {
         onActivityFilterChange={setActivityFilter}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        rightSlot={
+          <NotificationBell 
+            unreadCount={unreadCount}
+            onClick={() => setShowNotificationDrawer(true)}
+            variant="light"
+          />
+        }
       />
 
       {/* Content */}
@@ -1200,6 +1209,8 @@ const Events = () => {
                         switch (notification.type) {
                           case "message":
                             return <MailIcon style={{ fontSize: 20 }} className="text-primary" />;
+                          case "message_request":
+                            return <ChatBubbleIcon style={{ fontSize: 20 }} className="text-blue-500" />;
                           case "friend_request":
                             return <PersonAddIcon style={{ fontSize: 20 }} className="text-warning" />;
                           case "poke":
@@ -1218,6 +1229,8 @@ const Events = () => {
                       const getNotificationTitle = () => {
                         switch (notification.type) {
                           case "message":
+                            return notification.userName;
+                          case "message_request":
                             return notification.userName;
                           case "friend_request":
                             return notification.userName;
@@ -1238,6 +1251,8 @@ const Events = () => {
                         switch (notification.type) {
                           case "message":
                             return notification.message || "Sent you a message";
+                          case "message_request":
+                            return "wants to start a conversation with you";
                           case "friend_request":
                             return "wants to add you as a friend";
                           case "poke":
@@ -1285,6 +1300,8 @@ const Events = () => {
                             <div className={`flex-shrink-0 p-2 rounded-full ${
                               notification.type === "message"
                                 ? "bg-primary/15"
+                                : notification.type === "message_request"
+                                ? "bg-blue-500/15"
                                 : notification.type === "friend_request"
                                 ? "bg-warning/15"
                                 : notification.type === "poke"
@@ -1293,7 +1310,9 @@ const Events = () => {
                                 ? "bg-success/15"
                                 : notification.type === "achievement"
                                 ? "bg-warning/15"
-                                : "bg-success/15"
+                                : notification.type === "friend_accepted"
+                                ? "bg-success/15"
+                                : "bg-gray-500/15"
                             }`}>
                               {getNotificationIcon()}
                             </div>

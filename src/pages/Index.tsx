@@ -39,7 +39,9 @@ import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import BottomNavigation from "@/components/BottomNavigation";
+import { NotificationBell } from "@/components/NotificationBell";
 import { Switch } from "@/components/ui/switch";
 import { Avatar } from "@mui/material";
 import { toast } from "sonner";
@@ -612,26 +614,12 @@ const Index = () => {
               <h1 className="text-3xl font-bold mb-1">Welcome back, {userProfile?.username || "Athlete"}! 👋</h1>
               <p className="text-sm text-muted-foreground">Stay connected with your fitness community</p>
             </div>
-            {/* Notification Bell */}
-            <motion.button
-              whileTap={{ scale: 0.95 }}
+            {/* Notification Bell - Yellow when there are notifications */}
+            <NotificationBell 
+              unreadCount={unreadCount}
               onClick={() => setShowNotificationDrawer(true)}
-              className={`relative touch-target bg-transparent rounded-full hover:bg-muted transition-all ${
-                unreadCount > 0 ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-card' : ''
-              }`}
-              style={{ width: 40, height: 40 }}
-              title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : "Notifications"}
-            >
-              <NotificationsIcon 
-                style={{ fontSize: 24 }} 
-                className={unreadCount > 0 ? 'text-red-400' : 'text-foreground'}
-              />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center border-2 border-card shadow-lg animate-pulse z-10">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </motion.button>
+              variant="light"
+            />
           </div>
         </div>
       </motion.div>
@@ -1282,6 +1270,8 @@ const Index = () => {
                         switch (notification.type) {
                           case "message":
                             return <MailIcon style={{ fontSize: 20 }} className="text-primary" />;
+                          case "message_request":
+                            return <ChatBubbleIcon style={{ fontSize: 20 }} className="text-blue-500" />;
                           case "friend_request":
                             return <PersonAddIcon style={{ fontSize: 20 }} className="text-warning" />;
                           case "poke":
@@ -1300,6 +1290,8 @@ const Index = () => {
                       const getNotificationTitle = () => {
                         switch (notification.type) {
                           case "message":
+                            return notification.userName;
+                          case "message_request":
                             return notification.userName;
                           case "friend_request":
                             return notification.userName;
@@ -1320,6 +1312,8 @@ const Index = () => {
                         switch (notification.type) {
                           case "message":
                             return notification.message || "Sent you a message";
+                          case "message_request":
+                            return "wants to start a conversation with you";
                           case "friend_request":
                             return "wants to add you as a friend";
                           case "poke":
@@ -1367,6 +1361,8 @@ const Index = () => {
                             <div className={`flex-shrink-0 p-2 rounded-full ${
                               notification.type === "message"
                                 ? "bg-primary/15"
+                                : notification.type === "message_request"
+                                ? "bg-blue-500/15"
                                 : notification.type === "friend_request"
                                 ? "bg-warning/15"
                                 : notification.type === "poke"
@@ -1375,7 +1371,9 @@ const Index = () => {
                                 ? "bg-success/15"
                                 : notification.type === "achievement"
                                 ? "bg-warning/15"
-                                : "bg-success/15"
+                                : notification.type === "friend_accepted"
+                                ? "bg-success/15"
+                                : "bg-gray-500/15"
                             }`}>
                               {getNotificationIcon()}
                             </div>

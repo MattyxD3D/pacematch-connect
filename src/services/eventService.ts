@@ -80,19 +80,22 @@ export const joinEvent = async (
     
     const event = snapshot.val() as Event;
     
+    // Ensure participants is an array
+    const participants = Array.isArray(event.participants) ? event.participants : (event.hostId ? [event.hostId] : []);
+    
     // Check if user is already a participant
-    if (event.participants.includes(userId)) {
+    if (participants.includes(userId)) {
       return;
     }
     
     // Check if event is full
-    if (event.maxParticipants && event.participants.length >= event.maxParticipants) {
+    if (event.maxParticipants && participants.length >= event.maxParticipants) {
       throw new Error("Event is full");
     }
     
     // Add user to participants
     await set(ref(database, `events/${eventId}/participants`), [
-      ...event.participants,
+      ...participants,
       userId
     ]);
     
@@ -120,8 +123,11 @@ export const leaveEvent = async (
     
     const event = snapshot.val() as Event;
     
+    // Ensure participants is an array
+    const participants = Array.isArray(event.participants) ? event.participants : (event.hostId ? [event.hostId] : []);
+    
     // Remove user from participants
-    const updatedParticipants = event.participants.filter((id: string) => id !== userId);
+    const updatedParticipants = participants.filter((id: string) => id !== userId);
     await set(ref(database, `events/${eventId}/participants`), updatedParticipants);
     
     console.log(`✅ User ${userId} left event ${eventId}`);
@@ -168,7 +174,12 @@ export const listenToEvents = (
       }
       
       const events = snapshot.val();
-      callback(Object.values(events) as Event[]);
+      // Ensure all events have participants as an array
+      const normalizedEvents = Object.values(events).map((event: any) => ({
+        ...event,
+        participants: Array.isArray(event.participants) ? event.participants : (event.hostId ? [event.hostId] : []),
+      })) as Event[];
+      callback(normalizedEvents);
     },
     (error) => {
       console.error("❌ Error listening to events:", error);
@@ -202,6 +213,54 @@ export const getUserEvents = async (userId: string): Promise<Event[]> => {
   } catch (error) {
     console.error("❌ Error getting user events:", error);
     return [];
+  }
+};
+
+/**
+ * Update an event (only if user is the host)
+ */
+export const updateEvent = async (
+  eventId: string,
+  userId: string,
+  eventData: Partial<Omit<Event, "id" | "hostId" | "participants" | "createdAt">>
+): Promise<void> => {
+  try {
+    const eventRef = ref(database, `events/${eventId}`);
+    const snapshot = await get(eventRef);
+    
+    if (!snapshot.exists()) {
+      throw new Error("Event not found");
+    }
+    
+    const event = snapshot.val() as Event;
+    
+    if (event.hostId !== userId) {
+      throw new Error("Only the host can update the event");
+    }
+    
+    // Filter out undefined values to avoid Firebase errors
+    const cleanEventData: any = {};
+    Object.entries(eventData).forEach(([key, value]) => {
+      if (value !== undefined) {
+        cleanEventData[key] = value;
+      }
+    });
+    
+    // Update only the provided fields
+    const updates: any = {};
+    Object.keys(cleanEventData).forEach((key) => {
+      updates[`events/${eventId}/${key}`] = cleanEventData[key];
+    });
+    
+    await set(ref(database, `events/${eventId}`), {
+      ...event,
+      ...cleanEventData,
+    });
+    
+    console.log(`✅ Event updated: ${eventId}`);
+  } catch (error) {
+    console.error("❌ Error updating event:", error);
+    throw error;
   }
 };
 

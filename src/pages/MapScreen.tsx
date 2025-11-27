@@ -7,6 +7,7 @@ import {
   Marker,
   InfoWindow,
   Polyline,
+  Circle,
   useJsApiLoader
 } from "@react-google-maps/api";
 import {
@@ -29,6 +30,7 @@ import {
 } from "@mui/material";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { FitnessLevelAvatar } from "@/components/FitnessLevelAvatar";
 import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
@@ -41,7 +43,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useNavigate, useLocation as useRouterLocation } from "react-router-dom";
-import { useUser, Activity } from "@/contexts/UserContext";
+import { useUser, Activity, RadiusPreference } from "@/contexts/UserContext";
 import { useLocation } from "@/hooks/useLocation";
 import { useNearbyUsers } from "@/hooks/useNearbyUsers";
 import { useMatching } from "@/hooks/useMatching";
@@ -141,6 +143,7 @@ const getMarkerColor = (activity?: string | null): string => {
 
 /**
  * Calculate zoom level from distance in meters
+ * Aligned with research recommendations: Cycling (12-14), Running (14-16), Walking (16-18)
  */
 const calculateZoomFromMeters = (distanceMeters: number): number => {
   if (distanceMeters >= 50000) return 10; // 50km
@@ -150,7 +153,7 @@ const calculateZoomFromMeters = (distanceMeters: number): number => {
   if (distanceMeters >= 2000) return 14; // 2km
   if (distanceMeters >= 1000) return 15; // 1km
   if (distanceMeters >= 500) return 16; // 500m
-  if (distanceMeters >= 250) return 17; // 250m
+  if (distanceMeters >= 200) return 17; // 200m - walking close zoom
   if (distanceMeters >= 150) return 18; // 150m
   if (distanceMeters >= 100) return 18.5; // 100m
   if (distanceMeters >= 50) return 19; // 50m
@@ -241,11 +244,11 @@ const MapScreen = () => {
   
   // Get user's enabled activities from profile
   // Handle both 'activities' (array) and 'activity' (single value) for backward compatibility
-  const userActivities = userProfile?.activities?.length > 0 
+  const userActivities: Activity[] = userProfile?.activities?.length > 0 
     ? userProfile.activities 
     : (userProfile as any)?.activity 
       ? [(userProfile as any).activity as Activity]
-      : ["running", "cycling", "walking"];
+      : (["running", "cycling", "walking"] as Activity[]);
   const [selectedActivity, setSelectedActivity] = useState<"running" | "cycling" | "walking">(
     userActivities[0] as "running" | "cycling" | "walking"
   );
@@ -746,7 +749,8 @@ const MapScreen = () => {
         lng: match.user.location.lng,
         matchScore: match.score,
         fitnessLevel: match.user.fitnessLevel,
-        pace: match.user.pace
+        pace: match.user.pace,
+        timestamp: match.user.timestamp || null // Include timestamp for active workout filtering
       }));
   }, [matches, declinedUsers, now]);
 
@@ -766,7 +770,8 @@ const MapScreen = () => {
         lat: userData.lat,
         lng: userData.lng,
         photos: [],
-        bio: ""
+        bio: "",
+        timestamp: userData.timestamp || null // Include timestamp for active workout filtering
       }));
     } else {
       result = [];
@@ -784,7 +789,23 @@ const MapScreen = () => {
     }
 
     // Filter out current user
-    const otherUsers = nearbyUsers.filter((userData: any) => userData.id !== user?.uid);
+    let otherUsers = nearbyUsers.filter((userData: any) => userData.id !== user?.uid);
+    
+    // Additional safety filter: Only show users with active workouts (recent timestamp)
+    // This ensures users are only visible when they have an active workout session
+    const now = Date.now();
+    const activeThreshold = 5 * 60 * 1000; // 5 minutes in milliseconds
+    
+    otherUsers = otherUsers.filter((userData: any) => {
+      // User must have a timestamp indicating recent location update
+      if (!userData.timestamp) {
+        return false;
+      }
+      
+      // Check if timestamp is recent (within 5 minutes)
+      const timeDiff = now - userData.timestamp;
+      return timeDiff <= activeThreshold;
+    });
     
     if (otherUsers.length === 0) {
       return [];
@@ -1105,13 +1126,6 @@ const MapScreen = () => {
       console.log("⚠️ No real Firebase users detected during workout");
     }
     
-    // Add dummy users for testing ONLY if no real Firebase users were detected
-    // Real Firebase data is always prioritized - dummy data is fallback for testing
-    if (workoutNearbyUsers.length === 0) {
-      console.log("🧪 Adding dummy users for testing purposes");
-      setWorkoutNearbyUsers(generateDummyNearbyUsers());
-    }
-    
     // Always show summary when stopping activity (to show nearby people and stats)
     // Use a delay to ensure the stop confirmation dialog is fully closed first
     setTimeout(() => {
@@ -1137,78 +1151,6 @@ const MapScreen = () => {
     }
   };
   
-  // Generate dummy nearby users for testing (only used when no real Firebase users detected)
-  const generateDummyNearbyUsers = () => {
-    console.log("🧪 Generating dummy users for testing (no real Firebase users detected)");
-    const dummyUsers = [
-      {
-        id: "dummy-user-1",
-        name: "Sarah Johnson",
-        avatar: "https://i.pravatar.cc/150?img=47",
-        activity: "running",
-        distance: "0.5 km",
-        distanceValue: 0.5
-      },
-      {
-        id: "dummy-user-2",
-        name: "Mike Chen",
-        avatar: "https://i.pravatar.cc/150?img=33",
-        activity: "cycling",
-        distance: "1.2 km",
-        distanceValue: 1.2
-      },
-      {
-        id: "dummy-user-3",
-        name: "Emma Wilson",
-        avatar: "https://i.pravatar.cc/150?img=20",
-        activity: "walking",
-        distance: "0.8 km",
-        distanceValue: 0.8
-      },
-      {
-        id: "dummy-user-4",
-        name: "James Wilson",
-        avatar: "https://i.pravatar.cc/150?img=12",
-        activity: "running",
-        distance: "1.5 km",
-        distanceValue: 1.5
-      },
-      {
-        id: "dummy-user-5",
-        name: "Lisa Anderson",
-        avatar: "https://i.pravatar.cc/150?img=5",
-        activity: "cycling",
-        distance: "0.9 km",
-        distanceValue: 0.9
-      },
-      {
-        id: "dummy-user-6",
-        name: "Alex Runner",
-        avatar: "https://ui-avatars.com/api/?name=Alex+Runner&size=120&background=4CAF50&color=fff",
-        activity: "running",
-        distance: "1.8 km",
-        distanceValue: 1.8
-      },
-      {
-        id: "dummy-user-7",
-        name: "Sophie Martinez",
-        avatar: "https://i.pravatar.cc/150?img=68",
-        activity: "cycling",
-        distance: "2.1 km",
-        distanceValue: 2.1
-      },
-      {
-        id: "dummy-user-8",
-        name: "David Active",
-        avatar: "https://ui-avatars.com/api/?name=David+Active&size=120&background=E91E63&color=fff",
-        activity: "walking",
-        distance: "1.3 km",
-        distanceValue: 1.3
-      }
-    ];
-    return dummyUsers;
-  };
-
   const handleSaveWorkout = async () => {
     if (!user?.uid) {
       toast.error("You must be logged in to save workouts");
@@ -1217,7 +1159,7 @@ const MapScreen = () => {
 
     // Use workoutNearbyUsers - all REAL Firebase users detected during the workout session
     // These are populated from Firebase via useNearbyUsers hook and locationService
-    let activeNearbyUsers = workoutNearbyUsers.map(user => ({
+    const activeNearbyUsers = workoutNearbyUsers.map(user => ({
       id: user.id,
       name: user.name,
       avatar: user.avatar,
@@ -1226,21 +1168,10 @@ const MapScreen = () => {
     }));
 
     // Log what we're saving
-    const realUserCount = activeNearbyUsers.filter(u => !u.id.startsWith('dummy-')).length;
-    const dummyUserCount = activeNearbyUsers.filter(u => u.id.startsWith('dummy-')).length;
-    
-    if (realUserCount > 0) {
-      console.log(`✅ Saving workout with ${realUserCount} real Firebase users`);
-    }
-    if (dummyUserCount > 0) {
-      console.log(`🧪 Including ${dummyUserCount} dummy users for testing`);
-    }
-
-    // Add dummy users for testing ONLY if no real Firebase users were detected
-    // Real Firebase data is always prioritized - dummy data is fallback for testing
-    if (activeNearbyUsers.length === 0) {
-      console.log("🧪 No real users detected - adding dummy users for testing");
-      activeNearbyUsers = generateDummyNearbyUsers();
+    if (activeNearbyUsers.length > 0) {
+      console.log(`✅ Saving workout with ${activeNearbyUsers.length} real Firebase users`);
+    } else {
+      console.log("ℹ️ No nearby users detected during this workout");
     }
 
     const workoutData = {
@@ -1574,28 +1505,54 @@ const MapScreen = () => {
   }, [location, isNavigationStyle, userHeading, mapRef, isLoaded, isActive]);
 
   // Get zoom radius for selected activity and zoom level
+  // Based on research recommendations and matching service base radii alignment
+  // Tighter zoom levels for better detail and closer view
   const getZoomRadiusForActivity = (
     activity: "running" | "cycling" | "walking",
     zoomLevel: "close" | "medium" | "far"
   ): number => {
     const zoomConfig = {
       running: {
-        close: 200,    // 200m - really close
-        medium: 2000,  // 2km - current default
-        far: 5000      // 5km - wide view
+        close: 500,    // 500m - very nearby runners, immediate vicinity (Zoom 16)
+        medium: 2000,  // 2km - typical running range, matches base radius (Zoom 14)
+        far: 5000      // 5km - wider search, neighborhood view (Zoom 13)
       },
       cycling: {
-        close: 500,    // 500m - close
-        medium: 5000,  // 5km - medium
-        far: 15000     // 15km - very wide
+        close: 2500,   // 2.5km - nearby cyclists, immediate area (Zoom 14)
+        medium: 10000, // 10km - typical cycling range, matches base radius (Zoom 12)
+        far: 20000     // 20km - wide area search, city-wide view (Zoom 11)
       },
       walking: {
-        close: 50,     // 50m - really close
-        medium: 150,   // 150m - medium
-        far: 300       // 300m - wider view
+        close: 100,    // 100m - immediate vicinity, street-level detail (Zoom 18.5)
+        medium: 500,   // 500m - typical walking range, neighborhood view (Zoom 16)
+        far: 1000      // 1km - wider walking area, matches base radius (Zoom 15)
       }
     };
     return zoomConfig[activity][zoomLevel];
+  };
+
+  // Calculate actual matching radius based on activity and radius preference
+  // Matches the logic from matchingService.ts computeRadius function
+  const calculateMatchingRadius = (
+    activity: Activity,
+    radiusPreference: RadiusPreference = "normal"
+  ): number => {
+    const BASE_RADIUS: Record<Activity, number> = {
+      cycling: 10000,  // 10km for cycling
+      running: 2000,   // 2km for running
+      walking: 1000    // 1km for walking
+    };
+
+    const RADIUS_MULTIPLIERS: Record<RadiusPreference, number> = {
+      nearby: 0.5,   // 50% of base radius
+      normal: 1.0,   // 100% of base radius (default)
+      wide: 2.0      // 200% of base radius
+    };
+
+    const baseRadius = BASE_RADIUS[activity] || BASE_RADIUS.running;
+    const multiplier = RADIUS_MULTIPLIERS[radiusPreference] || 1.0;
+    
+    return Math.round(baseRadius * multiplier);
   };
 
   // Update zoom level based on activity and zoom level setting
@@ -1640,7 +1597,9 @@ const MapScreen = () => {
         }
         
         // Listen to drag events and immediately recenter if user tries to drag
-        const dragListener = mapRef.addListener('drag', () => {
+        // Cast mapRef to google.maps.Map to access addListener method
+        const googleMap = mapRef as any as google.maps.Map;
+        const dragListener = window.google.maps.event.addListener(googleMap, 'drag', () => {
           if (isActive && location && location.lat && location.lng) {
             // Immediately snap back to user location
             mapRef.setCenter({ lat: location.lat, lng: location.lng });
@@ -2114,6 +2073,51 @@ const MapScreen = () => {
             </>
           )}
 
+          {/* Transparent radius circle overlay showing matching range */}
+          {location && location.lat && location.lng && isLoaded && window.google && selectedActivity && userProfile && (
+            (() => {
+              const matchingRadius = calculateMatchingRadius(
+                selectedActivity,
+                userProfile.radiusPreference || "normal"
+              );
+              
+              // Activity-specific colors
+              const activityColors = {
+                walking: {
+                  fill: "#FFC107",      // Amber/Yellow
+                  stroke: "#FF9800"     // Orange
+                },
+                running: {
+                  fill: "#4CAF50",      // Green
+                  stroke: "#388E3C"     // Dark Green
+                },
+                cycling: {
+                  fill: "#2196F3",      // Blue
+                  stroke: "#1976D2"     // Dark Blue
+                }
+              };
+              
+              const colors = activityColors[selectedActivity] || activityColors.running;
+              
+              return (
+                <Circle
+                  key={`radius-circle-${selectedActivity}-${userProfile.radiusPreference || "normal"}-${location.lat}-${location.lng}`}
+                  center={{ lat: location.lat, lng: location.lng }}
+                  radius={matchingRadius}
+                  options={{
+                    fillColor: colors.fill,
+                    fillOpacity: 0.12,
+                    strokeColor: colors.stroke,
+                    strokeOpacity: 0.7,
+                    strokeWeight: 2,
+                    clickable: false,
+                    zIndex: 1
+                  }}
+                />
+              );
+            })()
+          )}
+
           {/* Nearby users' markers with profile pictures */}
           {nearbyUsersWithAdjustedPositions.map((userData: any) => {
               const hasTrail = userTrails[userData.id] && userTrails[userData.id].length > 1;
@@ -2123,11 +2127,12 @@ const MapScreen = () => {
               // Get profile picture URL - check both photoURL and avatar fields
               const photoURL = userData.photoURL || userData.avatar || null;
               const userName = userData.name || "User";
+              const fitnessLevel = userData.fitnessLevel;
               
-              // Create profile picture icon
+              // Create profile picture icon with fitness level glow
               const iconSize = hasTrail ? 56 : 48;
               const profileIcon = isLoaded && window.google 
-                ? createMapIcon(photoURL, userName, iconSize)
+                ? createMapIcon(photoURL, userName, iconSize, fitnessLevel)
                 : null;
               
               return isLoaded && window.google && profileIcon ? (
@@ -2813,12 +2818,13 @@ const MapScreen = () => {
                               }}
                               className="cursor-pointer hover:opacity-80 transition-opacity"
                             >
-                              <Avatar className={`w-12 h-12 border-2 ${isPoked ? 'border-purple-500 ring-2 ring-purple-300' : 'border-primary'}`}>
-                                <AvatarImage src={user.photoURL || `https://ui-avatars.com/api/?name=${user.name || 'User'}`} />
-                                <AvatarFallback>
-                                  {user.name?.charAt(0) || "U"}
-                                </AvatarFallback>
-                              </Avatar>
+                              <FitnessLevelAvatar
+                                photoURL={user.photoURL}
+                                name={user.name || "User"}
+                                fitnessLevel={user.fitnessLevel}
+                                size="md"
+                                showGlow={true}
+                              />
                             </button>
 
                             {/* User Info */}

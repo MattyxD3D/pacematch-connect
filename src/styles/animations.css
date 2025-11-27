@@ -14,3 +14,43 @@
   animation: pulse 2s infinite;
 }
 
+/* Glow animation for fitness level avatars */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.6), 0 0 24px rgba(59, 130, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(59, 130, 246, 0.8), 0 0 32px rgba(59, 130, 246, 0.5);
+  }
+}
+
+@keyframes glow-pulse-green {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.6), 0 0 24px rgba(34, 197, 94, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(34, 197, 94, 0.8), 0 0 32px rgba(34, 197, 94, 0.5);
+  }
+}
+
+@keyframes glow-pulse-purple {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.6), 0 0 24px rgba(168, 85, 247, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.8), 0 0 32px rgba(168, 85, 247, 0.5);
+  }
+}
+
+.animate-glow-pulse-blue {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+.animate-glow-pulse-green {
+  animation: glow-pulse-green 3s ease-in-out infinite;
+}
+
+.animate-glow-pulse-purple {
+  animation: glow-pulse-purple 3s ease-in-out infinite;
+}
+

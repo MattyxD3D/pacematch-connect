@@ -100,6 +100,12 @@ export const getUsersByVenues = async (
           try {
             const userData = await getUserData(userId);
             if (userData) {
+              // Filter out users with profileVisible === false (default to visible if not set)
+              if (userData.profileVisible === false) {
+                console.log(`User ${userId} filtered out from venue ${venueId} - profileVisible: false`);
+                continue;
+              }
+
               const venueUser: VenueUser = {
                 userId,
                 username: userData.username || userData.name || "User",
@@ -128,6 +134,7 @@ export const getUsersByVenues = async (
 
 /**
  * Listen to users by venues in real-time
+ * Also listens to user profile changes to refresh when profileVisible changes
  */
 export const listenToUsersByVenues = (
   venueIds: string[],
@@ -135,14 +142,10 @@ export const listenToUsersByVenues = (
 ): (() => void) => {
   try {
     const preferencesRef = ref(database, `userVenuePreferences`);
+    const usersRef = ref(database, `users`);
 
-    const unsubscribe = onValue(preferencesRef, async (snapshot: DataSnapshot) => {
-      if (!snapshot.exists()) {
-        callback({});
-        return;
-      }
-
-      const allPreferences = snapshot.val() as Record<string, UserVenuePreferences>;
+    // Helper function to fetch and filter venue users
+    const fetchVenueUsers = async (allPreferences: Record<string, UserVenuePreferences>): Promise<void> => {
       const usersByVenue: Record<string, VenueUser[]> = {};
 
       // Initialize venue arrays
@@ -165,6 +168,12 @@ export const listenToUsersByVenues = (
             const promise = getUserData(userId)
               .then((userData) => {
                 if (userData) {
+                  // Filter out users with profileVisible === false (default to visible if not set)
+                  if (userData.profileVisible === false) {
+                    console.log(`User ${userId} filtered out from venue ${venueId} - profileVisible: false`);
+                    return;
+                  }
+
                   const venueUser: VenueUser = {
                     userId,
                     username: userData.username || userData.name || "User",
@@ -191,13 +200,47 @@ export const listenToUsersByVenues = (
       await Promise.all(userDataPromises);
 
       callback(usersByVenue);
+    };
+
+    // Listener for venue preferences changes
+    const unsubscribePreferences = onValue(preferencesRef, async (snapshot: DataSnapshot) => {
+      if (!snapshot.exists()) {
+        callback({});
+        return;
+      }
+
+      const allPreferences = snapshot.val() as Record<string, UserVenuePreferences>;
+      await fetchVenueUsers(allPreferences);
     }, (error) => {
-      console.error("❌ Error listening to users by venues:", error);
+      console.error("❌ Error listening to venue preferences:", error);
       callback({});
+    });
+
+    // Listener for user profile changes (to refresh when profileVisible changes)
+    let currentPreferences: Record<string, UserVenuePreferences> | null = null;
+    
+    const unsubscribeUsers = onValue(usersRef, async (snapshot: DataSnapshot) => {
+      // Only refresh if we have current preferences cached
+      if (currentPreferences) {
+        await fetchVenueUsers(currentPreferences);
+      }
+    }, (error) => {
+      console.error("❌ Error listening to user profiles:", error);
+    });
+
+    // Cache preferences when they change
+    const cachePreferences = onValue(preferencesRef, (snapshot: DataSnapshot) => {
+      if (snapshot.exists()) {
+        currentPreferences = snapshot.val() as Record<string, UserVenuePreferences>;
+      } else {
+        currentPreferences = null;
+      }
     });
 
     return () => {
       off(preferencesRef);
+      off(usersRef);
+      cachePreferences();
     };
   } catch (error) {
     console.error("❌ Error setting up listener:", error);

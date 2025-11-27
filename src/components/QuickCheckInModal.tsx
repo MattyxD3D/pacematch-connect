@@ -154,7 +154,7 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                 <div>
                   <h2 className="text-2xl font-bold">Add venues</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Select venues and activities to discover people nearby
+                    Select venues and activies to display on other users. (Only your profile picture and user is visible)
                   </p>
                 </div>
               </div>

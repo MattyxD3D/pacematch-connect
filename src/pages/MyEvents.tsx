@@ -49,6 +49,7 @@ interface Event {
   lng: number;
   isJoined?: boolean;
   isPast?: boolean;
+  isGreyedOut?: boolean;
 }
 
 const MyEvents = () => {
@@ -72,19 +73,43 @@ const MyEvents = () => {
       try {
         const firebaseEvents = await getUserEvents(currentUser.uid);
         
-        // Transform and determine if events are past
-        let transformedEvents: Event[] = firebaseEvents.map((event) => {
-          const eventDate = new Date(event.date);
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          eventDate.setHours(0, 0, 0, 0);
-          
-          return {
-            ...event,
-            isJoined: true, // All events from getUserEvents are joined
-            isPast: eventDate < today,
-          };
-        });
+        // Transform and determine if events are past or greyed out (24 hours after event)
+        let transformedEvents: Event[] = firebaseEvents
+          .filter((event) => event && event.date) // Filter out invalid events
+          .map((event) => {
+            try {
+              // Combine date and time to get full event datetime
+              const eventDateTime = new Date(`${event.date}T${event.time || '00:00'}`);
+              const now = new Date();
+              
+              // Check if date is valid
+              if (isNaN(eventDateTime.getTime())) {
+                console.warn("Invalid event date:", event.date, event);
+                return null;
+              }
+              
+              // Calculate 24 hours after event
+              const eventEndTime = new Date(eventDateTime);
+              eventEndTime.setHours(eventEndTime.getHours() + 24);
+              
+              // Event is past if it's been more than 24 hours since the event
+              const isPast = now > eventEndTime;
+              // Event is greyed out if it's been more than 24 hours since the event
+              const isGreyedOut = now > eventEndTime;
+              
+              return {
+                ...event,
+                participants: Array.isArray(event.participants) ? event.participants : [],
+                isJoined: true, // All events from getUserEvents are joined
+                isPast,
+                isGreyedOut,
+              };
+            } catch (error) {
+              console.error("Error processing event:", error, event);
+              return null;
+            }
+          })
+          .filter((event): event is Event => event !== null); // Remove null entries
         
         // Add dummy events if enabled and no real events exist
         if (ENABLE_DUMMY_DATA && transformedEvents.length === 0) {
@@ -92,23 +117,40 @@ const MyEvents = () => {
           // Add current user to some events and filter to only include events where current user is a participant
           transformedEvents = dummyEvents
             .map((event, index) => {
+              // Ensure participants is an array
+              const participants = Array.isArray(event.participants) ? event.participants : [];
               // Add current user to first 3 events to ensure they show up
-              if (index < 3 && !event.participants.includes(currentUser.uid)) {
-                event.participants.push(currentUser.uid);
+              if (index < 3 && !participants.includes(currentUser.uid)) {
+                participants.push(currentUser.uid);
               }
-              return event;
+              return {
+                ...event,
+                participants,
+              };
             })
-            .filter(event => event.participants.includes(currentUser.uid))
+            .filter(event => {
+              const participants = Array.isArray(event.participants) ? event.participants : [];
+              return participants.includes(currentUser.uid);
+            })
             .map((event) => {
-              const eventDate = new Date(event.date);
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              eventDate.setHours(0, 0, 0, 0);
+              // Combine date and time to get full event datetime
+              const eventDateTime = new Date(`${event.date}T${event.time || '00:00'}`);
+              const now = new Date();
+              
+              // Calculate 24 hours after event
+              const eventEndTime = new Date(eventDateTime);
+              eventEndTime.setHours(eventEndTime.getHours() + 24);
+              
+              // Event is past if it's been more than 24 hours since the event
+              const isPast = now > eventEndTime;
+              const isGreyedOut = now > eventEndTime;
               
               return {
                 ...event,
+                participants: Array.isArray(event.participants) ? event.participants : [],
                 isJoined: true,
-                isPast: eventDate < today,
+                isPast,
+                isGreyedOut,
               };
             });
         }
@@ -124,9 +166,29 @@ const MyEvents = () => {
     loadUserEvents();
   }, [currentUser?.uid]);
 
-  // Filter events by status
-  const upcomingEvents = joinedEvents.filter((event) => !event.isPast);
-  const pastEvents = joinedEvents.filter((event) => event.isPast);
+  // Filter events by status with null safety
+  const upcomingEvents = (joinedEvents || []).filter((event) => event && !event.isPast);
+  const pastEvents = (joinedEvents || []).filter((event) => event && event.isPast);
+
+  // Helper function to safely parse event dates for calendar
+  const getValidEventDates = (events: Event[]) => {
+    return events
+      .filter((event) => event && event.date)
+      .map((event) => {
+        try {
+          const date = parseISO(event.date);
+          return isNaN(date.getTime()) ? null : date;
+        } catch {
+          return null;
+        }
+      })
+      .filter((date): date is Date => date !== null);
+  };
+
+  // Get valid dates for calendar modifiers
+  const upcomingEventsDates = getValidEventDates(upcomingEvents);
+  const pastEventsDates = getValidEventDates(pastEvents);
+  const allJoinedEventsDates = getValidEventDates(joinedEvents);
 
   const handleEventClick = (event: Event) => {
     setSelectedEvent(event);
@@ -150,7 +212,7 @@ const MyEvents = () => {
     }
   };
 
-  const getActivityIcon = (type: EventType) => {
+  const getActivityIcon = (type: EventType | string) => {
     switch (type) {
       case "running":
         return <DirectionsRunIcon className="text-success" style={{ fontSize: 20 }} />;
@@ -158,10 +220,13 @@ const MyEvents = () => {
         return <DirectionsBikeIcon className="text-primary" style={{ fontSize: 20 }} />;
       case "walking":
         return <DirectionsWalkIcon className="text-warning" style={{ fontSize: 20 }} />;
+      default:
+        // Default to running icon if type is unknown
+        return <DirectionsRunIcon className="text-success" style={{ fontSize: 20 }} />;
     }
   };
 
-  const getActivityColor = (type: EventType) => {
+  const getActivityColor = (type: EventType | string) => {
     switch (type) {
       case "running":
         return "bg-success";
@@ -169,13 +234,28 @@ const MyEvents = () => {
         return "bg-primary";
       case "walking":
         return "bg-warning";
+      default:
+        return "bg-success";
     }
   };
 
   const getEventsForDate = (date: Date) => {
-    return upcomingEvents.filter((event) => {
-      const eventDate = parseISO(event.date);
-      return isSameDay(eventDate, date);
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+      return [];
+    }
+    if (!joinedEvents || joinedEvents.length === 0) {
+      return [];
+    }
+    return joinedEvents.filter((event) => {
+      if (!event || !event.date) return false;
+      try {
+        const eventDate = parseISO(event.date);
+        if (isNaN(eventDate.getTime())) return false;
+        return isSameDay(eventDate, date);
+      } catch (error) {
+        console.error("Error parsing event date:", error, event);
+        return false;
+      }
     });
   };
 
@@ -222,31 +302,47 @@ const MyEvents = () => {
           <TabsList className="grid w-full grid-cols-3 h-auto mb-6">
             <TabsTrigger
               value="upcoming"
-              className="py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              className="py-2 sm:py-3 px-2 sm:px-4 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground min-h-[44px]"
             >
-              <UpcomingIcon className="mr-2" style={{ fontSize: 20 }} />
-              <span className="hidden sm:inline">Upcoming</span> ({upcomingEvents.length})
+              <UpcomingIcon className="sm:mr-2" style={{ fontSize: 20 }} />
+              <span className="hidden sm:inline">Upcoming</span>
+              <span className="ml-1 sm:ml-2 text-xs sm:text-sm">({upcomingEvents.length})</span>
             </TabsTrigger>
             <TabsTrigger
               value="calendar"
-              className="py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              className="py-2 sm:py-3 px-2 sm:px-4 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground min-h-[44px]"
             >
-              <CalendarMonthIcon className="mr-2" style={{ fontSize: 20 }} />
+              <CalendarMonthIcon className="sm:mr-2" style={{ fontSize: 20 }} />
               <span className="hidden sm:inline">Calendar</span>
             </TabsTrigger>
             <TabsTrigger
               value="past"
-              className="py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              className="py-2 sm:py-3 px-2 sm:px-4 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground min-h-[44px]"
             >
-              <HistoryIcon className="mr-2" style={{ fontSize: 20 }} />
-              <span className="hidden sm:inline">Past</span> ({pastEvents.length})
+              <HistoryIcon className="sm:mr-2" style={{ fontSize: 20 }} />
+              <span className="hidden sm:inline">Past</span>
+              <span className="ml-1 sm:ml-2 text-xs sm:text-sm">({pastEvents.length})</span>
             </TabsTrigger>
           </TabsList>
 
           {/* Upcoming Events */}
           <TabsContent value="upcoming" className="space-y-4">
             <AnimatePresence mode="wait">
-              {upcomingEvents.length === 0 ? (
+              {loading ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                >
+                  <Card className="p-12 text-center shadow-elevation-2">
+                    <UpcomingIcon
+                      style={{ fontSize: 64 }}
+                      className="text-muted-foreground/30 mx-auto mb-4 animate-pulse"
+                    />
+                    <h3 className="text-lg font-bold mb-2">Loading events...</h3>
+                  </Card>
+                </motion.div>
+              ) : upcomingEvents.length === 0 ? (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -316,31 +412,73 @@ const MyEvents = () => {
                     onSelect={setSelectedDate}
                     className="rounded-md border pointer-events-auto"
                     modifiers={{
-                      hasEvents: upcomingEvents.map((event) => parseISO(event.date)),
+                      hasUpcomingEvents: upcomingEventsDates,
+                      hasPastEvents: pastEventsDates,
                     }}
                     modifiersClassNames={{
-                      hasEvents: "font-bold relative",
+                      hasUpcomingEvents: "has-upcoming-event",
+                      hasPastEvents: "has-past-event",
                     }}
                   />
                   <style>{`
-                    .rdp-day_button:has(.event-dots) {
+                    /* Base styles for dates with events */
+                    .rdp-day.has-upcoming-event,
+                    .rdp-day.has-past-event {
                       position: relative;
                     }
+                    
+                    /* Upcoming events - primary/blue dot */
+                    .rdp-day.has-upcoming-event .rdp-day_button::after {
+                      content: '';
+                      position: absolute;
+                      bottom: 2px;
+                      left: 50%;
+                      transform: translateX(-50%);
+                      width: 6px;
+                      height: 6px;
+                      border-radius: 50%;
+                      background-color: hsl(var(--primary));
+                      box-shadow: 0 0 0 1px hsl(var(--background));
+                    }
+                    
+                    /* Past events - orange/amber dot */
+                    .rdp-day.has-past-event .rdp-day_button::after {
+                      content: '';
+                      position: absolute;
+                      bottom: 2px;
+                      left: 50%;
+                      transform: translateX(-50%);
+                      width: 6px;
+                      height: 6px;
+                      border-radius: 50%;
+                      background-color: hsl(var(--warning));
+                      box-shadow: 0 0 0 1px hsl(var(--background));
+                    }
+                    
+                    /* Ensure the dot is visible even when date is selected - upcoming */
+                    .rdp-day.has-upcoming-event[aria-selected="true"] .rdp-day_button::after {
+                      background-color: hsl(var(--primary-foreground));
+                      box-shadow: 0 0 0 1px hsl(var(--primary));
+                    }
+                    
+                    /* Ensure the dot is visible even when date is selected - past */
+                    .rdp-day.has-past-event[aria-selected="true"] .rdp-day_button::after {
+                      background-color: hsl(var(--warning-foreground, hsl(var(--background))));
+                      box-shadow: 0 0 0 1px hsl(var(--warning));
+                    }
+                    
+                    /* Make the dot more prominent on hover */
+                    .rdp-day.has-upcoming-event:hover .rdp-day_button::after,
+                    .rdp-day.has-past-event:hover .rdp-day_button::after {
+                      width: 7px;
+                      height: 7px;
+                    }
+                    
+                    /* Handle dates with both past and upcoming events (shouldn't happen, but just in case) */
+                    .rdp-day.has-upcoming-event.has-past-event .rdp-day_button::after {
+                      background-color: hsl(var(--primary));
+                    }
                   `}</style>
-                  {upcomingEvents.map((event) => {
-                    const eventDate = parseISO(event.date);
-                    return (
-                      <div
-                        key={event.id}
-                        className="absolute pointer-events-none"
-                        style={{
-                          display: 'none'
-                        }}
-                        data-event-date={format(eventDate, 'yyyy-MM-dd')}
-                        data-event-type={event.type}
-                      />
-                    );
-                  })}
                 </div>
               </Card>
 
@@ -370,20 +508,35 @@ const MyEvents = () => {
                           onClick={() => handleEventClick(event)}
                           className="cursor-pointer"
                         >
-                          <Card className="p-4 hover:shadow-elevation-2 transition-all duration-200 border-2 border-border/50 hover:border-primary/30">
+                          <Card 
+                            className={`p-4 hover:shadow-elevation-2 transition-all duration-200 border-2 ${
+                              event.isGreyedOut
+                                ? "opacity-50 grayscale border-muted bg-muted/20"
+                                : event.isPast 
+                                ? "border-warning/50 bg-muted/30 opacity-90 hover:border-warning/70" 
+                                : "border-border/50 hover:border-primary/30"
+                            }`}
+                          >
                             <div className="flex items-start gap-3">
-                              {getActivityIcon(event.type)}
+                              {getActivityIcon(event.type || "running")}
                               <div className="flex-1 min-w-0">
-                                <h4 className="font-semibold text-sm mb-1 truncate">
-                                  {event.title}
-                                </h4>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h4 className="font-semibold text-sm truncate">
+                                    {event.title || "Untitled Event"}
+                                  </h4>
+                                  {event.isPast && (
+                                    <Badge variant="secondary" className="flex-shrink-0 bg-muted text-xs">
+                                      Completed
+                                    </Badge>
+                                  )}
+                                </div>
                                 <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
                                   <EventIcon style={{ fontSize: 14 }} />
-                                  <span>{event.time}</span>
+                                  <span>{event.time || ""}</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                   <LocationOnIcon style={{ fontSize: 14 }} />
-                                  <span className="truncate">{event.location}</span>
+                                  <span className="truncate">{event.location || ""}</span>
                                 </div>
                               </div>
                             </div>
@@ -400,7 +553,21 @@ const MyEvents = () => {
           {/* Past Events */}
           <TabsContent value="past" className="space-y-4">
             <AnimatePresence mode="wait">
-              {pastEvents.length === 0 ? (
+              {loading ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                >
+                  <Card className="p-12 text-center shadow-elevation-2">
+                    <HistoryIcon
+                      style={{ fontSize: 64 }}
+                      className="text-muted-foreground/30 mx-auto mb-4 animate-pulse"
+                    />
+                    <h3 className="text-lg font-bold mb-2">Loading events...</h3>
+                  </Card>
+                </motion.div>
+              ) : pastEvents.length === 0 ? (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -470,6 +637,17 @@ const EventCard = ({
   showLeaveButton,
   isPast,
 }: EventCardProps) => {
+  // Add defensive checks for potentially missing data
+  const participantsCount = Array.isArray(event.participants) 
+    ? event.participants.length 
+    : 0;
+  const eventType = event.type || "running"; // Default to running if type is missing
+  const eventTitle = event.title || "Untitled Event";
+  const eventDescription = event.description || "";
+  const eventDate = event.date || "";
+  const eventTime = event.time || "";
+  const eventLocation = event.location || "";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -479,8 +657,12 @@ const EventCard = ({
       className="cursor-pointer"
     >
       <Card
-        className={`overflow-hidden shadow-elevation-2 hover:shadow-elevation-3 transition-all duration-300 border-2 border-border/50 hover:border-primary/30 ${
-          isPast ? "opacity-75" : ""
+        className={`overflow-hidden shadow-elevation-2 hover:shadow-elevation-3 transition-all duration-300 border-2 ${
+          event.isGreyedOut
+            ? "opacity-50 grayscale border-muted bg-muted/20"
+            : isPast 
+            ? "opacity-90 border-warning/50 bg-muted/30 hover:border-warning/70" 
+            : "border-border/50 hover:border-primary/30"
         }`}
       >
         <div className="p-5 space-y-4">
@@ -488,8 +670,8 @@ const EventCard = ({
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-2">
-                {getActivityIcon(event.type)}
-                <h3 className="font-bold text-lg truncate">{event.title}</h3>
+                {getActivityIcon(eventType)}
+                <h3 className="font-bold text-lg truncate">{eventTitle}</h3>
                 {isPast && (
                   <Badge variant="secondary" className="flex-shrink-0 bg-muted">
                     Completed
@@ -497,7 +679,7 @@ const EventCard = ({
                 )}
               </div>
               <p className="text-sm text-muted-foreground line-clamp-2">
-                {event.description}
+                {eventDescription}
               </p>
             </div>
             {event.category === "sponsored" && (
@@ -516,17 +698,17 @@ const EventCard = ({
             <div className="flex items-center gap-2 text-muted-foreground">
               <EventIcon style={{ fontSize: 18 }} />
               <span>
-                {event.date} at {event.time}
+                {eventDate} {eventTime && `at ${eventTime}`}
               </span>
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <LocationOnIcon style={{ fontSize: 18 }} />
-              <span className="truncate">{event.location}</span>
+              <span className="truncate">{eventLocation}</span>
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <PeopleIcon style={{ fontSize: 18 }} />
               <span>
-                {event.participants.length}
+                {participantsCount}
                 {event.maxParticipants ? ` / ${event.maxParticipants}` : ""} joined
               </span>
             </div>
@@ -535,8 +717,11 @@ const EventCard = ({
           {/* Status Badge */}
           <div className="flex items-center justify-between pt-2 border-t border-border">
             <div className="flex items-center gap-2">
-              <CheckCircleIcon className="text-success" style={{ fontSize: 20 }} />
-              <span className="text-sm font-semibold text-success">
+              <CheckCircleIcon 
+                className={isPast ? "text-warning" : "text-success"} 
+                style={{ fontSize: 20 }} 
+              />
+              <span className={`text-sm font-semibold ${isPast ? "text-warning" : "text-success"}`}>
                 {isPast ? "Event Completed" : "You're Joined"}
               </span>
             </div>

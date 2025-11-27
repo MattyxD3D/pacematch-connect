@@ -659,7 +659,7 @@ const Index = () => {
               <div>
                 <h2 className="text-xl font-bold">Meet New People</h2>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Share your profile and location to connect with others
+                  Share your profile and general location to connect with others
                 </p>
               </div>
             </div>
@@ -813,7 +813,10 @@ const Index = () => {
                   <div className="space-y-6">
                     {userVenuePreferences.venues.map((venueId) => {
                       const venue = getVenueById(venueId);
-                      const venueUsers = usersByVenue[venueId] || [];
+                      // Filter out current user and users with profileVisible === false
+                      const venueUsers = (usersByVenue[venueId] || []).filter(
+                        (user) => user.userId !== currentUser?.uid
+                      );
                       
                       if (!venue) return null;
 
@@ -822,7 +825,7 @@ const Index = () => {
                           <div className="flex items-center gap-2">
                             <LocationOnIcon className="text-primary" style={{ fontSize: 20 }} />
                             <h3 className="font-semibold text-base">
-                              Active users in {venue.name}
+                              {venue.name}
                             </h3>
                             {venueUsers.length > 0 && (
                               <span className="text-sm text-muted-foreground">
@@ -838,7 +841,7 @@ const Index = () => {
                               </p>
                             </div>
                           ) : (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
                               {venueUsers.map((venueUser) => {
                                 const activityIcons = {
                                   running: DirectionsRunIcon,
@@ -851,17 +854,17 @@ const Index = () => {
                                     key={venueUser.userId}
                                     initial={{ opacity: 0, scale: 0.9 }}
                                     animate={{ opacity: 1, scale: 1 }}
-                                    className="flex flex-col items-center p-3 border border-border rounded-lg bg-card hover:bg-secondary transition-colors"
+                                    className="flex flex-col items-center p-2 border border-border rounded-lg bg-card hover:bg-secondary transition-colors min-w-[80px] flex-shrink-0"
                                   >
                                     <Avatar
                                       src={venueUser.avatar || `https://ui-avatars.com/api/?name=${venueUser.username}`}
                                       alt={venueUser.username}
-                                      sx={{ width: 56, height: 56 }}
+                                      sx={{ width: 40, height: 40 }}
                                     />
-                                    <p className="text-sm font-medium mt-2 text-center truncate w-full">
+                                    <p className="text-xs font-medium mt-1.5 text-center truncate w-full max-w-[70px]">
                                       {venueUser.username}
                                     </p>
-                                    <div className="flex gap-1 mt-1">
+                                    <div className="flex gap-0.5 mt-1">
                                       {venueUser.activities.map((activity) => {
                                         const ActivityIcon = activityIcons[activity];
                                         return (
@@ -872,7 +875,7 @@ const Index = () => {
                                               activity === "cycling" ? "text-primary" :
                                               "text-warning"
                                             }
-                                            style={{ fontSize: 16 }}
+                                            style={{ fontSize: 14 }}
                                           />
                                         );
                                       })}
@@ -1067,31 +1070,6 @@ const Index = () => {
             </Card>
           </motion.div>
         )}
-
-        {/* Activity Filter Tabs */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
-          <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-            <TabsList className="w-full grid grid-cols-4 h-12">
-              <TabsTrigger value="all" className="text-xs">All Friends</TabsTrigger>
-              <TabsTrigger value="running" className="text-xs">
-                <DirectionsRunIcon style={{ fontSize: 16 }} className="mr-1" />
-                Running
-              </TabsTrigger>
-              <TabsTrigger value="cycling" className="text-xs">
-                <DirectionsBikeIcon style={{ fontSize: 16 }} className="mr-1" />
-                Cycling
-              </TabsTrigger>
-              <TabsTrigger value="walking" className="text-xs">
-                <DirectionsWalkIcon style={{ fontSize: 16 }} className="mr-1" />
-                Walking
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </motion.div>
 
         {/* Activity Feed */}
         <motion.div

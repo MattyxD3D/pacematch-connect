@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { FitnessLevelAvatar } from "@/components/FitnessLevelAvatar";
 import { MatchResult } from "@/services/matchingService";
 import { formatDistance } from "@/utils/distance";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
@@ -145,12 +146,13 @@ export const NearbyUsersAccordion = ({
                         onClick={() => onViewProfile(user.uid)}
                         className="cursor-pointer hover:opacity-80 transition-opacity"
                       >
-                        <Avatar className={`w-12 h-12 border-2 ${isPoked ? 'border-purple-500 ring-2 ring-purple-300' : 'border-primary'}`}>
-                          <AvatarImage src={user.photoURL || `https://ui-avatars.com/api/?name=${user.name || 'User'}`} />
-                          <AvatarFallback>
-                            {user.name?.charAt(0) || "U"}
-                          </AvatarFallback>
-                        </Avatar>
+                        <FitnessLevelAvatar
+                          photoURL={user.photoURL}
+                          name={user.name || "User"}
+                          fitnessLevel={user.fitnessLevel}
+                          size="md"
+                          showGlow={true}
+                        />
                       </button>
 
                       {/* User Info */}

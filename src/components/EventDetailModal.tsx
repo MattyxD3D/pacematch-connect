@@ -16,17 +16,19 @@ import LocationOnIcon from "@mui/icons-material/LocationOn";
 import PeopleIcon from "@mui/icons-material/People";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import StarIcon from "@mui/icons-material/Star";
-import ShareIcon from "@mui/icons-material/Share";
 import SendIcon from "@mui/icons-material/Send";
 import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutline";
-import LinkIcon from "@mui/icons-material/Link";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
+import NavigationIcon from "@mui/icons-material/Navigation";
 import { toast } from "sonner";
 import { useVenueCheckIns } from "@/hooks/useVenueCheckIns";
 import { findVenueForEvent } from "@/services/venueService";
-import { checkInToEventLocation, getCheckInsAtEventLocation } from "@/services/eventService";
+import { checkInToEventLocation, getCheckInsAtEventLocation, deleteEvent, updateEvent } from "@/services/eventService";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserData } from "@/services/authService";
+import { openGoogleMapsNavigation } from "@/utils/navigation";
 
 type EventType = "running" | "cycling" | "walking" | "others";
 
@@ -43,6 +45,7 @@ interface Event {
   distanceValue: number;
   participants: string[] | number;
   maxParticipants?: number;
+  hostId?: string;
   hostName?: string;
   hostAvatar?: string;
   sponsorLogo?: string;
@@ -71,9 +74,11 @@ interface EventDetailModalProps {
   event: Event | null;
   onClose: () => void;
   onJoin: (eventId: string | number) => void;
+  onEdit?: (eventId: string | number) => void;
+  onDelete?: (eventId: string | number) => void;
 }
 
-export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalProps) => {
+export const EventDetailModal = ({ event, onClose, onJoin, onEdit, onDelete }: EventDetailModalProps) => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("details");
   const [commentText, setCommentText] = useState("");
@@ -178,14 +183,46 @@ export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalPro
     toast.success("Comment added!");
   };
 
-  const handleShare = (method: string) => {
-    toast.success(`Event shared via ${method}!`);
+  const handleDelete = async () => {
+    if (!event || !user?.uid) return;
+    
+    if (event.hostId !== user.uid) {
+      toast.error("Only the event creator can delete this event");
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to delete this event? This action cannot be undone.")) {
+      return;
+    }
+
+    try {
+      await deleteEvent(String(event.id), user.uid);
+      toast.success("Event deleted successfully");
+      onClose();
+      if (onDelete) {
+        onDelete(event.id);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete event");
+    }
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(`https://app.example.com/events/${event.id}`);
-    toast.success("Event link copied to clipboard!");
+  const handleEdit = () => {
+    if (!event || !user?.uid) return;
+    
+    if (event.hostId !== user.uid) {
+      toast.error("Only the event creator can edit this event");
+      return;
+    }
+
+    if (onEdit) {
+      onEdit(event.id);
+    }
   };
+
+  // Check if current user is the event creator
+  const isEventCreator = event && user?.uid && event.hostId === user.uid;
+
 
   return (
     <AnimatePresence>
@@ -259,6 +296,28 @@ export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalPro
                   </div>
                 </div>
 
+                {/* Creator Actions - Edit/Delete */}
+                {isEventCreator && (
+                  <div className="flex gap-3 pb-3 border-b border-border">
+                    <Button
+                      onClick={handleEdit}
+                      variant="outline"
+                      className="flex-1 h-12 font-semibold"
+                    >
+                      <EditIcon className="mr-2" style={{ fontSize: 20 }} />
+                      Edit Event
+                    </Button>
+                    <Button
+                      onClick={handleDelete}
+                      variant="outline"
+                      className="flex-1 h-12 font-semibold text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <DeleteIcon className="mr-2" style={{ fontSize: 20 }} />
+                      Delete Event
+                    </Button>
+                  </div>
+                )}
+
                 {/* Action Buttons */}
                 <div className="flex flex-col sm:flex-row gap-3">
                   <Button
@@ -271,14 +330,6 @@ export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalPro
                     variant={event.isJoined ? "outline" : "default"}
                   >
                     {event.isJoined ? "✓ Joined" : "Join Event"}
-                  </Button>
-                  <Button
-                    onClick={handleCopyLink}
-                    variant="outline"
-                    className="sm:w-auto h-12 font-semibold"
-                  >
-                    <ShareIcon className="mr-2" style={{ fontSize: 20 }} />
-                    Share
                   </Button>
                 </div>
               </div>
@@ -318,8 +369,19 @@ export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalPro
                     <p className="text-sm text-muted-foreground mt-1">
                       {event.distance} from your location
                     </p>
-                    <Button variant="outline" size="sm" className="mt-3">
-                      <LocationOnIcon className="mr-2" style={{ fontSize: 16 }} />
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="mt-3"
+                      onClick={() => {
+                        if (event.lat && event.lng) {
+                          openGoogleMapsNavigation(event.lat, event.lng);
+                        } else {
+                          toast.error("Location not available");
+                        }
+                      }}
+                    >
+                      <NavigationIcon className="mr-2" style={{ fontSize: 16 }} />
                       View on Map
                     </Button>
                   </div>
@@ -499,47 +561,6 @@ export const EventDetailModal = ({ event, onClose, onJoin }: EventDetailModalPro
                   </div>
                 ) : null}
 
-                {/* Share Options */}
-                <div className="space-y-3">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <ShareIcon style={{ fontSize: 20 }} />
-                    Share Event
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <Button
-                      variant="outline"
-                      onClick={() => handleShare("Message")}
-                      className="h-auto flex-col py-3 gap-2"
-                    >
-                      <SendIcon style={{ fontSize: 24 }} />
-                      <span className="text-xs">Message</span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleCopyLink}
-                      className="h-auto flex-col py-3 gap-2"
-                    >
-                      <LinkIcon style={{ fontSize: 24 }} />
-                      <span className="text-xs">Copy Link</span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleShare("Social")}
-                      className="h-auto flex-col py-3 gap-2"
-                    >
-                      <ShareIcon style={{ fontSize: 24 }} />
-                      <span className="text-xs">Social</span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleShare("More")}
-                      className="h-auto flex-col py-3 gap-2"
-                    >
-                      <ShareIcon style={{ fontSize: 24 }} />
-                      <span className="text-xs">More</span>
-                    </Button>
-                  </div>
-                </div>
               </TabsContent>
 
               {/* Participants Tab */}

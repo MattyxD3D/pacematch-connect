@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { listenToEvents, Event as FirebaseEvent, joinEvent, listenToEventCheckIns, createEvent } from "@/services/eventService";
+import { listenToEvents, Event as FirebaseEvent, joinEvent, leaveEvent, listenToEventCheckIns, createEvent, deleteEvent, updateEvent } from "@/services/eventService";
 import { getUserData } from "@/services/authService";
 import { calculateDistance, formatDistance } from "@/utils/distance";
 import { GoogleMap, Marker, InfoWindow, OverlayView, useJsApiLoader } from "@react-google-maps/api";
@@ -19,12 +19,12 @@ import PeopleIcon from "@mui/icons-material/People";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import StarIcon from "@mui/icons-material/Star";
 import AddIcon from "@mui/icons-material/Add";
+import EditIcon from "@mui/icons-material/Edit";
 import ViewListIcon from "@mui/icons-material/ViewList";
 import MapIcon from "@mui/icons-material/Map";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
-import MenuIcon from "@mui/icons-material/Menu";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import MailIcon from "@mui/icons-material/Mail";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
@@ -37,6 +37,8 @@ import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
 import { EventDetailModal } from "@/components/EventDetailModal";
 import { CreateEventModal } from "@/components/CreateEventModal";
+import { EventsTopBar } from "@/components/EventsTopBar";
+import { EventDetailsPanel } from "@/components/EventDetailsPanel";
 import BottomNavigation from "@/components/BottomNavigation";
 import { generateDummyEvents, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 import {
@@ -72,6 +74,8 @@ interface Event {
   lat: number;
   lng: number;
   isJoined?: boolean;
+  isPast?: boolean;
+  isGreyedOut?: boolean;
 }
 
 // Custom Event Marker Component
@@ -145,13 +149,13 @@ const Events = () => {
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [activityFilter, setActivityFilter] = useState<EventType | "all">("all");
   const [categoryFilter, setCategoryFilter] = useState<EventCategory>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventDetail, setShowEventDetail] = useState(false);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(false); // Start closed on mobile
   const [drawerOpen, setDrawerOpen] = useState(false); // Mobile drawer state
   const [checkInCounts, setCheckInCounts] = useState<Record<string, number>>({});
   const [selectedMarkerEvent, setSelectedMarkerEvent] = useState<Event | null>(null);
@@ -298,11 +302,32 @@ const Events = () => {
           }
         }
         
+        // Calculate if event is past or greyed out (24 hours after event)
+        let isPast = false;
+        let isGreyedOut = false;
+        
+        try {
+          const eventDateTime = new Date(`${event.date}T${event.time || '00:00'}`);
+          if (!isNaN(eventDateTime.getTime())) {
+            const now = new Date();
+            const eventEndTime = new Date(eventDateTime);
+            eventEndTime.setHours(eventEndTime.getHours() + 24);
+            isPast = now > eventEndTime;
+            isGreyedOut = now > eventEndTime;
+          }
+        } catch (error) {
+          console.error("Error calculating event time:", error);
+        }
+        
         return {
           ...event,
-          isJoined: currentUser?.uid ? event.participants.includes(currentUser.uid) : false,
+          isJoined: currentUser?.uid && event.participants && Array.isArray(event.participants) 
+            ? event.participants.includes(currentUser.uid) 
+            : false,
           distance,
           distanceValue,
+          isPast,
+          isGreyedOut,
         };
       });
       
@@ -353,11 +378,46 @@ const Events = () => {
   const filteredEvents = events.filter((event) => {
     const matchesActivity = activityFilter === "all" || event.type === activityFilter;
     const matchesCategory = categoryFilter === "all" || event.category === categoryFilter;
-    return matchesActivity && matchesCategory;
+    
+    // Search filtering - case-insensitive search in title, description, and location
+    const matchesSearch = searchQuery.trim() === "" || 
+      event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      event.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      event.location.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    return matchesActivity && matchesCategory && matchesSearch;
   });
 
   // Sort by distance
   const sortedEvents = [...filteredEvents].sort((a, b) => a.distanceValue - b.distanceValue);
+
+  // Auto-zoom to single search result
+  useEffect(() => {
+    // Only auto-zoom if:
+    // 1. Search query is not empty
+    // 2. There's exactly one filtered event
+    // 3. We're in map view mode
+    // 4. Map reference is available
+    if (
+      searchQuery.trim() !== "" &&
+      filteredEvents.length === 1 &&
+      viewMode === "map" &&
+      mapRef
+    ) {
+      const singleEvent = filteredEvents[0];
+      
+      // Small delay to avoid rapid re-zooms during typing
+      const timeoutId = setTimeout(() => {
+        mapRef.panTo({ lat: singleEvent.lat, lng: singleEvent.lng });
+        mapRef.setZoom(15);
+        setSelectedEvent(singleEvent);
+        setShowEventDetail(true);
+        setSelectedMarkerEvent(singleEvent);
+      }, 300); // 300ms debounce delay
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [searchQuery, filteredEvents, viewMode, mapRef]);
 
   const handleJoinEvent = async (eventId: string) => {
     if (!currentUser?.uid) {
@@ -375,9 +435,56 @@ const Events = () => {
     }
   };
 
+  const handleLeaveEvent = async (eventId: string) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to leave events");
+      return;
+    }
+
+    try {
+      await leaveEvent(eventId, currentUser.uid);
+      toast.success("You've left the event");
+      // The real-time listener will update the events automatically
+    } catch (error: any) {
+      console.error("Error leaving event:", error);
+      toast.error(error.message || "Failed to leave event");
+    }
+  };
+
   const handleEventClick = (event: Event) => {
+    // Zoom to event location if map is available and in map view
+    if (mapRef && viewMode === "map") {
+      mapRef.panTo({ lat: event.lat, lng: event.lng });
+      mapRef.setZoom(15);
+    }
+    
     setSelectedEvent(event);
     setShowEventDetail(true);
+    setSelectedMarkerEvent(event);
+  };
+
+  const handleEditEvent = (eventId: string) => {
+    // Navigate to edit page or open edit modal
+    // For now, just show a toast - you can implement full edit functionality later
+    toast.info("Edit functionality coming soon!");
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to delete events");
+      return;
+    }
+
+    try {
+      await deleteEvent(eventId, currentUser.uid);
+      toast.success("Event deleted successfully");
+      setShowEventDetail(false);
+      setSelectedEvent(null);
+      // The real-time listener will update the events automatically
+    } catch (error: any) {
+      console.error("Error deleting event:", error);
+      toast.error(error.message || "Failed to delete event");
+    }
   };
 
   const handleCreateEvent = async (eventData: any) => {
@@ -463,154 +570,13 @@ const Events = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10 pb-20">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-20 border-b border-border/50"
-      >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold">Events</h1>
-              <p className="text-sm text-muted-foreground">
-                {sortedEvents.length} event{sortedEvents.length !== 1 ? "s" : ""} near you
-              </p>
-            </div>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setShowNotificationDrawer(true)}
-              className={`relative touch-target bg-transparent rounded-full hover:bg-muted transition-all ${
-                unreadCount > 0 ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-card' : ''
-              }`}
-              style={{ width: 40, height: 40 }}
-              title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : "Notifications"}
-            >
-              <NotificationsIcon 
-                style={{ fontSize: 24 }} 
-                className={unreadCount > 0 ? 'text-red-400' : 'text-foreground'}
-              />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center border-2 border-card shadow-lg animate-pulse z-10">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </motion.button>
-          </div>
-        </div>
-      </motion.div>
-
-      {/* Filters - Hidden on mobile, shown on desktop */}
-      <div className="hidden sm:block max-w-7xl mx-auto px-4 sm:px-6 py-4">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="space-y-3"
-        >
-          {/* Activity Filter */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-2">
-            <FilterListIcon className="text-muted-foreground flex-shrink-0" style={{ fontSize: 20 }} />
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("all")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
-                activityFilter === "all"
-                  ? "bg-primary text-primary-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              All Activities
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("running")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                activityFilter === "running"
-                  ? "bg-success text-success-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <DirectionsRunIcon style={{ fontSize: 18 }} />
-              Running
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("cycling")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                activityFilter === "cycling"
-                  ? "bg-primary text-primary-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <DirectionsBikeIcon style={{ fontSize: 18 }} />
-              Cycling
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("walking")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                activityFilter === "walking"
-                  ? "bg-warning text-warning-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <DirectionsWalkIcon style={{ fontSize: 18 }} />
-              Walking
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActivityFilter("others")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                activityFilter === "others"
-                  ? "bg-secondary text-secondary-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <FitnessCenterIcon style={{ fontSize: 18 }} />
-              Others
-            </motion.button>
-          </div>
-
-          {/* Category Filter */}
-          <div className="flex items-center gap-2">
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setCategoryFilter("all")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
-                categoryFilter === "all"
-                  ? "bg-primary text-primary-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              All Events
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setCategoryFilter("user")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
-                categoryFilter === "user"
-                  ? "bg-primary text-primary-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              Community
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setCategoryFilter("sponsored")}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                categoryFilter === "sponsored"
-                  ? "bg-primary text-primary-foreground shadow-elevation-2"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <StarIcon style={{ fontSize: 16 }} />
-              Sponsored
-            </motion.button>
-          </div>
-        </motion.div>
-      </div>
+      {/* Top Bar with Workout Dropdown and Search */}
+      <EventsTopBar
+        activityFilter={activityFilter}
+        onActivityFilterChange={setActivityFilter}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-0 sm:px-4 sm:px-6 pb-20 sm:pb-24">
@@ -652,6 +618,12 @@ const Events = () => {
                       }
                     }}
                     onClick={(e) => {
+                      // Close event details panel when clicking on empty map space
+                      if (showEventDetail) {
+                        setShowEventDetail(false);
+                        setSelectedEvent(null);
+                      }
+                      
                       // Allow clicking anywhere on the map to drop a pin for event creation
                       // Don't handle clicks if clicking on markers (they have their own handlers)
                       if (e.latLng && !e.placeId) {
@@ -719,6 +691,7 @@ const Events = () => {
                               checkInCount={checkInCount}
                               countdown={countdown}
                               onClick={() => {
+                                handleEventClick(event);
                                 setSelectedMarkerEvent(event);
                                 // Clear temp marker if clicking on existing event while in create mode
                                 if (tempMarkerPosition) {
@@ -810,8 +783,10 @@ const Events = () => {
                             </div>
                             <Button
                               onClick={() => {
-                                handleEventClick(selectedMarkerEvent);
-                                setSelectedMarkerEvent(null);
+                                if (selectedMarkerEvent) {
+                                  handleEventClick(selectedMarkerEvent);
+                                  setSelectedMarkerEvent(null);
+                                }
                               }}
                               className="w-full mt-2 h-8 text-xs"
                               size="sm"
@@ -826,21 +801,34 @@ const Events = () => {
                 )}
               </div>
 
+              {/* Create Event Button - Bottom Right of Map (dark rounded button with pencil+plus icon) */}
+              <motion.button
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setShowCreateEvent(true)}
+                className="absolute bottom-20 right-4 touch-target bg-gray-900 text-white rounded-2xl shadow-elevation-3 hover:bg-gray-800 hover:shadow-elevation-4 transition-all duration-300 flex items-center gap-2 px-5 py-3 z-30"
+                title="Create event"
+              >
+                {/* Pencil icon with plus sign */}
+                <div className="relative flex items-center justify-center">
+                  <EditIcon style={{ fontSize: 20, color: "white" }} />
+                  <AddIcon 
+                    style={{ 
+                      fontSize: 12, 
+                      color: "white",
+                      position: "absolute",
+                      top: "-4px",
+                      left: "-2px"
+                    }} 
+                  />
+                </div>
+                <span className="text-sm font-medium text-white">Create Event</span>
+              </motion.button>
+
               {/* Top Right Controls - Like MapScreen */}
               <div className="absolute top-4 right-4 flex flex-col gap-3 z-30">
-                {/* Create Event Button */}
-                <motion.button
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setShowCreateEvent(true)}
-                  className="touch-target bg-primary text-primary-foreground rounded-full shadow-elevation-3 border-2 border-primary-foreground/20 hover:shadow-elevation-4 transition-all duration-300 flex items-center justify-center"
-                  style={{ width: 56, height: 56 }}
-                  title="Create event"
-                >
-                  <AddIcon style={{ fontSize: 28 }} />
-                </motion.button>
 
                 {/* Events Drawer/List Button - Mobile only */}
                 <motion.button
@@ -860,98 +848,7 @@ const Events = () => {
                   )}
                 </motion.button>
 
-                {/* Desktop Sidebar Toggle */}
-                <motion.button
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="hidden sm:flex touch-target rounded-full shadow-elevation-3 border-2 bg-card/90 backdrop-blur-sm text-foreground border-border hover:border-primary items-center justify-center"
-                  style={{ width: 56, height: 56 }}
-                  title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-                >
-                  {sidebarOpen ? <CloseIcon style={{ fontSize: 28 }} /> : <MenuIcon style={{ fontSize: 28 }} />}
-                </motion.button>
               </div>
-
-              {/* Desktop Sidebar */}
-              <motion.div
-                initial={false}
-                animate={{
-                  x: sidebarOpen ? 0 : 400,
-                  opacity: sidebarOpen ? 1 : 0,
-                }}
-                transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                className="hidden sm:block absolute top-0 right-0 w-80 sm:w-96 h-full bg-background/95 backdrop-blur-md shadow-elevation-4 border-l border-border overflow-hidden z-30 pointer-events-none"
-                style={{ pointerEvents: sidebarOpen ? 'auto' : 'none' }}
-              >
-                <div className="h-full flex flex-col">
-                  <div className="p-4 border-b border-border">
-                    <h2 className="text-lg font-bold">Events</h2>
-                    <p className="text-xs text-muted-foreground">{sortedEvents.length} events found</p>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                    {sortedEvents.length === 0 ? (
-                      <div className="text-center py-8">
-                        <EventIcon className="text-muted-foreground/30 mx-auto mb-2" style={{ fontSize: 48 }} />
-                        <p className="text-sm text-muted-foreground">No events found</p>
-                      </div>
-                    ) : (
-                      sortedEvents.map((event, index) => {
-                        const checkInCount = checkInCounts[event.id] || 0;
-                        const countdown = calculateCountdown(event.date, event.time);
-                        
-                        return (
-                          <motion.div
-                            key={event.id}
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: index * 0.05 }}
-                            onClick={() => {
-                              if (mapRef) {
-                                mapRef.panTo({ lat: event.lat, lng: event.lng });
-                                mapRef.setZoom(15);
-                              }
-                              setSelectedMarkerEvent(event);
-                            }}
-                            className="cursor-pointer"
-                          >
-                            <Card className="p-3 hover:shadow-elevation-2 transition-all border border-border">
-                              <div className="flex items-start gap-3">
-                                <Avatar
-                                  src={event.hostAvatar}
-                                  alt={event.hostName}
-                                  sx={{ width: 48, height: 48 }}
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    {getActivityIcon(event.type)}
-                                    <h4 className="font-semibold text-sm truncate">{event.title}</h4>
-                                  </div>
-                                  <p className="text-xs text-muted-foreground mb-2">
-                                    {event.date} at {event.time}
-                                  </p>
-                                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                    <Badge variant="secondary" className="text-xs">
-                                      {countdown}
-                                    </Badge>
-                                    {checkInCount > 0 && (
-                                      <Badge variant="outline" className="text-xs">
-                                        +{checkInCount} checked in
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    {event.distance}
-                                  </p>
-                                </div>
-                              </div>
-                            </Card>
-                          </motion.div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </motion.div>
             </motion.div>
           ) : (
             <motion.div
@@ -977,7 +874,18 @@ const Events = () => {
                     event={event}
                     index={index}
                     onJoin={handleJoinEvent}
-                    onClick={() => handleEventClick(event)}
+                    onClick={() => {
+                      // If in list view, switch to map view first
+                      if (viewMode !== "map") {
+                        setViewMode("map");
+                        // Wait a bit for map to render, then zoom and show details
+                        setTimeout(() => {
+                          handleEventClick(event);
+                        }, 100);
+                      } else {
+                        handleEventClick(event);
+                      }
+                    }}
                     getActivityIcon={getActivityIcon}
                     getActivityColor={getActivityColor}
                     listView
@@ -989,24 +897,22 @@ const Events = () => {
         </AnimatePresence>
       </div>
 
-      {/* Create Event Button - For list view only */}
-      {viewMode === "list" && (
-        <motion.button
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setShowCreateEvent(true)}
-          className="fixed bottom-6 right-6 touch-target bg-primary text-primary-foreground rounded-full shadow-elevation-4 hover:shadow-elevation-5 transition-all duration-300 flex items-center justify-center z-30"
-          style={{ width: 56, height: 56 }}
-          title="Create event"
-        >
-          <AddIcon style={{ fontSize: 28 }} />
-        </motion.button>
-      )}
 
-      {/* Event Detail Modal */}
-      {showEventDetail && (
+      {/* Event Details Panel - Bottom Sliding Panel */}
+      <EventDetailsPanel
+        event={selectedEvent}
+        onClose={() => {
+          setShowEventDetail(false);
+          setSelectedEvent(null);
+        }}
+        onJoin={handleJoinEvent}
+        onLeave={handleLeaveEvent}
+        onEdit={handleEditEvent}
+        onDelete={handleDeleteEvent}
+      />
+
+      {/* Keep Event Detail Modal as fallback for desktop if needed */}
+      {showEventDetail && false && (
         <EventDetailModal
           event={selectedEvent}
           onClose={() => {
@@ -1146,6 +1052,7 @@ const Events = () => {
                           mapRef.panTo({ lat: event.lat, lng: event.lng });
                           mapRef.setZoom(15);
                         }
+                        handleEventClick(event);
                         setSelectedMarkerEvent(event);
                         setDrawerOpen(false);
                         if (viewMode !== "map") {
@@ -1193,23 +1100,31 @@ const Events = () => {
       </Drawer>
       
       {/* Quick Check-in, My Events, and View Toggle - Above Bottom Navigation */}
-      <div className="fixed bottom-20 left-0 right-0 z-40 px-4 pb-2">
-        <div className="bg-card/95 backdrop-blur-md rounded-2xl p-3 shadow-elevation-3 border border-border/50 max-w-2xl mx-auto">
-          <div className="flex items-center gap-2">
-            {/* My Events Button */}
-            <Button
-              variant="outline"
-              onClick={() => navigate("/my-events")}
-              className="flex-1 h-10 border-border bg-background hover:bg-secondary"
-            >
-              <div className="flex items-center mr-2">
-                <CheckCircleIcon style={{ fontSize: 16 }} />
-              </div>
-              <span className="text-sm font-semibold">My Events</span>
-            </Button>
+      <AnimatePresence>
+        {!showEventDetail && !selectedEvent && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.2 }}
+            className="fixed bottom-20 left-0 right-0 z-40 px-4 pb-2"
+          >
+            <div className="bg-card/95 backdrop-blur-md rounded-2xl p-3 shadow-elevation-3 border border-border/50 max-w-2xl mx-auto">
+              <div className="flex items-center gap-2">
+                {/* My Events Button */}
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/my-events")}
+                  className="flex-1 h-10 border-border bg-background hover:bg-secondary"
+                >
+                  <div className="flex items-center mr-2">
+                    <CheckCircleIcon style={{ fontSize: 16 }} />
+                  </div>
+                  <span className="text-sm font-semibold">My Events</span>
+                </Button>
 
-            {/* View Toggle - Grouped */}
-            <div className="flex gap-1 bg-muted rounded-xl p-1">
+                {/* View Toggle - Grouped */}
+                <div className="flex gap-1 bg-muted rounded-xl p-1">
               <motion.button
                 whileTap={{ scale: 0.95 }}
                 onClick={() => setViewMode("map")}
@@ -1235,7 +1150,9 @@ const Events = () => {
             </div>
           </div>
         </div>
-      </div>
+      </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Notification Drawer */}
       <AnimatePresence>
@@ -1456,7 +1373,11 @@ const EventCard = ({ event, index, onJoin, onClick, getActivityIcon, getActivity
       onClick={onClick}
       className="cursor-pointer"
     >
-      <Card className="overflow-hidden shadow-elevation-2 hover:shadow-elevation-3 transition-all duration-300 border-2 border-border/50 hover:border-primary/30">
+      <Card className={`overflow-hidden shadow-elevation-2 hover:shadow-elevation-3 transition-all duration-300 border-2 ${
+        event.isGreyedOut
+          ? "opacity-50 grayscale border-muted bg-muted/20"
+          : "border-border/50 hover:border-primary/30"
+      }`}>
         <div className="p-5 space-y-4">
           {/* Header */}
           <div className="flex items-start justify-between gap-3">

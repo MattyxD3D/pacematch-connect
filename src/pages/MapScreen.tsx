@@ -61,10 +61,10 @@ import { getProfilePictureUrl } from "@/utils/profilePicture";
 import { updateUserProfile } from "@/services/authService";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
-import { updateUserVisibility, listenToAllUsers } from "@/services/locationService";
+import { updateUserVisibility, listenToAllUsers, clearUserLocation } from "@/services/locationService";
 import { saveWorkout } from "@/services/workoutService";
 import { listenToFriendRequests, removeFriend, sendFriendRequest } from "@/services/friendService";
-import { getUserConversations } from "@/services/messageService";
+import { getUserConversations, markMessagesAsRead } from "@/services/messageService";
 import { listenToPokes, sendPoke, acceptPoke, dismissPoke, hasPokedUser } from "@/services/pokeService";
 import { reportUser, blockUser } from "@/services/userService";
 import { PokeModal } from "@/components/PokeModal";
@@ -309,10 +309,13 @@ const MapScreen = () => {
   // Friend requests and messages for sidebar
   const [friendRequests, setFriendRequests] = useState<{ incoming: string[]; outgoing: string[] }>({ incoming: [], outgoing: [] });
   const [messageRequests, setMessageRequests] = useState<any[]>([]);
+  const [incomingMessages, setIncomingMessages] = useState<any[]>([]); // New messages from friends
   const [friendRequestUsers, setFriendRequestUsers] = useState<Record<string, any>>({});
   const [messageRequestUsers, setMessageRequestUsers] = useState<Record<string, any>>({});
+  const [incomingMessageUsers, setIncomingMessageUsers] = useState<Record<string, any>>({});
   const [loadingFriendRequestUsers, setLoadingFriendRequestUsers] = useState(false);
   const [loadingMessageRequestUsers, setLoadingMessageRequestUsers] = useState(false);
+  const [loadingIncomingMessageUsers, setLoadingIncomingMessageUsers] = useState(false);
   
   // Load Google Maps API
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -322,12 +325,55 @@ const MapScreen = () => {
     libraries: libraries
   });
 
-  // Get user's current location - tracking controlled by activity button
+  // Get user's current location - always track when user is logged in (works in both beacon mode and active workout)
+  // isActive only controls workout features, not location tracking itself
   const { location, error: locationError, isGettingLocation, stopTracking } = useLocation(
     user?.uid || null,
-    isActive, // Use isActive instead of isActivityActive
+    true, // Always track location when user is logged in (for both beacon mode and active workout)
     visible
   );
+
+  // Get initial location on web to center the map (one-time request, not continuous tracking)
+  const [initialLocation, setInitialLocation] = useState<Location | null>(null);
+  const initialLocationFetchedRef = useRef(false);
+
+  useEffect(() => {
+    // Only get initial location on web (not native, as native uses useLocation hook)
+    if (isNativePlatform() || !user?.uid || initialLocationFetchedRef.current) {
+      return;
+    }
+
+    // Get one-time location for map centering
+    if (navigator.geolocation) {
+      console.log("📍 Requesting initial location for map centering...");
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const loc = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          setInitialLocation(loc);
+          initialLocationFetchedRef.current = true;
+          console.log("✅ Initial location obtained:", loc);
+          
+          // Center map on user's location
+          if (mapRef) {
+            mapRef.panTo(loc);
+            setMapCenter(loc);
+          }
+        },
+        (err) => {
+          console.warn("⚠️ Could not get initial location:", err.message);
+          initialLocationFetchedRef.current = true; // Don't retry
+        },
+        {
+          enableHighAccuracy: false, // Use less accurate but faster for initial location
+          timeout: 5000,
+          maximumAge: 60000 // Accept cached location up to 1 minute old
+        }
+      );
+    }
+  }, [user?.uid, mapRef, isNativePlatform()]);
 
   // Request location permissions when MapScreen loads (on native platforms)
   useEffect(() => {
@@ -358,11 +404,18 @@ const MapScreen = () => {
   }, [user?.uid]); // Request when user is available
 
   // Ensure GPS tracking is fully stopped whenever workout is inactive
+  // Also show error messages to user
   useEffect(() => {
     if (!isActive) {
       stopTracking();
+    } else if (locationError) {
+      // Show error to user when workout is active but GPS fails
+      console.error("⚠️ Location error detected:", locationError);
+      toast.error(`GPS Error: ${locationError}`, {
+        duration: 5000,
+      });
     }
-  }, [isActive, stopTracking]);
+  }, [isActive, stopTracking, locationError]);
 
   // Movement detection for inactivity warning
   const handleStationaryDetected = useCallback(() => {
@@ -685,14 +738,40 @@ const MapScreen = () => {
     return () => clearInterval(interval);
   }, [user?.uid, userProfile?.friends]);
 
-  // Auto-open sidebar only if there are new friend requests or message requests
+  // Load incoming messages (conversations with unread messages from friends)
   useEffect(() => {
-    const hasNewRequests = friendRequests.incoming.length > 0 || messageRequests.length > 0;
+    if (!user?.uid) return;
+
+    const loadIncomingMessages = async () => {
+      try {
+        const conversations = await getUserConversations(user.uid);
+        // Filter for conversations with unread messages from friends
+        const friends = userProfile?.friends || [];
+        const messages = conversations.filter(conv => 
+          conv.unreadCount > 0 && friends.some((f: any) => String(f) === conv.otherUserId)
+        );
+        // Sort by last message time (newest first)
+        messages.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
+        setIncomingMessages(messages);
+      } catch (error) {
+        console.error("Error loading incoming messages:", error);
+      }
+    };
+
+    loadIncomingMessages();
+    // Refresh every 30 seconds
+    const interval = setInterval(loadIncomingMessages, 30000);
+    return () => clearInterval(interval);
+  }, [user?.uid, userProfile?.friends]);
+
+  // Auto-open sidebar only if there are new friend requests, message requests, or incoming messages
+  useEffect(() => {
+    const hasNewRequests = friendRequests.incoming.length > 0 || messageRequests.length > 0 || incomingMessages.length > 0;
     if (hasNewRequests && !hasAutoOpenedRef.current) {
       setShowSidebar(true);
       hasAutoOpenedRef.current = true;
     }
-  }, [friendRequests.incoming.length, messageRequests.length]);
+  }, [friendRequests.incoming.length, messageRequests.length, incomingMessages.length]);
 
   // Fetch user data for message requests
   useEffect(() => {
@@ -733,6 +812,46 @@ const MapScreen = () => {
 
     fetchMessageRequestUsers();
   }, [messageRequests]);
+
+  // Fetch user data for incoming messages
+  useEffect(() => {
+    if (incomingMessages.length === 0) {
+      setIncomingMessageUsers({});
+      return;
+    }
+
+    const fetchIncomingMessageUsers = async () => {
+      setLoadingIncomingMessageUsers(true);
+      try {
+        const { getUserData } = await import("@/services/authService");
+        const uniqueUserIds = [...new Set(incomingMessages.map(conv => conv.otherUserId))];
+        const userDataPromises = uniqueUserIds.map(async (userId) => {
+          try {
+            const userData = await getUserData(userId);
+            return { userId, userData };
+          } catch (error) {
+            console.error(`Error fetching user data for ${userId}:`, error);
+            return { userId, userData: null };
+          }
+        });
+
+        const results = await Promise.all(userDataPromises);
+        const usersMap: Record<string, any> = {};
+        results.forEach(({ userId, userData }) => {
+          if (userData) {
+            usersMap[userId] = userData;
+          }
+        });
+        setIncomingMessageUsers(usersMap);
+      } catch (error) {
+        console.error("Error fetching incoming message users:", error);
+      } finally {
+        setLoadingIncomingMessageUsers(false);
+      }
+    };
+
+    fetchIncomingMessageUsers();
+  }, [incomingMessages]);
 
   // Mark all notifications as read when notification drawer opens
   // This makes the red indicator disappear when user views notifications
@@ -804,7 +923,7 @@ const MapScreen = () => {
   const matchingRadiusKm = matchingRadiusMeters / 1000; // Convert to km
 
   // Get nearby users from hook (fallback for non-matched display)
-  // Beacon mode: only show nearby users when workout is active
+  // Show nearby users when location is available (not just when workout is active)
   // Use activity-based radius instead of hardcoded 50km
   const { nearbyUsers: nearbyUsersFromHook, loading: usersLoading } = useNearbyUsers(
     location,
@@ -812,7 +931,7 @@ const MapScreen = () => {
     activityFilter, // Apply activity filter (running/cycling/walking/all)
     "all", // Gender filter (not used currently)
     user?.uid || null,
-    isActive // Only show nearby users when workout is active (beacon mode)
+    true // Always show nearby users when location is available (not just during workout)
   );
 
   
@@ -1373,35 +1492,121 @@ const MapScreen = () => {
     }
   }, [elapsedTime, distance]);
 
-  const handleStartStop = () => {
+  const handleStartStop = async () => {
     if (!isActive) {
-      // Start activity
-      toast.success("Activity started! GPS tracking enabled.");
-      setIsActive(true);
-      setIsPaused(false);
-      setPausedDueToInactivity(false); // Reset inactivity state
-      setShowInactivityWarning(false); // Close warning if open
-      setStartTime(new Date());
-      setElapsedTime(0);
-      setDistance(0);
-      setCurrentSpeed(0);
-      setAvgSpeed(0);
-      setPointsTracked(0);
-      setTotalPausedTime(0);
-      setPauseStartTime(null);
-      lastDistanceRef.current = 0;
-      lastTimeRef.current = 0;
-      setShowNotification(false);
-      // Reset workout tracking
-      setWorkoutPokes([]);
-      setWorkoutNearbyUsers([]);
+      // Start activity - first request GPS permission
+      // Check if geolocation is available
+      if (!isNativePlatform() && !navigator.geolocation) {
+        toast.error("Geolocation is not supported by your browser. Please use a modern browser.");
+        return;
+      }
+      
+      console.log("🏃 Starting workout... Requesting GPS permission first...");
+      
+      // Request GPS permission before starting workout
+      try {
+        if (isNativePlatform()) {
+          // For native platforms, request permission explicitly
+          const { Geolocation } = await import("@capacitor/geolocation");
+          const permissionStatus = await Geolocation.requestPermissions();
+          
+          if (permissionStatus.location !== 'granted') {
+            toast.error("Location permission is required to start a workout. Please allow location access in your device settings.");
+            return;
+          }
+          
+          console.log("✅ Location permission granted (native)");
+        } else {
+          // For web, try to get permission by requesting position
+          // This will trigger the browser's permission prompt
+          console.log("📍 Requesting GPS permission (web)...");
+          
+          try {
+            await new Promise<void>((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(
+                (position) => {
+                  console.log("✅ GPS permission granted and position obtained (web)");
+                  resolve();
+                },
+                (err) => {
+                  // Handle different error codes
+                  switch (err.code) {
+                    case err.PERMISSION_DENIED:
+                      // Permission denied - don't allow workout to start
+                      toast.error("Location permission denied. Please allow location access in your browser settings to start a workout.");
+                      reject(err);
+                      break;
+                    case err.POSITION_UNAVAILABLE:
+                      // Permission might be granted, but GPS signal unavailable
+                      // Allow workout to start - GPS will retry when signal is available
+                      console.warn("⚠️ GPS signal unavailable, but permission may be granted. Starting workout anyway...");
+                      toast.warning("GPS signal unavailable. Workout will start, but location tracking will begin when GPS signal is available.");
+                      resolve(); // Allow workout to start
+                      break;
+                    case err.TIMEOUT:
+                      // Timeout - permission might be granted, just taking too long
+                      // Allow workout to start - GPS will retry
+                      console.warn("⚠️ GPS request timeout, but permission may be granted. Starting workout anyway...");
+                      toast.warning("GPS request timed out. Workout will start, but location tracking will begin when GPS signal is available.");
+                      resolve(); // Allow workout to start
+                      break;
+                    default:
+                      // Unknown error - be lenient and allow workout to start
+                      console.warn("⚠️ GPS error:", err.message, "- Starting workout anyway...");
+                      resolve(); // Allow workout to start
+                  }
+                },
+                {
+                  enableHighAccuracy: false, // Use lower accuracy for permission check (faster)
+                  timeout: 5000, // Shorter timeout for permission check
+                  maximumAge: 60000 // Accept cached location
+                }
+              );
+            });
+          } catch (error: any) {
+            // If it's a permission denied error, don't start workout
+            if (error?.code === 1) { // PERMISSION_DENIED
+              throw error; // Re-throw to be caught by outer catch
+            }
+            // For other errors, allow workout to start
+            console.warn("⚠️ GPS error during permission check, but allowing workout to start:", error);
+          }
+        }
+        
+        // Permission granted - now start the workout
+        console.log("✅ GPS permission granted. Starting workout...");
+        toast.success("Activity started! GPS tracking enabled.");
+        setIsActive(true);
+        setIsPaused(false);
+        setPausedDueToInactivity(false); // Reset inactivity state
+        setShowInactivityWarning(false); // Close warning if open
+        setStartTime(new Date());
+        setElapsedTime(0);
+        setDistance(0);
+        setCurrentSpeed(0);
+        setAvgSpeed(0);
+        setPointsTracked(0);
+        setTotalPausedTime(0);
+        setPauseStartTime(null);
+        lastDistanceRef.current = 0;
+        lastTimeRef.current = 0;
+        setShowNotification(false);
+        // Reset workout tracking
+        setWorkoutPokes([]);
+        setWorkoutNearbyUsers([]);
+      } catch (error: any) {
+        // Permission denied or error occurred
+        console.error("❌ Failed to get GPS permission:", error);
+        // Error message already shown in the catch block above
+        return;
+      }
     } else {
       // Show confirmation dialog before stopping
       setShowStopConfirmation(true);
     }
   };
 
-  const handleConfirmStop = () => {
+  const handleConfirmStop = async () => {
     // Force-stop GPS watcher immediately
     stopTracking();
     // Stop activity - show summary
@@ -1411,6 +1616,17 @@ const MapScreen = () => {
     setPausedDueToInactivity(false); // Reset inactivity state
     setShowStopConfirmation(false);
     setShowInactivityWarning(false); // Close warning if open
+    
+    // Clear user location from Firebase when workout stops
+    // This ensures other users see that you've stopped working out immediately
+    if (user?.uid) {
+      try {
+        await clearUserLocation(user.uid);
+        console.log("✅ Location cleared from Firebase - other users will no longer see you");
+      } catch (error) {
+        console.error("❌ Error clearing location:", error);
+      }
+    }
     
     // Log real Firebase users detected during workout
     if (workoutNearbyUsers.length > 0) {
@@ -1471,6 +1687,74 @@ const MapScreen = () => {
     // The movement detection will continue monitoring
   };
   
+  /**
+   * Reverse geocode coordinates to get a readable location name
+   * Falls back to a general location description if geocoding fails
+   */
+  const getLocationName = useCallback(async (lat: number, lng: number): Promise<string> => {
+    // Check if Google Maps API is available
+    if (!window.google || !window.google.maps || !window.google.maps.Geocoder) {
+      // Fallback: Use coordinates formatted as a general location
+      return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    }
+
+    try {
+      const geocoder = new window.google.maps.Geocoder();
+      return new Promise((resolve) => {
+        geocoder.geocode(
+          { location: { lat, lng } },
+          (results, status) => {
+            if (status === "OK" && results && results.length > 0) {
+              const address = results[0].formatted_address;
+              // Extract a shorter, more readable version (neighborhood, city, or landmark)
+              // Try to get a meaningful location name
+              let locationName = address;
+              
+              // Try to extract a more user-friendly location name
+              // Look for neighborhood, locality, or establishment name
+              const addressComponents = results[0].address_components || [];
+              
+              // Try to find neighborhood, sublocality, or locality
+              const neighborhood = addressComponents.find((comp: any) => 
+                comp.types.includes("neighborhood") || 
+                comp.types.includes("sublocality") ||
+                comp.types.includes("sublocality_level_1")
+              );
+              
+              const locality = addressComponents.find((comp: any) => 
+                comp.types.includes("locality")
+              );
+              
+              const adminArea = addressComponents.find((comp: any) => 
+                comp.types.includes("administrative_area_level_1")
+              );
+              
+              // Build a friendly location name
+              if (neighborhood) {
+                locationName = `${neighborhood.long_name}${locality ? `, ${locality.long_name}` : ""}${adminArea ? `, ${adminArea.short_name}` : ""}`;
+              } else if (locality) {
+                locationName = `${locality.long_name}${adminArea ? `, ${adminArea.short_name}` : ""}`;
+              } else {
+                // Use the formatted address but shorten it if it's too long
+                locationName = address.split(',').slice(0, 2).join(',').trim();
+              }
+              
+              resolve(locationName);
+            } else {
+              // Fallback to coordinates if geocoding fails
+              console.warn("Reverse geocoding failed:", status);
+              resolve(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+            }
+          }
+        );
+      });
+    } catch (error) {
+      console.error("Error during reverse geocoding:", error);
+      // Fallback to coordinates
+      return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    }
+  }, []);
+
   const handleSaveWorkout = async () => {
     if (!user?.uid) {
       toast.error("You must be logged in to save workouts");
@@ -1495,6 +1779,16 @@ const MapScreen = () => {
       console.log("ℹ️ No nearby users detected during this workout");
     }
 
+    // Get location name from current location or first location in history
+    let locationName = "Unknown Location";
+    if (location) {
+      locationName = await getLocationName(location.lat, location.lng);
+    } else if (locationHistory.length > 0) {
+      // Use the first location from the workout history as a fallback
+      const firstLocation = locationHistory[0];
+      locationName = await getLocationName(firstLocation.lat, firstLocation.lng);
+    }
+
     const workoutData = {
       activity: selectedActivity,
       date: startTime || new Date(),
@@ -1502,7 +1796,7 @@ const MapScreen = () => {
       distance,
       avgSpeed,
       nearbyUsers: activeNearbyUsers,
-      location: "Central Park, New York", // This would come from GPS in real app
+      location: locationName,
     };
 
     try {
@@ -2180,7 +2474,7 @@ const MapScreen = () => {
             <div>
               <h2 className="text-2xl font-bold text-foreground">Activity Feed</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Matches, requests & messages
+                Requests, messages & matches
               </p>
             </div>
           </div>
@@ -2279,9 +2573,23 @@ const MapScreen = () => {
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       className="p-3 bg-muted/50 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer relative"
-                      onClick={() => {
+                      onClick={async () => {
                         setShowSidebar(false); // Auto-close sidebar
-                        if (userData) {
+                        if (userData && user?.uid) {
+                          // Automatically accept the message request by marking messages as read
+                          try {
+                            await markMessagesAsRead(user.uid, conv.otherUserId);
+                            // Refresh message requests list immediately
+                            const conversations = await getUserConversations(user.uid);
+                            const friends = userProfile?.friends || [];
+                            const requests = conversations.filter(c => 
+                              c.unreadCount > 0 && !friends.some((f: any) => String(f) === c.otherUserId)
+                            );
+                            setMessageRequests(requests);
+                          } catch (error) {
+                            console.error("Error accepting message request:", error);
+                          }
+                          
                           navigate("/chat", {
                             state: {
                               user: {
@@ -2322,6 +2630,72 @@ const MapScreen = () => {
             ) : (
               <div className="py-4 text-center">
                 <p className="text-sm text-muted-foreground">No message requests</p>
+              </div>
+            )}
+          </div>
+
+          {/* Incoming Messages Section */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-foreground">New Messages</h3>
+              <BadgeCounter count={incomingMessages.length} variant="default" size="sm" />
+            </div>
+            {loadingIncomingMessageUsers ? (
+              <div className="flex items-center justify-center py-4">
+                <CircularProgress size={24} />
+              </div>
+            ) : incomingMessages.length > 0 ? (
+              <div className="space-y-2">
+                {incomingMessages.slice(0, 5).map((conv) => {
+                  const userData = incomingMessageUsers[conv.otherUserId];
+                  const userName = userData?.name || "Unknown User";
+                  const userAvatar = userData?.photoURL;
+                  
+                  return (
+                    <motion.div
+                      key={conv.conversationId}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="p-3 bg-muted/50 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer relative"
+                      onClick={() => {
+                        setShowSidebar(false); // Auto-close sidebar
+                        if (userData) {
+                          navigate("/chat", {
+                            state: {
+                              user: {
+                                id: conv.otherUserId,
+                                name: userData.name || "Unknown",
+                                avatar: getProfilePictureUrl(userData.photoURL, userData.avatar, userData.name)
+                              }
+                            }
+                          });
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Avatar className="w-10 h-10">
+                          <AvatarImage src={userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}`} />
+                          <AvatarFallback>{userName.charAt(0).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0 pr-8">
+                          <p className="text-sm font-medium truncate">
+                            {userName}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">
+                            {conv.lastMessage || "No message preview"}
+                          </p>
+                        </div>
+                        {conv.unreadCount > 0 && (
+                          <BadgeCounter count={conv.unreadCount} variant="default" size="sm" />
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-4 text-center">
+                <p className="text-sm text-muted-foreground">No new messages</p>
               </div>
             )}
           </div>
@@ -2397,10 +2771,10 @@ const MapScreen = () => {
           })}
 
           {/* Current user's marker - Always visible when location is available */}
-          {location && location.lat && location.lng && isLoaded && window.google && (
+          {(location || initialLocation) && (location || initialLocation)?.lat && (location || initialLocation)?.lng && isLoaded && window.google && (
             <>
               <Marker
-                position={{ lat: location.lat, lng: location.lng }}
+                position={{ lat: (location || initialLocation)!.lat, lng: (location || initialLocation)!.lng }}
                 title={isActive ? "You are here (Active)" : "You are here"}
                 zIndex={1000}
                 icon={{
@@ -2415,7 +2789,7 @@ const MapScreen = () => {
                 animation={isActive && window.google.maps.Animation ? window.google.maps.Animation.BOUNCE : undefined}
               />
               {/* Circle around user location for better visibility when active */}
-              {isActive && window.google.maps && (
+              {isActive && location && window.google.maps && (
                 <Marker
                   position={{ lat: location.lat, lng: location.lng }}
                   icon={{
@@ -2712,6 +3086,31 @@ const MapScreen = () => {
           </motion.button>
         )}
 
+        {/* Notification Bell - Only visible when workout is active */}
+        {isActive && (
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowNotificationDrawer(true)}
+            className={`relative touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
+              unreadCount > 0
+                ? "bg-yellow-400/20 border-yellow-400 ring-2 ring-yellow-400/50"
+                : "bg-card border-border hover:border-primary"
+            }`}
+            style={{ width: 56, height: 56 }}
+            title={unreadCount > 0 ? `${unreadCount} notifications` : "Notifications"}
+          >
+            <NotificationsIcon 
+              style={{ fontSize: 28 }} 
+              className={unreadCount > 0 ? "text-yellow-400" : "text-foreground"}
+            />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-yellow-500 text-gray-900 text-[10px] font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1 border-2 border-background animate-pulse">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </motion.button>
+        )}
+
         {/* People Sidebar Toggle */}
         <motion.button
           whileTap={{ scale: 0.95 }}
@@ -2726,12 +3125,24 @@ const MapScreen = () => {
           className={`relative touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
             showSidebar
               ? "bg-primary text-primary-foreground border-primary"
+              : (unreadMessageCount + friendRequests.incoming.length) > 0
+              ? "bg-yellow-400/20 border-yellow-400"
               : "bg-card text-foreground border-border hover:border-primary"
           }`}
           style={{ width: 56, height: 56 }}
           title={showSidebar ? "Hide sidebar" : "Show sidebar"}
         >
-          <PeopleIcon style={{ fontSize: 28 }} />
+          <PeopleIcon style={{ fontSize: 28 }} className={
+            !showSidebar && (unreadMessageCount + friendRequests.incoming.length) > 0
+              ? "text-yellow-500"
+              : ""
+          } />
+          {/* Badge for unread messages and friend requests */}
+          {(unreadMessageCount + friendRequests.incoming.length) > 0 && !showSidebar && (
+            <span className="absolute -top-1 -right-1 bg-yellow-500 text-gray-900 text-[10px] font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1 border-2 border-background animate-pulse">
+              {(unreadMessageCount + friendRequests.incoming.length) > 99 ? '99+' : (unreadMessageCount + friendRequests.incoming.length)}
+            </span>
+          )}
         </motion.button>
 
         {/* Recenter Button - Only visible when workout is not active */}

@@ -144,8 +144,8 @@ const Messages = () => {
     try {
       // Mark messages as read to "accept" the request
       await markMessagesAsRead(currentUser.uid, conversation.otherUserId);
-      toast.success(`Accepted message from ${conversation.userName}`);
-      // Refresh conversations to update the list
+      
+      // Refresh conversations to remove the accepted request from the list
       const firebaseConversations = await getUserConversations(currentUser.uid);
       const conversationsWithUserData = await Promise.all(
         firebaseConversations.map(async (conv) => {
@@ -159,20 +159,34 @@ const Messages = () => {
             return {
               ...conv,
               userName: getDisplayName(username, conv.otherUserId, activity),
-              avatar: userData?.photoURL || "",
+              avatar: getProfilePictureUrl(userData?.photoURL, userData?.avatar, getDisplayName(username, conv.otherUserId, activity)),
               activity: activity,
             };
           } catch (error) {
+            const fallbackName = getDisplayName(null, conv.otherUserId, null);
             return {
               ...conv,
-              userName: getDisplayName(null, conv.otherUserId, null),
-              avatar: "",
+              userName: fallbackName,
+              avatar: getProfilePictureUrl(null, null, fallbackName),
               activity: null,
             };
           }
         })
       );
       setConversations(conversationsWithUserData);
+      
+      toast.success(`Accepted message from ${conversation.userName}`);
+      
+      // Navigate to the chat screen after accepting
+      navigate("/chat", {
+        state: {
+          user: {
+            id: conversation.otherUserId,
+            name: conversation.userName || "Unknown User",
+            avatar: conversation.avatar || "",
+          },
+        },
+      });
     } catch (error) {
       console.error("Error accepting message request:", error);
       toast.error("Failed to accept message request");

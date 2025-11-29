@@ -30,7 +30,7 @@ export interface Location {
  * @param {string} activityFilter - Filter by activity: "running", "cycling", "walking", or "all"
  * @param {string} genderFilter - Filter by gender: "male", "female", or "all"
  * @param {string | null} currentUserId - Current user's ID to exclude from results
- * @param {boolean} isWorkoutActive - Whether the current user's workout is active (beacon mode only works when active)
+ * @param {boolean} isWorkoutActive - Whether to show nearby users (always true now - shows users when location is available)
  * @returns {Object} { nearbyUsers, loading }
  */
 export const useNearbyUsers = (
@@ -39,7 +39,7 @@ export const useNearbyUsers = (
   activityFilter: string = "all",
   genderFilter: string = "all",
   currentUserId: string | null = null,
-  isWorkoutActive: boolean = false
+  isWorkoutActive: boolean = true // Default to true - show users when location is available
 ) => {
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,20 +49,21 @@ export const useNearbyUsers = (
   const lastEncounterCheckRef = useRef<number>(0);
 
   useEffect(() => {
-    // Beacon mode only works when workout is active - return empty array if inactive
-    if (!isWorkoutActive) {
-      setNearbyUsers([]);
-      setLoading(false);
-      return;
-    }
-
+    // Show nearby users when location is available (not just during active workout)
+    // This allows users to see who's nearby even when not actively working out
     if (!currentLocation || !currentLocation.lat || !currentLocation.lng) {
       setNearbyUsers([]);
       setLoading(false);
       return;
     }
 
-    const unsubscribe = listenToAllUsers((users) => {
+    // Store the latest users data for periodic re-evaluation
+    let latestUsers: Record<string, any> = {};
+
+    // Function to filter and update nearby users
+    const filterAndUpdateUsers = (users: Record<string, any>) => {
+      latestUsers = users;
+      // Use currentLocation from closure (will be latest value when effect re-runs)
       console.log("=== NEARBY USERS DEBUG ===");
       console.log("All users from Firebase:", users);
       console.log("Total users in database:", Object.keys(users || {}).length);
@@ -165,12 +166,12 @@ export const useNearbyUsers = (
 
       console.log(`Visibility filter: ${beforeVisibility} → ${filtered.length}`);
 
-      // Filter by active workout status - only show users with recent location updates (within 3 minutes)
+      // Filter by active workout status - only show users with recent location updates (within 10 minutes)
       // This ensures users are only visible when they have an active workout session
-      // Inactive locations automatically terminate after 3 minutes
+      // Using 10 minutes to match "active friends" threshold and allow for brief pauses
       const beforeActiveFilter = filtered.length;
       // Reuse 'now' from line 102 - no need to redeclare
-      const activeThreshold = 3 * 60 * 1000; // 3 minutes in milliseconds
+      const activeThreshold = 10 * 60 * 1000; // 10 minutes in milliseconds
       
       filtered = filtered.filter((user) => {
         // User must have a timestamp indicating recent location update
@@ -184,7 +185,7 @@ export const useNearbyUsers = (
         const isActive = timeDiff <= activeThreshold;
         
         if (!isActive) {
-          console.log(`User ${user.id} filtered out - timestamp too old (${Math.round(timeDiff / 1000)}s ago, threshold: 3min)`);
+          console.log(`User ${user.id} filtered out - timestamp too old (${Math.round(timeDiff / 1000)}s ago, threshold: 10min)`);
         }
         
         return isActive;
@@ -197,9 +198,24 @@ export const useNearbyUsers = (
 
       setNearbyUsers(filtered);
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    // Set up Firebase listener
+    const unsubscribe = listenToAllUsers(filterAndUpdateUsers);
+
+    // Set up periodic re-evaluation to filter out inactive users
+    // This ensures users who stopped working out are removed even if Firebase doesn't update
+    const intervalId = setInterval(() => {
+      if (Object.keys(latestUsers).length > 0) {
+        // Re-run filtering with latest data to remove inactive users
+        filterAndUpdateUsers(latestUsers);
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => {
+      unsubscribe();
+      clearInterval(intervalId);
+    };
   }, [currentLocation, maxDistanceKm, activityFilter, genderFilter, currentUserId, isWorkoutActive]);
 
   return { nearbyUsers, loading };

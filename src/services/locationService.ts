@@ -74,10 +74,6 @@ export const updateUserVisibility = async (userId: string, visible: boolean): Pr
   }
 };
 
-// Track last cleanup time to throttle cleanup operations
-let lastCleanupTime = 0;
-const CLEANUP_INTERVAL = 60 * 1000; // Run cleanup every 60 seconds
-
 /**
  * Listen to all users' locations
  * @param {Function} callback - Callback function that receives users object
@@ -112,15 +108,10 @@ export const listenToAllUsers = (callback: (users: Record<string, any>) => void)
         console.log(`📊 Firebase listener triggered - ${userCount} user(s) in database`);
       }
       
-      // Periodically clean up inactive locations (throttled to every 60 seconds)
-      const now = Date.now();
-      if (now - lastCleanupTime >= CLEANUP_INTERVAL) {
-        lastCleanupTime = now;
-        // Run cleanup in background (don't await to avoid blocking)
-        cleanupInactiveLocations(users).catch((error) => {
-          console.error("Background cleanup error:", error);
-        });
-      }
+      // Note: Cleanup of inactive locations is handled by each user's own client
+      // when they become inactive. We don't clean up other users' locations here
+      // because Firebase security rules only allow users to modify their own data.
+      // The 3-minute timeout is handled by filtering logic in useNearbyUsers hook.
       
       callback(users);
     },
@@ -208,39 +199,13 @@ export const clearUserLocation = async (userId: string): Promise<void> => {
 };
 
 /**
- * Clean up inactive user locations (locations older than 3 minutes)
- * This should be called periodically to remove stale location data
- * @param {Record<string, any>} users - All users from Firebase
- * @returns {Promise<void>}
+ * Note: Cleanup of inactive locations is handled by each user's own client
+ * when they become inactive (e.g., when they stop their workout or sign out).
+ * We don't clean up other users' locations because Firebase security rules
+ * only allow users to modify their own data.
+ * 
+ * The 3-minute timeout for inactive users is handled by filtering logic
+ * in the useNearbyUsers hook, which filters out users with timestamps
+ * older than 3 minutes.
  */
-export const cleanupInactiveLocations = async (users: Record<string, any>): Promise<void> => {
-  try {
-    const now = Date.now();
-    const inactiveThreshold = 3 * 60 * 1000; // 3 minutes in milliseconds
-    const cleanupPromises: Promise<void>[] = [];
-
-    for (const [userId, userData] of Object.entries(users)) {
-      // Check if user has a timestamp
-      if (userData.timestamp) {
-        const timeDiff = now - userData.timestamp;
-        
-        // If location is older than 3 minutes, clear it
-        if (timeDiff > inactiveThreshold) {
-          cleanupPromises.push(clearUserLocation(userId));
-        }
-      }
-    }
-
-    // Execute all cleanup operations in parallel
-    if (cleanupPromises.length > 0) {
-      await Promise.all(cleanupPromises);
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`🧹 Cleaned up ${cleanupPromises.length} inactive location(s)`);
-      }
-    }
-  } catch (error) {
-    console.error("❌ Error cleaning up inactive locations:", error);
-    // Don't throw - this is a background cleanup operation
-  }
-};
 

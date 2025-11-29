@@ -28,6 +28,9 @@ export const useLocation = (
   const browserWatchIdRef = useRef<number | null>(null);
   const nativeWatchIdRef = useRef<string | null>(null);
   const isNative = isNativePlatform();
+  // Throttle Firebase updates to every 5-10 seconds (use 7.5 seconds as middle ground)
+  const lastFirebaseUpdateRef = useRef<number>(0);
+  const FIREBASE_UPDATE_INTERVAL = 7500; // 7.5 seconds (middle of 5-10 second range)
 
   const stopTracking = useCallback(async () => {
     // Stop browser geolocation
@@ -86,7 +89,8 @@ export const useLocation = (
         setError(null);
         setIsGettingLocation(false);
 
-        // Update to Firebase
+        // Always update Firebase on initial position (no throttling for first update)
+        lastFirebaseUpdateRef.current = Date.now();
         await updateUserLocation(userId, latitude, longitude, visible);
 
         // Watch position for continuous updates
@@ -119,8 +123,14 @@ export const useLocation = (
               setLocation(newLocation);
               setError(null);
 
-              // Update to Firebase every 5-10 seconds
-              await updateUserLocation(userId, latitude, longitude, visible);
+              // Throttle Firebase updates to every 5-10 seconds
+              const now = Date.now();
+              const timeSinceLastUpdate = now - lastFirebaseUpdateRef.current;
+              
+              if (timeSinceLastUpdate >= FIREBASE_UPDATE_INTERVAL) {
+                lastFirebaseUpdateRef.current = now;
+                await updateUserLocation(userId, latitude, longitude, visible);
+              }
             }
           }
         );
@@ -162,7 +172,8 @@ export const useLocation = (
           setError(null);
           setIsGettingLocation(false);
 
-          // Update to Firebase
+          // Always update Firebase on initial position (no throttling for first update)
+          lastFirebaseUpdateRef.current = Date.now();
           await updateUserLocation(userId, latitude, longitude, visible);
 
           // Watch position for updates
@@ -174,8 +185,14 @@ export const useLocation = (
               setLocation(newLocation);
               setError(null);
 
-              // Update to Firebase every 5-10 seconds
-              await updateUserLocation(userId, latitude, longitude, visible);
+              // Throttle Firebase updates to every 5-10 seconds
+              const now = Date.now();
+              const timeSinceLastUpdate = now - lastFirebaseUpdateRef.current;
+              
+              if (timeSinceLastUpdate >= FIREBASE_UPDATE_INTERVAL) {
+                lastFirebaseUpdateRef.current = now;
+                await updateUserLocation(userId, latitude, longitude, visible);
+              }
             },
             (err) => {
               let errorMessage = "Location error";

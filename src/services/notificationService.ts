@@ -11,6 +11,7 @@ export type NotificationType =
   | "workout_complete" 
   | "achievement"
   | "report_submitted"
+  | "nearby_active_user" // Notification when active users are nearby
   // Admin moderation notification types
   | "admin_comment_deleted"
   | "admin_event_deleted"

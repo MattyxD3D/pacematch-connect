@@ -61,7 +61,7 @@ import { getProfilePictureUrl } from "@/utils/profilePicture";
 import { updateUserProfile } from "@/services/authService";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
-import { updateUserVisibility } from "@/services/locationService";
+import { updateUserVisibility, listenToAllUsers } from "@/services/locationService";
 import { saveWorkout } from "@/services/workoutService";
 import { listenToFriendRequests, removeFriend, sendFriendRequest } from "@/services/friendService";
 import { getUserConversations } from "@/services/messageService";
@@ -252,6 +252,8 @@ const MapScreen = () => {
   const lastLocationRef = useRef<Location | null>(null);
   const processedUserIdsRef = useRef<Set<string>>(new Set());
   const nearbyUsersRef = useRef<any[]>([]);
+  const notificationShownRef = useRef(false); // Track if notification was shown in this session
+  const notificationCreatedRef = useRef(false); // Track if notification was added to bell in this session
   
   // Get user's enabled activities from profile
   // Handle both 'activities' (array) and 'activity' (single value) for backward compatibility
@@ -764,13 +766,53 @@ const MapScreen = () => {
     }
   }, [showSidebar, matches.length]);
 
+  // Calculate actual matching radius based on activity and radius preference
+  // Matches the logic from matchingService.ts computeRadius function
+  const calculateMatchingRadius = useCallback((
+    activity: Activity,
+    radiusPreference: RadiusPreference = "normal"
+  ): number => {
+    const BASE_RADIUS: Record<Activity, number> = {
+      cycling: 10000,  // 10km for cycling
+      running: 2000,   // 2km for running
+      walking: 1000    // 1km for walking
+    };
+
+    const RADIUS_MULTIPLIERS: Record<RadiusPreference, number> = {
+      nearby: 0.5,   // 50% of base radius
+      normal: 1.0,   // 100% of base radius (default)
+      wide: 2.0      // 200% of base radius
+    };
+
+    const baseRadius = BASE_RADIUS[activity] || BASE_RADIUS.running;
+    const multiplier = RADIUS_MULTIPLIERS[radiusPreference] || 1.0;
+    
+    return Math.round(baseRadius * multiplier);
+  }, []);
+
+  // Calculate matching radius based on selected activity and user preference
+  const matchingRadiusMeters = useMemo(() => {
+    if (!selectedActivity || !userProfile) {
+      return 2000; // Default to 2km (running)
+    }
+    return calculateMatchingRadius(
+      selectedActivity,
+      userProfile.radiusPreference || "normal"
+    );
+  }, [selectedActivity, userProfile?.radiusPreference, calculateMatchingRadius]);
+
+  const matchingRadiusKm = matchingRadiusMeters / 1000; // Convert to km
+
   // Get nearby users from hook (fallback for non-matched display)
+  // Beacon mode: only show nearby users when workout is active
+  // Use activity-based radius instead of hardcoded 50km
   const { nearbyUsers: nearbyUsersFromHook, loading: usersLoading } = useNearbyUsers(
     location,
-    50,
-    "all",
-    "all",
-    user?.uid || null
+    matchingRadiusKm, // Use activity-based radius (cycling: 10km, running: 2km, walking: 1km)
+    activityFilter, // Apply activity filter (running/cycling/walking/all)
+    "all", // Gender filter (not used currently)
+    user?.uid || null,
+    isActive // Only show nearby users when workout is active (beacon mode)
   );
 
   
@@ -892,6 +934,134 @@ const MapScreen = () => {
     nearbyUsersRef.current = result;
     return result;
   }, [matchedUsersForDisplay, nearbyUsersFromHook]);
+
+  // Check for nearby active users and show notification when workout is inactive
+  useEffect(() => {
+    // Only check when workout is inactive
+    if (isActive) {
+      // Reset notification state when workout starts
+      notificationShownRef.current = false;
+      notificationCreatedRef.current = false;
+      setShowNotification(false);
+      return;
+    }
+
+    // Don't check if notification was already shown in this session
+    if (notificationShownRef.current) {
+      return;
+    }
+
+    // Check if we have location to calculate distances
+    if (!location || !location.lat || !location.lng) {
+      return;
+    }
+
+    // Throttle notification checks to every 10 seconds
+    let lastCheckTime = 0;
+    const checkInterval = 10000; // 10 seconds
+
+    // Listen to all users to check for nearby active users
+    const unsubscribe = listenToAllUsers((users) => {
+      if (isActive || notificationShownRef.current || !location) {
+        return;
+      }
+
+      // Throttle checks to every 10 seconds
+      const now = Date.now();
+      if (now - lastCheckTime < checkInterval) {
+        return;
+      }
+      lastCheckTime = now;
+
+      const activeThreshold = 3 * 60 * 1000; // 3 minutes
+      
+      // Calculate matching radius based on selected activity and user preference
+      // Use the same radius as the matching system and map circle
+      const maxDistanceKm = selectedActivity && userProfile
+        ? calculateMatchingRadius(
+            selectedActivity,
+            userProfile.radiusPreference || "normal"
+          ) / 1000 // Convert meters to km
+        : 2; // Default to 2km (running) if activity/preference not available
+
+      // Filter users to find active nearby users
+      const activeNearbyUsers = Object.entries(users || {})
+        .filter(([userId, userData]: [string, any]) => {
+          // Exclude current user
+          if (userId === user?.uid) {
+            return false;
+          }
+
+          // Check if user has location
+          if (!userData.lat || !userData.lng) {
+            return false;
+          }
+
+          // Check if user is visible
+          if (userData.visible === false) {
+            return false;
+          }
+
+          // Check if timestamp is recent (within 3 minutes)
+          if (!userData.timestamp) {
+            return false;
+          }
+
+          const timeDiff = now - userData.timestamp;
+          if (timeDiff > activeThreshold) {
+            return false;
+          }
+
+          // Check distance using activity-based radius (cycling: 10km, running: 2km, walking: 1km)
+          // Uses Haversine formula to calculate distance
+          const R = 6371; // Earth's radius in km
+          const dLat = (userData.lat - location.lat) * Math.PI / 180;
+          const dLng = (userData.lng - location.lng) * Math.PI / 180;
+          const a = 
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(location.lat * Math.PI / 180) * Math.cos(userData.lat * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const distance = R * c;
+
+          return distance <= maxDistanceKm;
+        });
+
+      // Show notification if there are active nearby users
+      if (activeNearbyUsers.length > 0 && !notificationShownRef.current) {
+        setShowNotification(true);
+        notificationShownRef.current = true;
+        
+        // Also add notification to bell if not already created
+        if (!notificationCreatedRef.current && user?.uid) {
+          // Check if there's already an unread nearby_active_user notification
+          const hasExistingNotification = notifications.some(
+            (notif) => notif.type === "nearby_active_user" && !notif.read
+          );
+          
+          if (!hasExistingNotification) {
+            addNotification({
+              type: "nearby_active_user",
+              fromUserId: "system",
+              fromUserName: "PaceMatch",
+              fromUserAvatar: "",
+              message: `${activeNearbyUsers.length} active user${activeNearbyUsers.length > 1 ? 's' : ''} nearby! Start your workout to see them.`,
+            });
+            notificationCreatedRef.current = true;
+          }
+        }
+        
+        // Auto-dismiss banner after 5 seconds
+        setTimeout(() => {
+          setShowNotification(false);
+        }, 5000);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isActive, location, user?.uid, selectedActivity, userProfile?.radiusPreference, calculateMatchingRadius, notifications, addNotification]);
 
   // Apply overlap prevention to nearby users markers
   const nearbyUsersWithAdjustedPositions = useMemo(() => {
@@ -1347,11 +1517,12 @@ const MapScreen = () => {
       // Add workout completion notification with workout ID
       addNotification({
         type: "workout_complete",
-        userId: parseInt(user.uid) || 0,
-        userName: "Workout Complete",
-        userAvatar: "",
+        fromUserId: user.uid, // Use fromUserId for Firebase format
+        fromUserName: "Workout Complete",
+        fromUserAvatar: userProfile?.photoURL || "",
         message: `Great job! You completed ${distance.toFixed(2)} km of ${selectedActivity}`,
-        workoutId: workoutId
+        workoutId: workoutId,
+        linkType: "workout" // Link to workout when tapped
       });
       console.log("✅ Workout completion notification added. Unread count should update.");
       
@@ -1416,6 +1587,7 @@ const MapScreen = () => {
 
   const handleNotificationBannerTap = () => {
     setShowNotification(false);
+    notificationShownRef.current = true; // Mark as shown so it doesn't appear again
     handleStartStop();
   };
 
@@ -1740,30 +1912,6 @@ const MapScreen = () => {
       }
     };
     return zoomConfig[activity][zoomLevel];
-  };
-
-  // Calculate actual matching radius based on activity and radius preference
-  // Matches the logic from matchingService.ts computeRadius function
-  const calculateMatchingRadius = (
-    activity: Activity,
-    radiusPreference: RadiusPreference = "normal"
-  ): number => {
-    const BASE_RADIUS: Record<Activity, number> = {
-      cycling: 10000,  // 10km for cycling
-      running: 2000,   // 2km for running
-      walking: 1000    // 1km for walking
-    };
-
-    const RADIUS_MULTIPLIERS: Record<RadiusPreference, number> = {
-      nearby: 0.5,   // 50% of base radius
-      normal: 1.0,   // 100% of base radius (default)
-      wide: 2.0      // 200% of base radius
-    };
-
-    const baseRadius = BASE_RADIUS[activity] || BASE_RADIUS.running;
-    const multiplier = RADIUS_MULTIPLIERS[radiusPreference] || 1.0;
-    
-    return Math.round(baseRadius * multiplier);
   };
 
   // Update zoom level based on activity and zoom level setting
@@ -2284,8 +2432,8 @@ const MapScreen = () => {
             </>
           )}
 
-          {/* Transparent radius circle overlay showing matching range */}
-          {location && location.lat && location.lng && isLoaded && window.google && selectedActivity && userProfile && (
+          {/* Transparent radius circle overlay showing matching range - only show when workout is active (beacon mode) */}
+          {isActive && location && location.lat && location.lng && isLoaded && window.google && selectedActivity && userProfile && (
             (() => {
               const matchingRadius = calculateMatchingRadius(
                 selectedActivity,
@@ -2423,7 +2571,10 @@ const MapScreen = () => {
       {/* Notification Banner */}
       <NotificationBanner
         show={showNotification}
-        onDismiss={() => setShowNotification(false)}
+        onDismiss={() => {
+          setShowNotification(false);
+          notificationShownRef.current = true; // Mark as shown so it doesn't appear again
+        }}
         onTap={handleNotificationBannerTap}
       />
 
@@ -3357,6 +3508,8 @@ const MapScreen = () => {
                             return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
                           case "achievement":
                             return <EmojiEventsIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          case "nearby_active_user":
+                            return <PeopleIcon style={{ fontSize: 20 }} className="text-warning" />;
                           default:
                             return <NotificationsIcon style={{ fontSize: 20 }} />;
                         }
@@ -3378,6 +3531,8 @@ const MapScreen = () => {
                             return "Workout Completed";
                           case "achievement":
                             return notification.message || "Congrats for a new achievement!";
+                          case "nearby_active_user":
+                            return "Active Users Nearby";
                           default:
                             return notification.userName;
                         }
@@ -3399,6 +3554,8 @@ const MapScreen = () => {
                             return notification.message || "Workout completed successfully!";
                           case "achievement":
                             return notification.message || "Congrats for a new achievement!";
+                          case "nearby_active_user":
+                            return notification.message || "Active users nearby! Start your workout to see them.";
                           default:
                             return "";
                         }
@@ -3427,7 +3584,13 @@ const MapScreen = () => {
                             !notification.read ? 'bg-primary/5 border-primary/30' : ''
                           }`}
                           onClick={() => {
-                            handleNotificationTap(notification);
+                            // Special handling for nearby_active_user: start workout
+                            if (notification.type === "nearby_active_user") {
+                              handleNotificationBannerTap();
+                              dismissNotification(notification.id);
+                            } else {
+                              handleNotificationTap(notification);
+                            }
                             setShowNotificationDrawer(false);
                           }}
                         >
@@ -3448,6 +3611,8 @@ const MapScreen = () => {
                                 ? "bg-warning/15"
                                 : notification.type === "friend_accepted"
                                 ? "bg-success/15"
+                                : notification.type === "nearby_active_user"
+                                ? "bg-warning/15"
                                 : "bg-gray-500/15"
                             }`}>
                               {getNotificationIcon()}

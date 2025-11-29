@@ -30,6 +30,7 @@ export interface Location {
  * @param {string} activityFilter - Filter by activity: "running", "cycling", "walking", or "all"
  * @param {string} genderFilter - Filter by gender: "male", "female", or "all"
  * @param {string | null} currentUserId - Current user's ID to exclude from results
+ * @param {boolean} isWorkoutActive - Whether the current user's workout is active (beacon mode only works when active)
  * @returns {Object} { nearbyUsers, loading }
  */
 export const useNearbyUsers = (
@@ -37,7 +38,8 @@ export const useNearbyUsers = (
   maxDistanceKm: number = 5,
   activityFilter: string = "all",
   genderFilter: string = "all",
-  currentUserId: string | null = null
+  currentUserId: string | null = null,
+  isWorkoutActive: boolean = false
 ) => {
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +49,13 @@ export const useNearbyUsers = (
   const lastEncounterCheckRef = useRef<number>(0);
 
   useEffect(() => {
+    // Beacon mode only works when workout is active - return empty array if inactive
+    if (!isWorkoutActive) {
+      setNearbyUsers([]);
+      setLoading(false);
+      return;
+    }
+
     if (!currentLocation || !currentLocation.lat || !currentLocation.lng) {
       setNearbyUsers([]);
       setLoading(false);
@@ -191,7 +200,7 @@ export const useNearbyUsers = (
     });
 
     return () => unsubscribe();
-  }, [currentLocation, maxDistanceKm, activityFilter, genderFilter, currentUserId]);
+  }, [currentLocation, maxDistanceKm, activityFilter, genderFilter, currentUserId, isWorkoutActive]);
 
   return { nearbyUsers, loading };
 };

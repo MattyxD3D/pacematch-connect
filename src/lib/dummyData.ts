@@ -100,7 +100,6 @@ export const generateDummyWorkoutPosts = (): WorkoutPost[] => {
       duration: 3600, // 1 hour
       distance: 10.5,
       avgSpeed: 10.5,
-      calories: 650,
       location: "Central Park, New York",
       nearbyUsers: [
         {
@@ -139,7 +138,6 @@ export const generateDummyWorkoutPosts = (): WorkoutPost[] => {
       duration: 5400, // 1.5 hours
       distance: 35.0,
       avgSpeed: 23.3,
-      calories: 850,
       location: "Hudson River Path",
     },
     caption: "Long ride along the river. Feeling strong! 🚴",
@@ -176,7 +174,6 @@ export const generateDummyWorkoutPosts = (): WorkoutPost[] => {
       duration: 2700, // 45 minutes
       distance: 3.5,
       avgSpeed: 4.7,
-      calories: 180,
       location: "Riverside Park",
     },
     caption: "Peaceful evening walk. Perfect way to unwind 🚶",
@@ -197,7 +194,6 @@ export const generateDummyWorkoutPosts = (): WorkoutPost[] => {
       duration: 2400, // 40 minutes
       distance: 8.0,
       avgSpeed: 12.0,
-      calories: 520,
       location: "Prospect Park",
     },
     caption: "Morning tempo run. Pushed myself today!",
@@ -226,7 +222,6 @@ export const generateDummyWorkoutPosts = (): WorkoutPost[] => {
       duration: 7200, // 2 hours
       distance: 50.0,
       avgSpeed: 25.0,
-      calories: 1200,
       location: "Brooklyn Bridge Loop",
     },
     caption: "Epic ride today! 50km in the books 🎉",
@@ -516,7 +511,6 @@ export const generateDummyWorkoutHistory = (): WorkoutHistory[] => {
     duration: 3600, // 1 hour
     distance: 10.5,
     avgSpeed: 10.5,
-    calories: 650,
     location: "Central Park, New York",
     nearbyUsers: [
       {
@@ -537,7 +531,6 @@ export const generateDummyWorkoutHistory = (): WorkoutHistory[] => {
     duration: 5400, // 1.5 hours
     distance: 35.0,
     avgSpeed: 23.3,
-    calories: 850,
     location: "Hudson River Path",
   });
 
@@ -549,7 +542,6 @@ export const generateDummyWorkoutHistory = (): WorkoutHistory[] => {
     duration: 2700, // 45 minutes
     distance: 3.5,
     avgSpeed: 4.7,
-    calories: 180,
     location: "Riverside Park",
   });
 
@@ -561,7 +553,6 @@ export const generateDummyWorkoutHistory = (): WorkoutHistory[] => {
     duration: 2400, // 40 minutes
     distance: 8.0,
     avgSpeed: 12.0,
-    calories: 520,
     location: "Prospect Park",
   });
 
@@ -573,7 +564,6 @@ export const generateDummyWorkoutHistory = (): WorkoutHistory[] => {
     duration: 7200, // 2 hours
     distance: 50.0,
     avgSpeed: 25.0,
-    calories: 1200,
     location: "Brooklyn Bridge Loop",
   });
 
@@ -585,7 +575,6 @@ export const generateDummyWorkoutHistory = (): WorkoutHistory[] => {
     duration: 3000, // 50 minutes
     distance: 9.5,
     avgSpeed: 11.4,
-    calories: 600,
     location: "Central Park",
     nearbyUsers: [
       {

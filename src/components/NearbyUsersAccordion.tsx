@@ -14,6 +14,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FitnessLevelAvatar } from "@/components/FitnessLevelAvatar";
 import { MatchResult } from "@/services/matchingService";
 import { formatDistance } from "@/utils/distance";
+import { getDisplayName } from "@/utils/anonymousName";
+import { getProfilePictureUrl } from "@/utils/profilePicture";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -125,9 +127,19 @@ export const NearbyUsersAccordion = ({
             <div className="space-y-2 pb-2">
               {sortedMatches.map((match, index) => {
                 const user = match.user;
+                const username = user.name || null;
+                const activity = user.activity || null;
+                const displayName = getDisplayName(username, user.uid, activity);
                 const distanceKm = match.distance / 1000;
                 const score = match.score;
                 const isPoked = pokes.includes(user.uid);
+                
+                // Get profile picture using utility function
+                const profilePictureUrl = getProfilePictureUrl(
+                  user.photoURL,
+                  user.avatar,
+                  displayName
+                );
 
                 return (
                   <motion.div
@@ -147,8 +159,8 @@ export const NearbyUsersAccordion = ({
                         className="cursor-pointer hover:opacity-80 transition-opacity"
                       >
                         <FitnessLevelAvatar
-                          photoURL={user.photoURL}
-                          name={user.name || "User"}
+                          photoURL={profilePictureUrl}
+                          name={displayName}
                           fitnessLevel={user.fitnessLevel}
                           size="md"
                           showGlow={true}
@@ -159,7 +171,7 @@ export const NearbyUsersAccordion = ({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <h4 className="font-semibold text-sm truncate">
-                            {user.name || "Unknown User"}
+                            {displayName}
                           </h4>
                           {isPoked && (
                             <Badge className="bg-purple-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">

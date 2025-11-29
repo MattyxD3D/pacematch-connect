@@ -2,6 +2,7 @@ import * as React from "react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { FitnessLevel } from "@/contexts/UserContext";
 import { cn } from "@/lib/utils";
+import { getProfilePictureUrl } from "@/utils/profilePicture";
 import "@/styles/animations.css";
 
 interface FitnessLevelAvatarProps {
@@ -72,6 +73,9 @@ export const FitnessLevelAvatar = React.forwardRef<
 
   const styles = getFitnessLevelStyles(fitnessLevel);
   const sizeClass = sizeClasses[size];
+  
+  // Get profile picture using utility function for consistent fallback
+  const profilePictureUrl = getProfilePictureUrl(photoURL, null, name);
 
   return (
     <div
@@ -93,7 +97,7 @@ export const FitnessLevelAvatar = React.forwardRef<
         )}
       >
         <AvatarImage 
-          src={photoURL || `https://ui-avatars.com/api/?name=${name || 'User'}&background=random`}
+          src={profilePictureUrl}
           className="rounded-full object-cover"
         />
         <AvatarFallback className="rounded-full">

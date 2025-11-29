@@ -1,7 +1,8 @@
 // Custom hook for finding nearby users
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { listenToAllUsers } from "../services/locationService";
 import { filterUsersByDistance } from "../utils/distance";
+import { addEncounteredUser } from "../services/encounteredUsersService";
 
 export interface NearbyUser {
   id: string;
@@ -40,6 +41,10 @@ export const useNearbyUsers = (
 ) => {
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
   const [loading, setLoading] = useState(true);
+  // Track which users we've already recorded encounters for in this session
+  // to avoid duplicate tracking on every location update
+  const trackedEncountersRef = useRef<Set<string>>(new Set());
+  const lastEncounterCheckRef = useRef<number>(0);
 
   useEffect(() => {
     if (!currentLocation || !currentLocation.lat || !currentLocation.lng) {
@@ -92,6 +97,41 @@ export const useNearbyUsers = (
       console.log("Users after distance filter:", filtered);
       console.log("Users after distance filter count:", filtered.length);
 
+      // Track encounters for users within discovery radius
+      // Throttle to avoid excessive database writes (check every 10 seconds)
+      const now = Date.now();
+      if (currentUserId && now - lastEncounterCheckRef.current > 10000) {
+        lastEncounterCheckRef.current = now;
+        
+        filtered.forEach((user) => {
+          // Only track if we haven't tracked this user in this session
+          // or if it's been more than 5 minutes since last tracking
+          const encounterKey = `${user.id}`;
+          
+          if (!trackedEncountersRef.current.has(encounterKey)) {
+            // Track the encounter
+            addEncounteredUser(
+              currentUserId,
+              user.id,
+              user.distance,
+              { lat: user.lat, lng: user.lng }
+            ).catch((error) => {
+              // Silently fail - encounter tracking is non-critical
+              if (process.env.NODE_ENV === 'development') {
+                console.error("Error tracking encounter:", error);
+              }
+            });
+            
+            trackedEncountersRef.current.add(encounterKey);
+            
+            // Clean up old tracked encounters after 5 minutes to allow re-tracking
+            setTimeout(() => {
+              trackedEncountersRef.current.delete(encounterKey);
+            }, 5 * 60 * 1000);
+          }
+        });
+      }
+
       // Filter by activity
       if (activityFilter !== "all") {
         filtered = filtered.filter(
@@ -120,7 +160,7 @@ export const useNearbyUsers = (
       // This ensures users are only visible when they have an active workout session
       // Inactive locations automatically terminate after 3 minutes
       const beforeActiveFilter = filtered.length;
-      const now = Date.now();
+      // Reuse 'now' from line 102 - no need to redeclare
       const activeThreshold = 3 * 60 * 1000; // 3 minutes in milliseconds
       
       filtered = filtered.filter((user) => {

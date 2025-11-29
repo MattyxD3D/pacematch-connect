@@ -12,9 +12,10 @@ import SearchIcon from "@mui/icons-material/Search";
 import CheckBoxIcon from "@mui/icons-material/CheckBox";
 import CheckBoxOutlineBlankIcon from "@mui/icons-material/CheckBoxOutlineBlank";
 import { toast } from "sonner";
-import { getAllVenues, searchVenues, Venue } from "@/services/venueService";
+import { getAllVenuesSync, searchVenues, Venue } from "@/services/venueService";
 import { useAuth } from "@/hooks/useAuth";
 import { saveUserVenuePreferences, getUserVenuePreferences, Activity } from "@/services/venuePreferenceService";
+import { VenueRequestModal } from "./VenueRequestModal";
 
 interface QuickCheckInModalProps {
   onClose: () => void;
@@ -25,8 +26,9 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedActivities, setSelectedActivities] = useState<Activity[]>([]);
   const [selectedVenues, setSelectedVenues] = useState<string[]>([]);
-  const [venues, setVenues] = useState<Venue[]>(getAllVenues());
+  const [venues, setVenues] = useState<Venue[]>(getAllVenuesSync());
   const [loading, setLoading] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
 
   // Load existing preferences on mount
   useEffect(() => {
@@ -51,7 +53,7 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
     if (searchQuery.trim()) {
       setVenues(searchVenues(searchQuery));
     } else {
-      setVenues(getAllVenues());
+      setVenues(getAllVenuesSync());
     }
   }, [searchQuery]);
 
@@ -127,7 +129,7 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
+        className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       >
         <motion.div
           initial={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -135,11 +137,11 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
           exit={{ scale: 0.95, opacity: 0, y: 20 }}
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
           onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-2xl my-8"
+          className="w-full max-w-2xl max-h-[90vh] flex flex-col"
         >
-          <Card className="overflow-hidden shadow-elevation-4 border-2 border-border/50">
-            {/* Header */}
-            <div className="relative bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 p-6 border-b border-border">
+          <Card className="flex flex-col overflow-hidden shadow-elevation-4 border-2 border-border/50 h-full">
+            {/* Header - Fixed */}
+            <div className="relative bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 p-6 border-b border-border flex-shrink-0">
               <button
                 onClick={onClose}
                 className="absolute top-4 right-4 p-2 bg-background/80 backdrop-blur-sm hover:bg-secondary rounded-full transition-colors z-10"
@@ -147,21 +149,21 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                 <CloseIcon fontSize="small" />
               </button>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 pr-10">
                 <div className="p-3 bg-background/80 backdrop-blur-sm rounded-xl">
                   <LocationOnIcon className="text-primary" style={{ fontSize: 28 }} />
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold">Add venues</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Select venues and activies to display on other users. (Only your profile picture and user is visible)
+                    Select venues and activities to display on other users. (Only your profile picture and user is visible)
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Content */}
-            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+            {/* Content - Scrollable */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {/* Activity Selection */}
               <div className="space-y-3">
                 <label className="text-base font-semibold">Activities</label>
@@ -228,7 +230,16 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
 
               {/* Venue Search */}
               <div className="space-y-3">
-                <label className="text-base font-semibold">Select Venue</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-base font-semibold">Select Venue</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowRequestModal(true)}
+                    className="text-sm text-primary hover:text-primary/80 underline"
+                  >
+                    Can't find your venue?
+                  </button>
+                </div>
                 <div className="relative">
                   <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
                   <Input
@@ -240,8 +251,8 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                 </div>
               </div>
 
-              {/* Venue List */}
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {/* Venue List - No nested scrolling */}
+              <div className="space-y-2">
                 {venues.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <p>No venues found</p>
@@ -256,32 +267,30 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                         whileTap={{ scale: 0.98 }}
                         onClick={() => handleToggleVenue(venue.id)}
                         className={`
-                          w-full text-left p-4 rounded-xl border-2 transition-all duration-300
+                          w-full text-left p-4 rounded-lg border-2 transition-all duration-200
                           ${
                             isSelected
-                              ? "border-primary bg-primary/10 shadow-elevation-2"
-                              : "border-border bg-card hover:bg-secondary"
+                              ? "border-primary bg-primary/10"
+                              : "border-border bg-card hover:bg-secondary hover:border-primary/50"
                           }
                         `}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3 flex-1">
-                            {isSelected ? (
-                              <CheckBoxIcon className="text-primary" style={{ fontSize: 24 }} />
-                            ) : (
-                              <CheckBoxOutlineBlankIcon className="text-muted-foreground" style={{ fontSize: 24 }} />
-                            )}
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <LocationOnIcon
-                                  className={isSelected ? "text-primary" : "text-muted-foreground"}
-                                  style={{ fontSize: 20 }}
-                                />
-                                <h3 className="font-semibold">{venue.name}</h3>
-                              </div>
-                              <p className="text-sm text-muted-foreground">{venue.description}</p>
-                              <p className="text-xs text-muted-foreground mt-1">{venue.city}</p>
+                        <div className="flex items-start gap-3">
+                          {isSelected ? (
+                            <CheckBoxIcon className="text-primary flex-shrink-0 mt-0.5" style={{ fontSize: 20 }} />
+                          ) : (
+                            <CheckBoxOutlineBlankIcon className="text-muted-foreground flex-shrink-0 mt-0.5" style={{ fontSize: 20 }} />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <LocationOnIcon
+                                className={isSelected ? "text-primary" : "text-muted-foreground"}
+                                style={{ fontSize: 18 }}
+                              />
+                              <h3 className="font-semibold text-base truncate">{venue.name}</h3>
                             </div>
+                            <p className="text-sm text-muted-foreground line-clamp-2">{venue.description}</p>
+                            <p className="text-xs text-muted-foreground mt-1">{venue.city}</p>
                           </div>
                         </div>
                       </motion.button>
@@ -289,29 +298,40 @@ export const QuickCheckInModal = ({ onClose }: QuickCheckInModalProps) => {
                   })
                 )}
               </div>
+            </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-3 pt-4 border-t border-border">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={onClose}
-                  className="flex-1 h-12"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleSetLocation}
-                  disabled={selectedVenues.length === 0 || selectedActivities.length === 0 || loading}
-                  className="flex-1 h-12 font-semibold"
-                >
-                  {loading ? "Saving..." : "Set location"}
-                </Button>
-              </div>
+            {/* Action Buttons - Fixed */}
+            <div className="flex gap-3 p-6 pt-4 border-t border-border flex-shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onClose}
+                className="flex-1 h-12"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSetLocation}
+                disabled={selectedVenues.length === 0 || selectedActivities.length === 0 || loading}
+                className="flex-1 h-12 font-semibold"
+              >
+                {loading ? "Saving..." : "Set location"}
+              </Button>
             </div>
           </Card>
         </motion.div>
       </motion.div>
+
+      {/* Venue Request Modal */}
+      {showRequestModal && (
+        <VenueRequestModal
+          onClose={() => setShowRequestModal(false)}
+          onSuccess={() => {
+            setShowRequestModal(false);
+            toast.success("Request submitted successfully!");
+          }}
+        />
+      )}
     </AnimatePresence>
   );
 };

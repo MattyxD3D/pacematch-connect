@@ -59,6 +59,7 @@ export const formatDistance = (distanceKm: number | null | undefined): string =>
  * @param {number} userLng - Current user's longitude
  * @param {number} maxDistanceKm - Maximum distance in kilometers
  * @param {string | null} excludeUserId - User ID to exclude from results (optional)
+ * @param {boolean} requireActive - If true, only include users with active workouts (recent timestamps within 3 min)
  * @returns {Array} Filtered users with distance property
  */
 export const filterUsersByDistance = (
@@ -66,12 +67,17 @@ export const filterUsersByDistance = (
   userLat: number,
   userLng: number,
   maxDistanceKm: number,
-  excludeUserId: string | null = null
+  excludeUserId: string | null = null,
+  requireActive: boolean = false
 ): Array<UserWithLocation & { id: string; distance: number }> => {
   if (!userLat || !userLng) {
     console.log("⚠️ No user location provided for distance filter");
     return [];
   }
+
+  // Active workout threshold: 3 minutes
+  const now = Date.now();
+  const activeThreshold = 3 * 60 * 1000; // 3 minutes in milliseconds
 
   if (!users || (typeof users === 'object' && !Array.isArray(users) && Object.keys(users).length === 0)) {
     console.log("⚠️ No users provided to filter");
@@ -109,6 +115,20 @@ export const filterUsersByDistance = (
       if (userData.profileVisible === false) {
         console.log(`User ${userId} filtered out - profileVisible: false`);
         return null;
+      }
+
+      // Check active workout status if required
+      if (requireActive) {
+        if (!userData.timestamp) {
+          console.log(`User ${userId} filtered out - no timestamp (not actively tracking)`);
+          return null;
+        }
+        
+        const timeDiff = now - userData.timestamp;
+        if (timeDiff > activeThreshold) {
+          console.log(`User ${userId} filtered out - timestamp too old (${Math.round(timeDiff / 1000)}s ago, threshold: 3min)`);
+          return null;
+        }
       }
 
       const distance = calculateDistance(

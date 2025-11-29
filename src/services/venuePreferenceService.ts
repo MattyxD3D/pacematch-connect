@@ -1,7 +1,7 @@
 // Venue preference service - manages user venue and activity preferences
 import { ref, set, get, onValue, off, DataSnapshot } from "firebase/database";
 import { database } from "./firebase";
-import { getUserData } from "./authService";
+import { getUserData, updateUserProfile } from "./authService";
 
 export type Activity = "running" | "cycling" | "walking";
 
@@ -38,6 +38,16 @@ export const saveUserVenuePreferences = async (
 
     await set(preferencesRef, preferences);
     console.log(`✅ Saved venue preferences for user ${userId}`);
+    
+    // Automatically enable profile visibility when user adds venues
+    // This makes sense because adding venues indicates they want to be discoverable
+    try {
+      await updateUserProfile(userId, { profileVisible: true });
+      console.log(`✅ Enabled profile visibility for user ${userId}`);
+    } catch (profileError) {
+      // Log error but don't fail the entire operation if profile update fails
+      console.error("❌ Error enabling profile visibility:", profileError);
+    }
   } catch (error) {
     console.error("❌ Error saving venue preferences:", error);
     throw error;

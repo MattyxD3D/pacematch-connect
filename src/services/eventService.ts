@@ -3,6 +3,7 @@ import { ref, set, get, onValue, off, push, remove, DataSnapshot } from "firebas
 import { database } from "./firebase";
 import { checkInToVenue, checkOutFromVenue, getCheckInsAtVenue, CheckIn, UserCheckInData } from "./checkInService";
 import { findVenueForEvent } from "./venueService";
+import { isCommentingSuspended } from "./userService";
 
 export interface Event {
   id: string;
@@ -382,6 +383,93 @@ export const getCheckInsAtEventLocation = async (eventId: string): Promise<Check
 /**
  * Listen to check-ins at an event's location in real-time
  */
+// Comment interface
+export interface EventComment {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  text: string;
+  timestamp: number;
+}
+
+/**
+ * Add a comment to an event
+ * Checks if user's commenting privileges are suspended before allowing
+ */
+export const addComment = async (
+  eventId: string,
+  userId: string,
+  userName: string,
+  userAvatar: string,
+  text: string
+): Promise<string> => {
+  try {
+    // Check if user's commenting is suspended
+    const suspension = await isCommentingSuspended(userId);
+    if (suspension) {
+      const suspendedUntilText = suspension.suspendedUntil 
+        ? ` until ${new Date(suspension.suspendedUntil).toLocaleDateString()}`
+        : "";
+      throw new Error(`Your commenting privileges are suspended${suspendedUntilText}. Reason: ${suspension.reason}`);
+    }
+    
+    const commentsRef = ref(database, `events/${eventId}/comments`);
+    const newCommentRef = push(commentsRef);
+    const commentId = newCommentRef.key!;
+    
+    const comment: EventComment = {
+      id: commentId,
+      userId,
+      userName,
+      userAvatar: userAvatar || "",
+      text,
+      timestamp: Date.now()
+    };
+    
+    await set(newCommentRef, comment);
+    console.log(`✅ Comment added to event ${eventId}`);
+    return commentId;
+  } catch (error) {
+    console.error("❌ Error adding comment:", error);
+    throw error;
+  }
+};
+
+/**
+ * Listen to comments on an event in real-time
+ */
+export const listenToComments = (
+  eventId: string,
+  callback: (comments: EventComment[]) => void
+): (() => void) => {
+  const commentsRef = ref(database, `events/${eventId}/comments`);
+  
+  const unsubscribe = onValue(
+    commentsRef,
+    (snapshot: DataSnapshot) => {
+      if (!snapshot.exists()) {
+        callback([]);
+        return;
+      }
+      
+      const comments = snapshot.val();
+      const commentsArray = Object.values(comments) as EventComment[];
+      // Sort by timestamp (oldest first)
+      commentsArray.sort((a, b) => a.timestamp - b.timestamp);
+      callback(commentsArray);
+    },
+    (error) => {
+      console.error("❌ Error listening to comments:", error);
+      callback([]);
+    }
+  );
+  
+  return () => {
+    off(commentsRef);
+  };
+};
+
 export const listenToEventCheckIns = (
   eventId: string,
   callback: (checkIns: CheckIn[]) => void
@@ -462,5 +550,75 @@ export const listenToEventCheckIns = (
     if (eventCheckInsUnsubscribe) eventCheckInsUnsubscribe();
     off(eventRef);
   };
+};
+
+// ============ ADDITIONAL COMMENT FUNCTIONS ============
+
+/**
+ * Delete a comment (only the comment author, event host, or admin can delete)
+ * @param isAdmin - If true, skips ownership check (for admin moderation)
+ */
+export const deleteComment = async (
+  eventId: string,
+  commentId: string,
+  userId: string,
+  isAdmin: boolean = false
+): Promise<void> => {
+  try {
+    // Get the comment to check ownership
+    const commentRef = ref(database, `events/${eventId}/comments/${commentId}`);
+    const commentSnapshot = await get(commentRef);
+    
+    if (!commentSnapshot.exists()) {
+      throw new Error("Comment not found");
+    }
+    
+    const comment = commentSnapshot.val() as EventComment;
+    
+    // Skip permission check if admin
+    if (!isAdmin) {
+      // Get the event to check if user is host
+      const eventRef = ref(database, `events/${eventId}`);
+      const eventSnapshot = await get(eventRef);
+      
+      if (!eventSnapshot.exists()) {
+        throw new Error("Event not found");
+      }
+      
+      const event = eventSnapshot.val() as Event;
+      
+      // Only allow deletion by comment author or event host
+      if (comment.userId !== userId && event.hostId !== userId) {
+        throw new Error("You don't have permission to delete this comment");
+      }
+    }
+    
+    await remove(commentRef);
+    console.log(`✅ Comment ${commentId} deleted from event ${eventId}${isAdmin ? ' (by admin)' : ''}`);
+  } catch (error) {
+    console.error("❌ Error deleting comment:", error);
+    throw error;
+  }
+};
+
+/**
+ * Get all comments for an event (used by admin)
+ */
+export const getAllEventComments = async (eventId: string): Promise<EventComment[]> => {
+  try {
+    const commentsRef = ref(database, `events/${eventId}/comments`);
+    const snapshot = await get(commentsRef);
+    
+    if (!snapshot.exists()) {
+      return [];
+    }
+    
+    const comments = snapshot.val();
+    const commentsArray = Object.values(comments) as EventComment[];
+    return commentsArray.sort((a, b) => b.timestamp - a.timestamp);
+  } catch (error) {
+    console.error("❌ Error getting event comments:", error);
+    return [];
+  }
 };
 

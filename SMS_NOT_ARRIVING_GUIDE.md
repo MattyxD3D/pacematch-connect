@@ -20,9 +20,14 @@ Open Browser DevTools (F12) → Console tab and look for:
    - `auth/invalid-phone-number` → Phone number format issue
    - `auth/too-many-requests` → Too many SMS requests
 
-### ✅ Step 2: Firebase Phone Authentication Test Mode
+### ✅ Step 2: Firebase Phone Authentication Test Mode vs Production Mode
 
-**IMPORTANT:** Firebase has a **test mode** for Phone Authentication that only sends SMS to whitelisted phone numbers!
+**IMPORTANT:** Firebase has two modes for Phone Authentication:
+
+#### Test Mode (Development)
+- **SMS only sent to**: Phone numbers in "Phone numbers for testing" list
+- **Use case**: Development and testing
+- **How to use**: Add test phone numbers in Firebase Console
 
 1. Go to [Firebase Console](https://console.firebase.google.com/project/pacematch-gps/authentication)
 2. Click on **Authentication** → **Settings** → **Phone numbers for testing**
@@ -33,6 +38,21 @@ Open Browser DevTools (F12) → Console tab and look for:
    - Click **Add**
 
 **Note:** In test mode, if you provide a test code, Firebase will use that code instead of sending a real SMS. If you don't provide a test code, Firebase will send a real SMS but only to numbers in this list.
+
+#### Production Mode (Send SMS to Any Number)
+- **SMS sent to**: ANY phone number
+- **Use case**: Production apps serving real users
+- **Requirements**: 
+  1. Billing enabled (Blaze plan)
+  2. Phone Authentication enabled
+  3. **NO test phone numbers configured** (critical!)
+
+**To enable Production Mode**:
+1. Remove ALL test phone numbers from Firebase Console → Authentication → Settings → Phone numbers for testing
+2. Verify billing is enabled (Firebase Console → Usage & Billing)
+3. Production mode activates automatically when test list is empty
+
+📖 **For detailed setup instructions, see**: `PHONE_AUTH_PRODUCTION_SETUP.md`
 
 ### ✅ Step 3: Check Firebase SMS Quota
 
@@ -87,7 +107,21 @@ Sometimes carriers block or delay SMS:
 
 ## Common Solutions
 
-### Solution 1: Add Phone Number to Test List (Recommended for Development)
+### Solution 1: Enable Production Mode (For Production Apps)
+
+**To send SMS to ANY phone number**:
+
+1. Go to Firebase Console → Authentication → Settings → **Phone numbers for testing**
+2. **Remove ALL test phone numbers** from the list (critical step!)
+3. Verify billing is enabled (Firebase Console → Usage & Billing → Blaze plan)
+4. Production mode activates automatically when test list is empty
+5. Test with any phone number
+
+📖 **Detailed instructions**: See `PHONE_AUTH_PRODUCTION_SETUP.md`
+
+**Key Point**: If ANY test numbers exist, Firebase stays in test mode and only sends SMS to those numbers, even with billing enabled.
+
+### Solution 2: Add Phone Number to Test List (For Development/Testing)
 
 1. Firebase Console → Authentication → Settings → **Phone numbers for testing**
 2. Add your phone: `+631234567890`
@@ -97,19 +131,21 @@ Sometimes carriers block or delay SMS:
 **With test code:** You can use the test code you specified instead of waiting for SMS
 **Without test code:** Firebase will send a real SMS only to whitelisted numbers
 
-### Solution 2: Enable Billing (For Production)
+**Note**: This keeps you in TEST MODE. To enable production, remove all test numbers.
+
+### Solution 3: Enable Billing (Required for Production Mode)
 
 1. Firebase Console → Usage & Billing
 2. Enable billing (requires payment method)
 3. This allows unlimited SMS (within quotas)
 
-### Solution 3: Check Phone Number Format
+### Solution 4: Check Phone Number Format
 
 Verify your phone number format in the browser console:
 - Look for: `📱 Phone number format check:`
 - Should show: `startsWithPlus: true`, `length: 13` (for +63 + 10 digits)
 
-### Solution 4: Use Test Code Mode
+### Solution 5: Use Test Code Mode
 
 If you added a test code in Firebase Console:
 - Enter that test code directly (e.g., `123456`)
@@ -180,11 +216,26 @@ If none of the above works:
 
 Most common reasons SMS doesn't arrive:
 
-1. **Test mode** - Phone number not in whitelist (90% of cases)
+1. **Test mode** - Phone number not in whitelist OR test numbers still configured (90% of cases)
+   - **Solution**: For production, remove ALL test numbers. For development, add your number to test list.
 2. **SMS quota exceeded** - Free tier limits reached
-3. **Billing not enabled** - Required for production SMS
+   - **Solution**: Check Firebase Console > Usage & Billing
+3. **Billing not enabled** - Required for production SMS (Blaze plan)
+   - **Solution**: Enable billing in Firebase Console > Usage & Billing
 4. **Wrong phone format** - Not in E.164 format
+   - **Solution**: Use format `+63XXXXXXXXXX` (country code + 10 digits)
 5. **Carrier delay** - SMS can take 1-5 minutes
+   - **Solution**: Wait and check phone
 
-**Quick Fix:** Add your phone number to "Phone numbers for testing" in Firebase Console!
+### Quick Fixes by Use Case
+
+**For Development/Testing**:
+- Add your phone number to "Phone numbers for testing" in Firebase Console
+
+**For Production (Send SMS to Any Number)**:
+1. Remove ALL test phone numbers from Firebase Console
+2. Verify billing is enabled (Blaze plan)
+3. Test with any phone number
+
+📖 **For detailed production mode setup, see**: `PHONE_AUTH_PRODUCTION_SETUP.md`
 

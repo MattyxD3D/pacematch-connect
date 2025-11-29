@@ -163,8 +163,32 @@ export function matchUsers(
     user.uid
   );
 
+  // Filter for active users only (users with recent location updates within 3 minutes)
+  // This ensures we only match with users who are currently working out
+  const now = Date.now();
+  const activeThreshold = 3 * 60 * 1000; // 3 minutes in milliseconds
+  const activeCandidates = candidates.filter(candidate => {
+    // User must have a timestamp indicating recent location update
+    if (!candidate.timestamp) {
+      console.log(`Match candidate ${candidate.id} filtered out - no timestamp (not actively tracking)`);
+      return false;
+    }
+    
+    // Check if timestamp is recent (within 3 minutes)
+    const timeDiff = now - candidate.timestamp;
+    const isActive = timeDiff <= activeThreshold;
+    
+    if (!isActive) {
+      console.log(`Match candidate ${candidate.id} filtered out - timestamp too old (${Math.round(timeDiff / 1000)}s ago, threshold: 3min)`);
+    }
+    
+    return isActive;
+  });
+
+  console.log(`Matching: ${candidates.length} nearby users → ${activeCandidates.length} with active workouts`);
+
   // Filter by fitness level and pace compatibility
-  const filtered = candidates
+  const filtered = activeCandidates
     .map(candidate => {
       // Ensure candidate has required fields
       const candidateFitnessLevel = candidate.fitnessLevel || "intermediate";

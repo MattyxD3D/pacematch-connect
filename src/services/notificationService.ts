@@ -9,7 +9,15 @@ export type NotificationType =
   | "friend_accepted" 
   | "poke" 
   | "workout_complete" 
-  | "achievement";
+  | "achievement"
+  | "report_submitted"
+  // Admin moderation notification types
+  | "admin_comment_deleted"
+  | "admin_event_deleted"
+  | "admin_event_cancelled"
+  | "admin_warning"
+  | "admin_comment_suspended"
+  | "admin_comment_restored";
 
 export interface Notification {
   id: string;
@@ -22,6 +30,11 @@ export interface Notification {
   read: boolean;
   workoutId?: string; // For poke notifications linking to workout
   linkType?: string; // For navigation context
+  // Admin moderation fields
+  eventId?: string; // For event-related notifications
+  eventTitle?: string; // Event title for context
+  reason?: string; // Admin action reason
+  adminId?: string; // Admin who took action
 }
 
 /**

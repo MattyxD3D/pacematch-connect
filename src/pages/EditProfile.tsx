@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/contexts/UserContext";
 import { Button } from "@/components/ui/button";
@@ -16,22 +16,28 @@ import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
 import DeleteIcon from "@mui/icons-material/Delete";
+import CameraAltIcon from "@mui/icons-material/CameraAlt";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserData, updateUserProfile } from "@/services/authService";
+import { DEFAULT_AVATARS, generateUserAvatar } from "@/lib/avatars";
+import { storage } from "@/services/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 const EditProfile = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { userProfile, setUserProfile } = useUser();
   
-  const [username, setUsername] = useState(userProfile?.username || "");
-  const [bio, setBio] = useState(userProfile?.bio || "");
-  const [gender, setGender] = useState(userProfile?.gender || "");
-  const [photos, setPhotos] = useState<string[]>(userProfile?.photos || []);
-  const [selectedActivities, setSelectedActivities] = useState<("running" | "cycling" | "walking")[]>(
-    userProfile?.activities || []
-  );
+  const [username, setUsername] = useState("");
+  const [bio, setBio] = useState("");
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [selectedActivities, setSelectedActivities] = useState<("running" | "cycling" | "walking")[]>([]);
+  const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -42,24 +48,36 @@ const EditProfile = () => {
         try {
           const userData = await getUserData(user.uid);
           if (userData) {
-            // Load username from Firebase
+            // Load username from Firebase (stored as 'name')
             if (userData.name) {
               setUsername(userData.name);
             }
             
-            // Load gender from Firebase and lock it
-            if (userData.gender) {
-              setGender(userData.gender);
+            // Load bio from Firebase
+            if (userData.bio) {
+              setBio(userData.bio);
             }
             
-            // Load activity from Firebase (onboarding saves as single value)
-            // Convert to array format for checkboxes
-            if (userData.activity) {
+            // Load photos from Firebase
+            if (userData.photos && Array.isArray(userData.photos)) {
+              setPhotos(userData.photos);
+            }
+            
+            // Load photoURL from Firebase (profile photo/avatar)
+            if (userData.photoURL) {
+              setSelectedPhotoUrl(userData.photoURL);
+            }
+            
+            // Load activities from Firebase - prioritize activities array over single activity
+            if (userData.activities && Array.isArray(userData.activities) && userData.activities.length > 0) {
+              setSelectedActivities(userData.activities);
+            } else if (userData.activity) {
+              // Fallback to single activity if array doesn't exist
               const activity = userData.activity as "running" | "cycling" | "walking";
               setSelectedActivities([activity]);
-            } else if (userProfile?.activities && userProfile.activities.length > 0) {
-              // Fallback to userProfile if Firebase doesn't have it
-              setSelectedActivities(userProfile.activities);
+            } else {
+              // Default to running if nothing is set
+              setSelectedActivities(["running"]);
             }
           }
         } catch (error) {
@@ -95,7 +113,61 @@ const EditProfile = () => {
     });
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle profile photo/avatar upload
+  const handleProfilePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error("Please select an image file");
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be less than 5MB");
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      // Create a reference to the file in Firebase Storage
+      const storageRef = ref(storage, `profile-photos/${user.uid}/${Date.now()}_${file.name}`);
+      
+      // Upload the file
+      const snapshot = await uploadBytes(storageRef, file);
+      
+      // Get the download URL
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+      
+      setSelectedPhotoUrl(downloadUrl);
+      setShowAvatarPicker(false);
+      toast.success("Profile photo updated successfully!");
+    } catch (error: any) {
+      console.error("Error uploading photo:", error);
+      toast.error("Failed to upload photo. Please try again.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  // Handle default avatar selection
+  const handleAvatarSelect = (avatarUrl: string) => {
+    setSelectedPhotoUrl(avatarUrl);
+    setShowAvatarPicker(false);
+    toast.success("Avatar selected!");
+  };
+
+  // Get current display photo URL
+  const getDisplayPhotoUrl = (): string => {
+    if (selectedPhotoUrl) return selectedPhotoUrl;
+    if (user?.photoURL) return user.photoURL;
+    return generateUserAvatar(username || user?.displayName || user?.email || 'User');
+  };
+
+  // Handle additional photos upload (up to 3)
+  const handlePhotosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
 
@@ -142,6 +214,7 @@ const EditProfile = () => {
         name: username.trim(), // Save username as 'name' in Firebase
         bio: bio.trim() || null,
         photos: photos.length > 0 ? photos : null,
+        photoURL: selectedPhotoUrl || null, // Save profile photo/avatar URL
         // Save activities - use first activity as primary activity for compatibility
         activity: selectedActivities[0], // Primary activity (for backward compatibility)
         activities: selectedActivities, // Array of all selected activities
@@ -155,7 +228,6 @@ const EditProfile = () => {
         ...userProfile!,
         username: username.trim(),
         bio: bio.trim(),
-        gender,
         photos,
         activities: selectedActivities,
       });
@@ -191,20 +263,153 @@ const EditProfile = () => {
       </motion.div>
 
       <div className="max-w-2xl mx-auto px-6 py-6 space-y-6 pb-10">
-        {/* Profile Picture */}
+        {/* Profile Picture - Clickable with Avatar Picker */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex justify-center"
+          className="flex flex-col items-center gap-3"
         >
-          <Avatar
-            src={user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.displayName || user?.email || 'User')}&size=120`}
-            alt="Profile"
-            sx={{ width: 120, height: 120 }}
-            className="border-4 border-primary/20 shadow-elevation-3"
-          />
+          <div className="relative group">
+            <button
+              type="button"
+              onClick={() => setShowAvatarPicker(true)}
+              className="relative rounded-full focus:outline-none focus:ring-4 focus:ring-primary/30 transition-all duration-300"
+            >
+              <Avatar
+                sx={{ width: 120, height: 120 }}
+                alt="Profile"
+                src={getDisplayPhotoUrl()}
+                className="border-4 border-primary/20 shadow-elevation-3"
+              />
+              {/* Camera overlay on hover */}
+              <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 border-4 border-primary/20 rounded-full">
+                <CameraAltIcon className="text-white" style={{ fontSize: 40 }} />
+              </div>
+              {/* Selected indicator */}
+              {selectedPhotoUrl && (
+                <div className="absolute -bottom-1 -right-1 bg-green-500 rounded-full p-1.5">
+                  <CheckCircleIcon className="text-white" style={{ fontSize: 20 }} />
+                </div>
+              )}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAvatarPicker(true)}
+            className="text-sm text-primary hover:text-primary/80 font-medium transition-colors"
+          >
+            {selectedPhotoUrl ? "Change Photo" : "Add Photo"}
+          </button>
         </motion.div>
+
+        {/* Avatar Picker Modal */}
+        <AnimatePresence>
+          {showAvatarPicker && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+              onClick={() => setShowAvatarPicker(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-card rounded-2xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-bold text-foreground">Choose Your Photo</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowAvatarPicker(false)}
+                    className="text-muted-foreground hover:text-foreground transition-colors text-2xl leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Upload Photo Option */}
+                <div className="mb-6">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleProfilePhotoUpload}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingPhoto}
+                    className="w-full flex items-center justify-center gap-3 p-4 rounded-xl border-2 border-dashed border-primary/30 hover:border-primary hover:bg-primary/5 transition-all duration-200 disabled:opacity-50"
+                  >
+                    {uploadingPhoto ? (
+                      <>
+                        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        <span className="font-medium text-primary">Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <AddPhotoAlternateIcon className="text-primary" style={{ fontSize: 28 }} />
+                        <span className="font-medium text-primary">Upload Your Photo</span>
+                      </>
+                    )}
+                  </button>
+                  <p className="text-xs text-muted-foreground text-center mt-2">
+                    Max 5MB • JPG, PNG, GIF
+                  </p>
+                </div>
+
+                {/* Divider */}
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="flex-1 h-px bg-border" />
+                  <span className="text-sm text-muted-foreground">or choose an avatar</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+
+                {/* Default Avatars Grid */}
+                <div className="grid grid-cols-4 gap-3">
+                  {DEFAULT_AVATARS.map((avatar) => (
+                    <button
+                      key={avatar.id}
+                      type="button"
+                      onClick={() => handleAvatarSelect(avatar.url)}
+                      className={`relative rounded-xl p-2 transition-all duration-200 hover:scale-105 ${
+                        selectedPhotoUrl === avatar.url
+                          ? "bg-primary/20 ring-2 ring-primary"
+                          : "bg-secondary hover:bg-secondary/80"
+                      }`}
+                    >
+                      <img
+                        src={avatar.url}
+                        alt={avatar.name}
+                        className="w-full aspect-square rounded-lg"
+                      />
+                      {selectedPhotoUrl === avatar.url && (
+                        <div className="absolute -top-1 -right-1 bg-primary rounded-full p-0.5">
+                          <CheckCircleIcon className="text-white" style={{ fontSize: 14 }} />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Close button */}
+                <Button
+                  type="button"
+                  onClick={() => setShowAvatarPicker(false)}
+                  className="w-full mt-6"
+                  variant="outline"
+                >
+                  Done
+                </Button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Photos Section */}
         <motion.div
@@ -236,7 +441,7 @@ const EditProfile = () => {
                     accept="image/*"
                     multiple
                     className="hidden"
-                    onChange={handlePhotoUpload}
+                    onChange={handlePhotosUpload}
                   />
                   <AddPhotoAlternateIcon className="text-muted-foreground" style={{ fontSize: 32 }} />
                   <span className="text-xs text-muted-foreground mt-2">Add Photo</span>
@@ -264,6 +469,9 @@ const EditProfile = () => {
                 placeholder="Your username"
                 className="h-12"
               />
+              <p className="text-xs text-muted-foreground">
+                This name will be displayed to other users
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -277,22 +485,6 @@ const EditProfile = () => {
                 rows={4}
               />
               <p className="text-xs text-muted-foreground text-right">{bio.length}/500</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="gender">Gender</Label>
-              <Select value={gender} onValueChange={setGender} disabled>
-                <SelectTrigger className="h-12" disabled>
-                  <SelectValue placeholder="Select gender" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="male">Male</SelectItem>
-                  <SelectItem value="female">Female</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                  <SelectItem value="prefer-not-to-say">Prefer not to say</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">Gender cannot be changed after onboarding</p>
             </div>
           </Card>
         </motion.div>

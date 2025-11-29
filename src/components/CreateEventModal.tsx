@@ -13,6 +13,8 @@ import {
   DrawerDescription,
 } from "@/components/ui/drawer";
 import { GoogleMap, Marker, Autocomplete, useJsApiLoader } from "@react-google-maps/api";
+import { Geolocation } from "@capacitor/geolocation";
+import { isNativePlatform } from "@/utils/platform";
 import CloseIcon from "@mui/icons-material/Close";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
@@ -125,6 +127,7 @@ export const CreateEventModal = ({
   const [mapPickerZoom, setMapPickerZoom] = useState(13);
   const [mapPickerRef, setMapPickerRef] = useState<google.maps.Map | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [isLoadingUserLocation, setIsLoadingUserLocation] = useState(false);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
   
@@ -159,27 +162,82 @@ export const CreateEventModal = ({
     libraries: libraries
   });
   
-  // Get user location when component mounts
+  // Get user location when component mounts or map picker opens
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const loc = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          };
+    const getUserLocation = async () => {
+      setIsLoadingUserLocation(true);
+      
+      try {
+        let loc: { lat: number; lng: number } | null = null;
+        
+        if (isNativePlatform()) {
+          // Use Capacitor Geolocation for native apps (iOS/Android)
+          try {
+            // Request permissions first
+            const permissionStatus = await Geolocation.requestPermissions();
+            
+            if (permissionStatus.location === 'granted') {
+              const position = await Geolocation.getCurrentPosition({
+                enableHighAccuracy: true,
+                timeout: 10000
+              });
+              
+              loc = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+              };
+            } else {
+              console.warn("Location permission denied on native platform");
+            }
+          } catch (error) {
+            console.warn("Could not get user location (native):", error);
+          }
+        } else {
+          // Use browser geolocation for web
+          if (navigator.geolocation) {
+            await new Promise<void>((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(
+                (position) => {
+                  loc = {
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude,
+                  };
+                  resolve();
+                },
+                (error) => {
+                  console.warn("Could not get user location (web):", error);
+                  reject(error);
+                }
+              );
+            });
+          }
+        }
+        
+        if (loc) {
           setUserLocation(loc);
+          
+          // If map picker is open, center on user location
           if (showMapPicker) {
             setMapPickerCenter(loc);
             setLiveMapCenter(loc);
+            setMapPickerZoom(15);
+            
+            // Also pan the map if ref exists
+            if (mapPickerRef) {
+              mapPickerRef.panTo(loc);
+              mapPickerRef.setZoom(15);
+            }
           }
-        },
-        (error) => {
-          console.warn("Could not get user location:", error);
         }
-      );
-    }
-  }, [showMapPicker]);
+      } catch (error) {
+        console.warn("Error getting user location:", error);
+      } finally {
+        setIsLoadingUserLocation(false);
+      }
+    };
+    
+    getUserLocation();
+  }, [showMapPicker, mapPickerRef]);
 
   useEffect(() => {
     if (
@@ -195,6 +253,18 @@ export const CreateEventModal = ({
   useEffect(() => {
     setLiveMapCenter(mapPickerCenter);
   }, [mapPickerCenter]);
+
+  // Center map on user location when it becomes available (handles async loading)
+  useEffect(() => {
+    if (showMapPicker && userLocation && mapPickerRef && !selectedLocation) {
+      // Only auto-center if no location is selected yet
+      mapPickerRef.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+      mapPickerRef.setZoom(15);
+      setMapPickerCenter(userLocation);
+      setLiveMapCenter(userLocation);
+      setMapPickerZoom(15);
+    }
+  }, [userLocation, showMapPicker, mapPickerRef, selectedLocation]);
   
   // Detect mobile viewport - use initial check only, avoid re-renders during typing
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
@@ -302,13 +372,15 @@ export const CreateEventModal = ({
         });
       }
 
+      // Always update React state to ensure sync even if component re-renders
+      setMapPickerCenter({ lat, lng });
+      setLiveMapCenter({ lat, lng });
+      setMapPickerZoom(15);
+      
+      // Also pan the map if ref exists (for immediate visual feedback)
       if (mapPickerRef) {
         mapPickerRef.panTo({ lat, lng });
         mapPickerRef.setZoom(15);
-      } else {
-        setMapPickerCenter({ lat, lng });
-        setMapPickerZoom(15);
-        setLiveMapCenter({ lat, lng });
       }
     },
     [resolveAddressFromCoords, mapPickerRef]
@@ -581,13 +653,26 @@ export const CreateEventModal = ({
                 )}
 
                 {isMapLoaded && !mapLoadError && (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
-                    <div className="relative h-14 w-14 flex items-center justify-center">
-                      <span className="absolute left-1/2 top-0 h-14 w-[2px] -translate-x-1/2 bg-primary/70"></span>
-                      <span className="absolute top-1/2 left-0 w-14 h-[2px] -translate-y-1/2 bg-primary/70"></span>
-                      <div className="w-6 h-6 rounded-full border-2 border-primary/80 bg-background/60 backdrop-blur-sm shadow-md"></div>
+                  <>
+                    {/* Center crosshair */}
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
+                      <div className="relative h-14 w-14 flex items-center justify-center">
+                        <span className="absolute left-1/2 top-0 h-14 w-[2px] -translate-x-1/2 bg-primary/70"></span>
+                        <span className="absolute top-1/2 left-0 w-14 h-[2px] -translate-y-1/2 bg-primary/70"></span>
+                        <div className="w-6 h-6 rounded-full border-2 border-primary/80 bg-background/60 backdrop-blur-sm shadow-md"></div>
+                      </div>
                     </div>
-                  </div>
+                    
+                    {/* Loading user location indicator */}
+                    {isLoadingUserLocation && (
+                      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-background/90 backdrop-blur-sm px-4 py-2 rounded-lg shadow-md border border-border">
+                        <div className="flex items-center gap-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                          <p className="text-sm text-muted-foreground">Getting your location...</p>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Selected Location Info and Actions */}
@@ -779,13 +864,26 @@ export const CreateEventModal = ({
                   </GoogleMap>
                 )}
                 {isMapLoaded && !mapLoadError && (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
-                    <div className="relative h-14 w-14 flex items-center justify-center">
-                      <span className="absolute left-1/2 top-0 h-14 w-[2px] -translate-x-1/2 bg-primary/70"></span>
-                      <span className="absolute top-1/2 left-0 w-14 h-[2px] -translate-y-1/2 bg-primary/70"></span>
-                      <div className="w-6 h-6 rounded-full border-2 border-primary/80 bg-background/60 backdrop-blur-sm shadow-md"></div>
+                  <>
+                    {/* Center crosshair */}
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
+                      <div className="relative h-14 w-14 flex items-center justify-center">
+                        <span className="absolute left-1/2 top-0 h-14 w-[2px] -translate-x-1/2 bg-primary/70"></span>
+                        <span className="absolute top-1/2 left-0 w-14 h-[2px] -translate-y-1/2 bg-primary/70"></span>
+                        <div className="w-6 h-6 rounded-full border-2 border-primary/80 bg-background/60 backdrop-blur-sm shadow-md"></div>
+                      </div>
                     </div>
-                  </div>
+                    
+                    {/* Loading user location indicator */}
+                    {isLoadingUserLocation && (
+                      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-background/90 backdrop-blur-sm px-4 py-2 rounded-lg shadow-md border border-border">
+                        <div className="flex items-center gap-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                          <p className="text-sm text-muted-foreground">Getting your location...</p>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 

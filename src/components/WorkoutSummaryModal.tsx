@@ -33,6 +33,7 @@ interface NearbyUser {
   activity?: string;
   distance?: string;
   distanceValue?: number;
+  isSameActivity?: boolean; // Flag indicating if user's activity matches workout activity
 }
 
 interface WorkoutSummaryModalProps {
@@ -223,23 +224,42 @@ export const WorkoutSummaryModal = ({
                     user.activity === "cycling" ? DirectionsBikeIcon :
                     DirectionsWalkIcon;
                   
+                  // Check if user's activity matches workout activity
+                  // Use isSameActivity flag if available, otherwise compare directly
+                  const isSameActivity = user.isSameActivity !== undefined 
+                    ? user.isSameActivity 
+                    : user.activity && user.activity.toLowerCase() === activity.toLowerCase();
+                  const shouldGreyOut = !isSameActivity;
+                  
                   return (
                     <motion.div
                       key={user.id}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.2 + (index * 0.03) }}
-                      className="flex items-center gap-2.5 p-2.5 bg-card/90 rounded-lg border border-border/50 hover:border-primary/50 hover:bg-card transition-all"
+                      className={`flex items-center gap-2.5 p-2.5 bg-card/90 rounded-lg border transition-all ${
+                        shouldGreyOut 
+                          ? "opacity-50 border-border/30 hover:border-border/50 hover:bg-card/70" 
+                          : "border-border/50 hover:border-primary/50 hover:bg-card"
+                      }`}
                     >
-                      <Avatar className="w-12 h-12 border-2 border-primary/50 flex-shrink-0">
+                      <Avatar className={`w-12 h-12 border-2 flex-shrink-0 ${
+                        shouldGreyOut ? "border-border/30" : "border-primary/50"
+                      }`}>
                         <AvatarImage src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}`} />
                         <AvatarFallback className="text-sm font-bold">{user.name.charAt(0).toUpperCase()}</AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{user.name}</p>
+                        <p className={`text-sm font-semibold truncate ${
+                          shouldGreyOut ? "text-muted-foreground" : ""
+                        }`}>{user.name}</p>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                           {user.activity && (
-                            <span className="text-xs text-foreground capitalize flex items-center gap-1 px-1.5 py-0.5 bg-muted/50 rounded">
+                            <span className={`text-xs capitalize flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                              shouldGreyOut 
+                                ? "text-muted-foreground bg-muted/30" 
+                                : "text-foreground bg-muted/50"
+                            }`}>
                               <ActivityIcon style={{ fontSize: 12 }} />
                               {user.activity}
                             </span>

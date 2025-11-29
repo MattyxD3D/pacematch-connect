@@ -2,6 +2,13 @@ import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { useNavigate, useLocation } from "react-router-dom";
 import PhoneIcon from "@mui/icons-material/Phone";
 import EmailIcon from "@mui/icons-material/Email";
@@ -9,7 +16,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import PersonIcon from "@mui/icons-material/Person";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import PeopleIcon from "@mui/icons-material/People";
-import { sendPhoneVerificationCode, verifyPhoneCode, ConfirmationResult, signUpWithEmail, signInWithEmail, resetPassword } from "@/services/authService";
+import { sendPhoneVerificationCode, verifyPhoneCode, ConfirmationResult, signUpWithEmail, signInWithEmail, resetPassword, checkEmailExists } from "@/services/authService";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { auth } from "@/services/firebase";
@@ -19,7 +26,8 @@ const LoginScreen = () => {
   const location = useLocation();
   const { user, loading: authLoading } = useAuth();
   // Login method: 'phone' or 'email'
-  const [loginMethod, setLoginMethod] = useState<'phone' | 'email'>('phone');
+  // Changed default to 'email' since phone auth has configuration issues
+  const [loginMethod, setLoginMethod] = useState<'phone' | 'email'>('email');
   // Email login state
   const [isSignUp, setIsSignUp] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -37,6 +45,9 @@ const LoginScreen = () => {
   const [error, setError] = useState<string | null>(null);
   const hasCheckedRedirect = useRef(false);
   const hasRedirected = useRef(false);
+  // Terms and Privacy dialogs
+  const [showTerms, setShowTerms] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   // Check if mobile device (including Chrome mobile view)
   const isMobile = () => {
@@ -134,7 +145,10 @@ const LoginScreen = () => {
       const confirmation = await sendPhoneVerificationCode(formattedPhone);
       
       setConfirmationResult(confirmation);
-      toast.success("Verification code sent! Check your SMS.");
+      toast.success("Verification code sent! Check your SMS.", {
+        description: "If SMS doesn't arrive, you may be in test mode. Check console for details.",
+        duration: 5000,
+      });
       console.log("✅ SMS code sent successfully");
     } catch (err: any) {
       console.error("❌ Error sending SMS code:", err);
@@ -215,6 +229,16 @@ const LoginScreen = () => {
     setError(null);
 
     try {
+      // Check if email is already registered before attempting to create account
+      console.log("🔍 Checking if email is already registered:", email);
+      const emailExists = await checkEmailExists(email);
+      
+      if (emailExists) {
+        setError("This email is already registered. Please sign in instead.");
+        setLoading(false);
+        return;
+      }
+
       console.log("📧 Signing up with email:", email);
       const user = await signUpWithEmail(email, password, displayName);
       
@@ -433,7 +457,8 @@ const LoginScreen = () => {
           transition={{ duration: 0.5, delay: 0.6 }}
           className="space-y-4"
         >
-          {/* Toggle Buttons */}
+          {/* Toggle Buttons - Phone login temporarily hidden */}
+          {/* 
           <div className="flex gap-2 p-1 bg-muted rounded-lg">
             <Button
               onClick={() => {
@@ -461,6 +486,7 @@ const LoginScreen = () => {
               Email
             </Button>
           </div>
+          */}
 
           {/* Phone Login Form */}
           {loginMethod === 'phone' && (
@@ -516,6 +542,9 @@ const LoginScreen = () => {
                 <p className="text-xs text-muted-foreground">
                   Enter your mobile number (e.g., 0912 345 6789 or 912 345 6789)
                 </p>
+                <p className="text-xs text-muted-foreground/70 italic mt-1">
+                  Note: If SMS doesn't arrive, check Firebase Console &gt; Authentication &gt; Settings &gt; Phone numbers for testing. Remove test numbers to enable production mode.
+                </p>
               </div>
 
               <Button
@@ -560,6 +589,9 @@ const LoginScreen = () => {
                 />
                 <p className="text-xs text-muted-foreground text-center">
                   Check your SMS for the verification code
+                </p>
+                <p className="text-xs text-muted-foreground/70 text-center italic mt-1">
+                  SMS may take 30 seconds to 2 minutes to arrive. If not received, ensure production mode is enabled.
                 </p>
               </div>
 
@@ -827,15 +859,206 @@ const LoginScreen = () => {
 
           <p className="text-xs text-center text-muted-foreground px-4 leading-relaxed">
             By continuing, you agree to our{" "}
-            <a href="#" className="underline hover:text-primary transition-colors font-medium">
+            <button
+              onClick={() => setShowTerms(true)}
+              className="underline hover:text-primary transition-colors font-medium"
+            >
               Terms of Service
-            </a>{" "}
+            </button>{" "}
             and{" "}
-            <a href="#" className="underline hover:text-primary transition-colors font-medium">
+            <button
+              onClick={() => setShowPrivacy(true)}
+              className="underline hover:text-primary transition-colors font-medium"
+            >
               Privacy Policy
-            </a>
+            </button>
           </p>
         </motion.div>
+
+        {/* Terms of Service Dialog */}
+        <Dialog open={showTerms} onOpenChange={setShowTerms}>
+          <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold text-primary">
+                Terms of Service
+              </DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground">
+                Research Prototype Study Agreement
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 text-sm text-foreground/90 leading-relaxed">
+              <section>
+                <h3 className="font-semibold text-primary mb-2">1. Research Study Overview</h3>
+                <p>
+                  <strong>PaceMatch</strong> is a venue-based fitness partner matching system developed as a 
+                  capstone research project for the Bachelor of Science in Information Technology degree at the 
+                  Institute of Information and Computing Technology.
+                </p>
+                <p className="mt-2">
+                  <strong>Researchers:</strong> Roy Vincent R. Pertubal & Mark Anthony A. Mateo
+                </p>
+                <p>
+                  <strong>Research Adviser:</strong> Engr. Klarence M. Baptista, MIT
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">2. Purpose of the Study</h3>
+                <p>
+                  This study aims to develop and evaluate a venue-based fitness partner matching system that 
+                  utilizes real-time GPS location sharing to connect Filipino fitness enthusiasts with 
+                  compatible workout partners in Metro Manila. The system addresses the gap in existing 
+                  fitness applications by combining location-based services with fitness-specific 
+                  compatibility factors.
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">3. Prototype Nature</h3>
+                <p>
+                  This application is a <strong>research prototype</strong> developed for academic purposes. 
+                  It is not a commercial product and is intended solely for research validation and testing. 
+                  Features and functionality may be limited or subject to change as part of the research process.
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">4. User Responsibilities</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Provide accurate profile information</li>
+                  <li>Use the application responsibly and respectfully</li>
+                  <li>Report any inappropriate behavior or technical issues</li>
+                  <li>Respect other users' privacy and safety</li>
+                  <li>Understand that meetups arranged through the app are at your own discretion</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">5. Disclaimer</h3>
+                <p>
+                  The researchers and institution are not liable for any incidents arising from in-person 
+                  meetups arranged through this application. Users are advised to exercise caution and meet 
+                  in public, well-lit areas. This is a research prototype and comes with no warranties.
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">6. Acceptance</h3>
+                <p>
+                  By creating an account and using PaceMatch, you acknowledge that you have read, understood, 
+                  and agree to these terms. You also consent to participate in this research study.
+                </p>
+              </section>
+            </div>
+            <div className="mt-4 pt-4 border-t">
+              <Button onClick={() => setShowTerms(false)} className="w-full">
+                I Understand
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Privacy Policy Dialog */}
+        <Dialog open={showPrivacy} onOpenChange={setShowPrivacy}>
+          <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold text-primary">
+                Privacy Policy
+              </DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground">
+                Data Privacy and Protection Notice
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 text-sm text-foreground/90 leading-relaxed">
+              <section>
+                <h3 className="font-semibold text-primary mb-2">1. Data Privacy Compliance</h3>
+                <p>
+                  This research study complies with the <strong>Data Privacy Act of 2012 (Republic Act No. 10173)</strong> 
+                  of the Philippines. Your personal data is collected and processed in accordance with the 
+                  principles of transparency, legitimate purpose, and proportionality.
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">2. Data We Collect</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>Account Information:</strong> Email address, phone number, display name</li>
+                  <li><strong>Profile Data:</strong> Fitness activity preferences, fitness level</li>
+                  <li><strong>Location Data:</strong> Real-time GPS coordinates (when enabled)</li>
+                  <li><strong>Activity Data:</strong> Workout tracking information, distance, duration</li>
+                  <li><strong>Usage Data:</strong> App interactions for system improvement</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">3. How We Use Your Data</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>To match you with compatible fitness partners nearby</li>
+                  <li>To display your presence on the map (when visibility is enabled)</li>
+                  <li>To facilitate communication between matched users</li>
+                  <li>To validate research objectives and system functionality</li>
+                  <li>For academic analysis and thesis documentation (anonymized)</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">4. Privacy Controls</h3>
+                <p>
+                  PaceMatch provides comprehensive privacy controls as required by Filipino users' expectations:
+                </p>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li><strong>Visibility Toggle:</strong> Control whether you appear on the map</li>
+                  <li><strong>Radius-Based Sharing:</strong> Limit who can see your location</li>
+                  <li><strong>Activity Filtering:</strong> Choose what activities to display</li>
+                  <li><strong>Ghost Mode:</strong> Hide your location entirely when needed</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">5. Data Storage & Security</h3>
+                <p>
+                  Your data is securely stored in Firebase Realtime Database with encryption in transit. 
+                  Location data is processed in real-time and not permanently stored beyond the current session. 
+                  Access to research data is limited to the authorized researchers.
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">6. Your Rights</h3>
+                <p>Under the Data Privacy Act of 2012, you have the right to:</p>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>Be informed about how your data is processed</li>
+                  <li>Access your personal data</li>
+                  <li>Object to data processing</li>
+                  <li>Request correction or deletion of your data</li>
+                  <li>Withdraw consent at any time by deleting your account</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">7. Research Use</h3>
+                <p>
+                  Aggregated and anonymized data may be used in the research thesis document and academic 
+                  presentations. No personally identifiable information will be published or shared outside 
+                  the research team.
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-primary mb-2">8. Contact</h3>
+                <p>
+                  For questions about data privacy or to exercise your rights, please contact the research 
+                  team through the Institute of Information and Computing Technology.
+                </p>
+              </section>
+            </div>
+            <div className="mt-4 pt-4 border-t">
+              <Button onClick={() => setShowPrivacy(false)} className="w-full">
+                I Understand
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Features preview */}
         <motion.div
@@ -845,9 +1068,9 @@ const LoginScreen = () => {
           className="grid grid-cols-3 gap-6 pt-4"
         >
           {[
-            { icon: DirectionsRunIcon, label: "Track Activities", color: "success", delay: 0 },
-            { icon: PeopleIcon, label: "Find Nearby", color: "primary", delay: 0.1 },
-            { icon: DirectionsRunIcon, label: "Match & Meet", color: "warning", delay: 0.2 },
+            { icon: PeopleIcon, label: "Find Partners", color: "primary", delay: 0 },
+            { icon: DirectionsRunIcon, label: "Match Fitness", color: "success", delay: 0.1 },
+            { icon: DirectionsRunIcon, label: "Train Together", color: "warning", delay: 0.2 },
           ].map((feature, i) => (
             <motion.div
               key={i}

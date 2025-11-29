@@ -1,7 +1,9 @@
 // Custom hook for GPS location tracking
-// Works in web browsers
+// Works in web browsers and native mobile apps (via Capacitor)
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Geolocation } from "@capacitor/geolocation";
 import { updateUserLocation } from "../services/locationService";
+import { isNativePlatform } from "../utils/platform";
 
 export interface Location {
   lat: number;
@@ -24,11 +26,24 @@ export const useLocation = (
   const [error, setError] = useState<string | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const browserWatchIdRef = useRef<number | null>(null);
+  const nativeWatchIdRef = useRef<string | null>(null);
+  const isNative = isNativePlatform();
 
-  const stopTracking = useCallback(() => {
+  const stopTracking = useCallback(async () => {
+    // Stop browser geolocation
     if (browserWatchIdRef.current !== null && navigator.geolocation) {
       navigator.geolocation.clearWatch(browserWatchIdRef.current);
       browserWatchIdRef.current = null;
+    }
+    
+    // Stop Capacitor geolocation
+    if (nativeWatchIdRef.current !== null) {
+      try {
+        await Geolocation.clearWatch({ id: nativeWatchIdRef.current });
+        nativeWatchIdRef.current = null;
+      } catch (err) {
+        console.error("Error clearing native watch:", err);
+      }
     }
   }, []);
 
@@ -41,7 +56,92 @@ export const useLocation = (
       return;
     }
 
-    // Browser geolocation function
+    /**
+     * Start native mobile tracking using Capacitor Geolocation API
+     * This provides better accuracy and battery efficiency on mobile devices
+     */
+    const startNativeTracking = async () => {
+      setIsGettingLocation(true);
+
+      try {
+        // Request permissions first
+        const permissionStatus = await Geolocation.requestPermissions();
+        
+        if (permissionStatus.location !== 'granted') {
+          setError("Location permission denied. Please allow location access in your device settings.");
+          setIsGettingLocation(false);
+          return;
+        }
+
+        // Get current position first
+        const currentPosition = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 10000
+        });
+
+        const { latitude, longitude } = currentPosition.coords;
+        const newLocation = { lat: latitude, lng: longitude };
+
+        setLocation(newLocation);
+        setError(null);
+        setIsGettingLocation(false);
+
+        // Update to Firebase
+        await updateUserLocation(userId, latitude, longitude, visible);
+
+        // Watch position for continuous updates
+        const watchId = await Geolocation.watchPosition(
+          {
+            enableHighAccuracy: true,
+            timeout: 10000
+          },
+          async (position, err) => {
+            if (err) {
+              let errorMessage = "Location error";
+              if (err.message) {
+                errorMessage = err.message;
+              } else if (err.code === 'PERMISSION_DENIED') {
+                errorMessage = "Location permission denied. Please allow location access in your device settings.";
+              } else if (err.code === 'POSITION_UNAVAILABLE') {
+                errorMessage = "Location information unavailable.";
+              } else if (err.code === 'TIMEOUT') {
+                errorMessage = "Location request timed out.";
+              }
+              setError(errorMessage);
+              setIsGettingLocation(false);
+              return;
+            }
+
+            if (position) {
+              const { latitude, longitude } = position.coords;
+              const newLocation = { lat: latitude, lng: longitude };
+
+              setLocation(newLocation);
+              setError(null);
+
+              // Update to Firebase every 5-10 seconds
+              await updateUserLocation(userId, latitude, longitude, visible);
+            }
+          }
+        );
+
+        nativeWatchIdRef.current = watchId;
+      } catch (err: any) {
+        let errorMessage = "Location error";
+        if (err?.message) {
+          errorMessage = err.message;
+        } else if (err?.code === 'PERMISSION_DENIED') {
+          errorMessage = "Location permission denied. Please allow location access in your device settings.";
+        }
+        setError(errorMessage);
+        setIsGettingLocation(false);
+      }
+    };
+
+    /**
+     * Start browser tracking using Web Geolocation API
+     * Used when running in web browsers
+     */
     const startBrowserTracking = () => {
       setIsGettingLocation(true);
 
@@ -127,14 +227,18 @@ export const useLocation = (
       );
     };
 
-    // Start tracking
-    startBrowserTracking();
+    // Start tracking based on platform
+    if (isNative) {
+      startNativeTracking();
+    } else {
+      startBrowserTracking();
+    }
 
     // Cleanup
     return () => {
       stopTracking();
     };
-  }, [userId, isTracking, visible, stopTracking]);
+  }, [userId, isTracking, visible, stopTracking, isNative]);
 
   // Ensure tracking stops on unmount
   useEffect(() => {

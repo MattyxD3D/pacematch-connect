@@ -1,14 +1,19 @@
 # Capacitor Authentication Guide
 
-## ✅ Current Implementation
+## ⚠️ Important Note
+
+**Google Sign-In is now admin-only**. Regular users must use phone or email/password authentication. This guide is for admin authentication only.
+
+## ✅ Current Implementation (Admin Only)
 
 The app now uses **redirect-based authentication** for mobile devices and Capacitor, which provides a better user experience than popups.
 
-### How It Works
+### How It Works (Admin Login)
 
 1. **Desktop/Web**: Uses popup authentication (seamless UX)
 2. **Mobile/Capacitor**: Automatically uses redirect authentication (better compatibility)
 3. **Detection**: Automatically detects mobile devices and Capacitor environment
+4. **Admin Only**: Google Sign-In is only available on the admin login page (`/admin/login`)
 
 ### Benefits
 
@@ -74,18 +79,22 @@ npx cap sync
 - Updated loading message to "Redirecting to Google..."
 - Better user feedback for redirect flow
 
-## 🚀 Testing
+## 🚀 Testing (Admin Only)
 
 ### Desktop
-1. Click "Sign in with Google"
-2. Popup should appear
-3. Sign in and return to app
+1. Navigate to `/admin/login`
+2. Click "Sign in with Google"
+3. Popup should appear
+4. Sign in and return to app
 
 ### Mobile/Capacitor
-1. Click "Sign in with Google"
-2. Page redirects to Google sign-in
-3. Sign in and return to app
-4. App handles redirect result automatically
+1. Navigate to `/admin/login`
+2. Click "Sign in with Google"
+3. Page redirects to Google sign-in
+4. Sign in and return to app
+5. App handles redirect result automatically
+
+**Note**: Regular users should use phone or email/password authentication on the main login page.
 
 ## 📝 Adding Native Google Sign-In (Future)
 

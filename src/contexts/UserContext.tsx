@@ -19,7 +19,6 @@ export interface WorkoutHistory {
   duration: number; // seconds
   distance: number; // km
   avgSpeed: number; // km/h
-  calories: number;
   nearbyUsers?: NearbyUser[]; // Users who were nearby during workout
   location?: string; // Location where workout happened
 }

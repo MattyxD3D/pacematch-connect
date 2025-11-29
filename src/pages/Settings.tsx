@@ -3,14 +3,11 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { FitnessLevel, RadiusPreference, VisibilitySettings } from "@/contexts/UserContext";
 import { SearchFilter } from "@/services/matchingService";
-import VisibilityIcon from "@mui/icons-material/Visibility";
-import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import LogoutIcon from "@mui/icons-material/Logout";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
@@ -22,13 +19,11 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useAuth } from "@/hooks/useAuth";
-import { updateUserVisibility } from "@/services/locationService";
 import { updateUserProfile, signOut, getUserData } from "@/services/authService";
 
 const Settings = () => {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const [isVisible, setIsVisible] = useState(true);
   const [activity, setActivity] = useState<string | null>(null);
   const [fitnessLevel, setFitnessLevel] = useState<FitnessLevel>("intermediate");
   const [pace, setPace] = useState("");
@@ -54,7 +49,6 @@ const Settings = () => {
         const userData = await getUserData(user.uid);
         if (userData) {
           setActivity(userData.activity || null);
-          setIsVisible(userData.visible !== false); // Default to true if not set
           setFitnessLevel(userData.fitnessLevel || "intermediate");
           setPace(userData.pace ? userData.pace.toString() : "");
           if (userData.visibility) {
@@ -68,22 +62,6 @@ const Settings = () => {
     };
     loadUserData();
   }, [user]);
-
-  const handleVisibilityToggle = async () => {
-    if (!user) return;
-    
-    const newVisibility = !isVisible;
-    setIsVisible(newVisibility);
-    
-    try {
-      await updateUserVisibility(user.uid, newVisibility);
-      toast.success(newVisibility ? "You're now visible on the map" : "You're now invisible on the map");
-    } catch (error: any) {
-      console.error("Error updating visibility:", error);
-      toast.error("Failed to update visibility. Please try again.");
-      setIsVisible(!newVisibility); // Revert on error
-    }
-  };
 
   const handleSignOut = async () => {
     try {
@@ -192,38 +170,6 @@ const Settings = () => {
 
       {/* Content */}
       <div className="max-w-2xl mx-auto p-6 space-y-6 pb-10">
-        {/* Visibility Toggle - Prominent */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <Card className="p-6 shadow-elevation-3 border-2 border-border/50 bg-card/50 backdrop-blur-sm">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4 flex-1">
-                <motion.div 
-                  animate={isVisible ? { scale: [1, 1.1, 1] } : {}}
-                  transition={{ duration: 2, repeat: Infinity }}
-                  className={`p-4 rounded-2xl transition-all duration-300 ${isVisible ? "bg-success/15 shadow-elevation-1" : "bg-muted"}`}
-                >
-                  {isVisible ? (
-                    <VisibilityIcon className="text-success" style={{ fontSize: 32 }} />
-                  ) : (
-                    <VisibilityOffIcon className="text-muted-foreground" style={{ fontSize: 32 }} />
-                  )}
-                </motion.div>
-                <div>
-                  <h3 className="text-lg font-bold">Show on map</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {isVisible ? "Visible to others" : "Hidden from others"}
-                  </p>
-                </div>
-              </div>
-              <Switch checked={isVisible} onCheckedChange={handleVisibilityToggle} className="scale-110" />
-            </div>
-          </Card>
-        </motion.div>
-
         {/* Quick Links */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}

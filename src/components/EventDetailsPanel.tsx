@@ -2,14 +2,11 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@mui/material";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserData } from "@/services/authService";
-import { checkInToEventLocation, getCheckInsAtEventLocation, deleteEvent, updateEvent } from "@/services/eventService";
-import { findVenueForEvent } from "@/services/venueService";
-import { useVenueCheckIns } from "@/hooks/useVenueCheckIns";
+import { deleteEvent, addComment, listenToComments, deleteComment, type EventComment } from "@/services/eventService";
 import { openGoogleMapsNavigation } from "@/utils/navigation";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
@@ -50,14 +47,16 @@ interface Event {
   isJoined?: boolean;
 }
 
-interface Comment {
-  id: number;
-  userId: number;
-  userName: string;
-  userAvatar: string;
-  text: string;
-  timestamp: string;
+interface ParticipantData {
+  id: string;
+  name: string;
+  username?: string;
+  avatar: string;
+  activity?: string;
+  activities?: string[];
 }
+
+// Using EventComment from eventService for type consistency
 
 interface EventDetailsPanelProps {
   event: Event | null;
@@ -71,35 +70,72 @@ interface EventDetailsPanelProps {
 export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onDelete }: EventDetailsPanelProps) => {
   const { user } = useAuth();
   const [commentText, setCommentText] = useState("");
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [eventCheckIns, setEventCheckIns] = useState<any[]>([]);
-  const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const [comments, setComments] = useState<EventComment[]>([]);
+  const [participantsData, setParticipantsData] = useState<ParticipantData[]>([]);
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
+  const [isAddingComment, setIsAddingComment] = useState(false);
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
 
-  // Find venue for event location
-  const venue = event ? findVenueForEvent(event.lat, event.lng) : null;
-  const venueId = venue?.id;
+  // Check if current user has joined the event
+  const isUserJoined = event && user?.uid && Array.isArray(event.participants) && event.participants.includes(user.uid);
 
-  // Get check-ins for this venue/event
-  const { checkIns, userCheckIn, checkIn, checkOut, isCheckedIn } = useVenueCheckIns({
-    venueId: venueId,
-    autoLoad: true,
-  });
-
-  // Load check-ins at event location
+  // Listen to comments from Firebase
   useEffect(() => {
-    if (!event?.id) return;
+    if (!event?.id) {
+      setComments([]);
+      return;
+    }
 
-    const loadCheckIns = async () => {
+    const unsubscribe = listenToComments(event.id, (fetchedComments) => {
+      setComments(fetchedComments);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [event?.id]);
+
+  // Fetch participant profiles when event changes
+  useEffect(() => {
+    if (!event?.participants || !Array.isArray(event.participants)) {
+      setParticipantsData([]);
+      return;
+    }
+
+    const fetchParticipants = async () => {
+      setLoadingParticipants(true);
       try {
-        const checkInsData = await getCheckInsAtEventLocation(String(event.id));
-        setEventCheckIns(checkInsData);
+        const participantPromises = event.participants.map(async (userId: string) => {
+          try {
+            const userData = await getUserData(userId);
+            if (userData) {
+              return {
+                id: userId,
+                name: userData.name || userData.username || "User",
+                username: userData.username,
+                avatar: userData.photoURL || `https://ui-avatars.com/api/?name=${userData.name || userData.username || 'User'}`,
+                activity: userData.activity,
+                activities: userData.activities || (userData.activity ? [userData.activity] : []),
+              };
+            }
+            return null;
+          } catch (error) {
+            console.error(`Error fetching user ${userId}:`, error);
+            return null;
+          }
+        });
+
+        const results = await Promise.all(participantPromises);
+        setParticipantsData(results.filter((p): p is ParticipantData => p !== null));
       } catch (error) {
-        console.error("Error loading event check-ins:", error);
+        console.error("Error fetching participants:", error);
+      } finally {
+        setLoadingParticipants(false);
       }
     };
 
-    loadCheckIns();
-  }, [event?.id]);
+    fetchParticipants();
+  }, [event?.participants]);
 
   const participantsCount = Array.isArray(event?.participants)
     ? event.participants.length
@@ -118,54 +154,64 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
     }
   };
 
-  const handleEventCheckIn = async () => {
-    if (!user?.uid || !event) return;
-
-    try {
-      setIsCheckingIn(true);
-      const userData = await getUserData(user.uid);
-      if (!userData) {
-        throw new Error("User data not found");
-      }
-
-      await checkInToEventLocation(
-        String(event.id),
-        user.uid,
-        {
-          userId: user.uid,
-          userName: userData.name || "Unknown User",
-          userAvatar: userData.photoURL || "",
-          activity: event.type,
-        }
-      );
-
-      toast.success("Checked in to event location!");
-
-      // Reload check-ins
-      const checkInsData = await getCheckInsAtEventLocation(String(event.id));
-      setEventCheckIns(checkInsData);
-    } catch (error: any) {
-      toast.error(error.message || "Failed to check in");
-    } finally {
-      setIsCheckingIn(false);
+  const getSmallActivityIcon = (activity: string) => {
+    switch (activity) {
+      case "running":
+        return <DirectionsRunIcon className="text-success" style={{ fontSize: 14 }} />;
+      case "cycling":
+        return <DirectionsBikeIcon className="text-primary" style={{ fontSize: 14 }} />;
+      case "walking":
+        return <DirectionsWalkIcon className="text-warning" style={{ fontSize: 14 }} />;
+      default:
+        return null;
     }
   };
 
-  const handleAddComment = () => {
-    if (!commentText.trim() || !event) return;
+  const handleAddComment = async () => {
+    if (!commentText.trim() || !event || !user?.uid) return;
 
-    const newComment: Comment = {
-      id: comments.length + 1,
-      userId: user?.uid ? parseInt(user.uid) : 0,
-      userName: user?.displayName || "You",
-      userAvatar: user?.photoURL || "",
-      text: commentText,
-      timestamp: "Just now",
-    };
+    // Check if user has joined the event
+    if (!isUserJoined) {
+      toast.error("Please join the event to add comments");
+      return;
+    }
 
-    setComments([...comments, newComment]);
-    setCommentText("");
-    toast.success("Comment added!");
+    setIsAddingComment(true);
+    try {
+      await addComment(
+        event.id,
+        user.uid,
+        user.displayName || "User",
+        user.photoURL || "",
+        commentText.trim()
+      );
+      setCommentText("");
+      toast.success("Comment added!");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to add comment");
+    } finally {
+      setIsAddingComment(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!event || !user?.uid) return;
+
+    setDeletingCommentId(commentId);
+    try {
+      await deleteComment(event.id, commentId, user.uid);
+      toast.success("Comment deleted");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete comment");
+    } finally {
+      setDeletingCommentId(null);
+    }
+  };
+
+  // Check if user can delete a comment (author or event host)
+  const canDeleteComment = (comment: EventComment) => {
+    if (!user?.uid || !event) return false;
+    return comment.userId === user.uid || event.hostId === user.uid;
   };
 
   const handleDelete = async () => {
@@ -229,8 +275,11 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
             exit={{ y: "100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
             onClick={(e) => e.stopPropagation()}
-            className="fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border rounded-t-3xl shadow-elevation-4"
-            style={{ maxHeight: "60vh" }}
+            className="fixed left-0 right-0 z-40 bg-card border-t border-border rounded-t-3xl shadow-elevation-4"
+            style={{ 
+              bottom: `calc(4.5rem + env(safe-area-inset-bottom, 0px))`,
+              maxHeight: "calc(100vh - 6rem - env(safe-area-inset-bottom, 0px))"
+            }}
           >
           {/* Drag Handle with Close Button */}
           <div className="flex items-center justify-between px-4 pt-3 pb-2">
@@ -247,8 +296,8 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
             </button>
           </div>
 
-          <div className="overflow-y-auto" style={{ maxHeight: "calc(60vh - 60px)" }}>
-            <div className="p-4 space-y-4">
+          <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 10rem)" }}>
+            <div className="p-4 pb-8 space-y-4">
               {/* Event Header */}
               <div className="flex items-start gap-3">
                 <div className="p-2 bg-muted rounded-lg">
@@ -308,6 +357,21 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
                 <span>View on Map</span>
               </Button>
 
+              {/* Event Creator/Host Section */}
+              {event.hostName && (
+                <div className="flex items-center gap-3 bg-muted/50 rounded-xl p-3">
+                  <Avatar 
+                    src={event.hostAvatar} 
+                    alt={event.hostName} 
+                    sx={{ width: 40, height: 40 }} 
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate">{event.hostName}</p>
+                    <p className="text-xs text-muted-foreground">Event Organizer</p>
+                  </div>
+                </div>
+              )}
+
               {/* Creator Actions - Edit/Delete */}
               {isEventCreator && (
                 <div className="flex gap-2 pb-2 border-b border-border">
@@ -332,50 +396,88 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
                 </div>
               )}
 
-              {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button
-                  onClick={() => {
-                    if (event.isJoined) {
-                      onLeave(event.id);
-                    } else {
-                      onJoin(event.id);
-                    }
-                  }}
-                  className="flex-1 min-h-[44px]"
-                  variant={event.isJoined ? "outline" : "default"}
-                >
-                  {event.isJoined ? (
-                    <>
-                      <CheckCircleIcon style={{ fontSize: 18 }} className="mr-1 sm:mr-2" />
-                      <span className="hidden sm:inline">Leave Event</span>
-                      <span className="sm:hidden">Leave</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="hidden sm:inline">Join Event</span>
-                      <span className="sm:hidden">Join</span>
-                    </>
-                  )}
-                </Button>
-                <Button
-                  onClick={handleEventCheckIn}
-                  variant="outline"
-                  disabled={isCheckingIn}
-                  className="min-h-[44px]"
-                >
-                  <CheckCircleIcon style={{ fontSize: 18 }} className="mr-1 sm:mr-2" />
-                  <span className="hidden sm:inline">Check In</span>
-                  <span className="sm:hidden">Check In</span>
-                </Button>
-              </div>
+              {/* Join/Leave Button */}
+              <Button
+                onClick={() => {
+                  if (event.isJoined) {
+                    onLeave(event.id);
+                  } else {
+                    onJoin(event.id);
+                  }
+                }}
+                className={`w-full min-h-[44px] ${
+                  event.isJoined
+                    ? "bg-success/20 text-success hover:bg-success/30 border-2 border-success"
+                    : ""
+                }`}
+                variant={event.isJoined ? "outline" : "default"}
+              >
+                {event.isJoined ? (
+                  <>
+                    <CheckCircleIcon style={{ fontSize: 18 }} className="mr-2" />
+                    <span>Joined - Leave Event</span>
+                  </>
+                ) : (
+                  <span>Join Event</span>
+                )}
+              </Button>
 
-              {/* Check-ins Count */}
-              {eventCheckIns.length > 0 && (
-                <div className="text-sm text-muted-foreground">
-                  {eventCheckIns.length} checked in at this location
-                </div>
-              )}
+              {/* Participants Section */}
+              <div className="border-t border-border pt-4">
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                  <PeopleIcon style={{ fontSize: 18 }} />
+                  Who's Joining ({participantsCount})
+                </h3>
+
+                {loadingParticipants ? (
+                  <div className="text-center py-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
+                    <p className="text-xs text-muted-foreground mt-2">Loading...</p>
+                  </div>
+                ) : participantsData.length === 0 ? (
+                  <div className="text-center py-4 bg-muted/50 rounded-lg">
+                    <p className="text-sm text-muted-foreground">No participants yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">Be the first to join!</p>
+                  </div>
+                ) : (
+                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                    {participantsData.map((participant, index) => {
+                      const activities = participant.activities || [];
+                      const isCurrentUser = participant.id === user?.uid;
+
+                      return (
+                        <motion.div
+                          key={participant.id}
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: index * 0.05 }}
+                          className={`flex flex-col items-center p-2 border border-border rounded-lg bg-card hover:bg-secondary transition-colors min-w-[70px] flex-shrink-0 ${
+                            isCurrentUser ? "ring-2 ring-primary/60" : ""
+                          }`}
+                        >
+                          <Avatar
+                            src={participant.avatar}
+                            alt={participant.name}
+                            sx={{ width: 40, height: 40 }}
+                          />
+                          <p className="text-xs font-medium mt-1.5 text-center truncate w-full max-w-[60px]">
+                            {isCurrentUser ? "You" : participant.name}
+                          </p>
+                          {activities.length > 0 && (
+                            <div className="flex gap-0.5 mt-1">
+                              {activities.map((activity) => (
+                                <span key={activity}>
+                                  {getSmallActivityIcon(activity)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               {/* Comments Section */}
               <div className="border-t border-border pt-4">
@@ -387,7 +489,7 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
                     <p className="text-sm text-muted-foreground">No comments yet</p>
                   ) : (
                     comments.map((comment) => (
-                      <div key={comment.id} className="flex gap-2">
+                      <div key={comment.id} className="flex gap-2 group">
                         <Avatar
                           src={comment.userAvatar}
                           alt={comment.userName}
@@ -397,8 +499,23 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium">{comment.userName}</span>
                             <span className="text-xs text-muted-foreground">
-                              {comment.timestamp}
+                              {new Date(comment.timestamp).toLocaleDateString(undefined, {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
                             </span>
+                            {canDeleteComment(comment) && (
+                              <button
+                                onClick={() => handleDeleteComment(comment.id)}
+                                disabled={deletingCommentId === comment.id}
+                                className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive disabled:opacity-50"
+                                title="Delete comment"
+                              >
+                                <DeleteIcon style={{ fontSize: 16 }} />
+                              </button>
+                            )}
                           </div>
                           <p className="text-sm text-foreground mt-1">{comment.text}</p>
                         </div>
@@ -408,28 +525,35 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
                 </div>
 
                 {/* Comment Input */}
-                <div className="flex gap-2">
-                  <Input
-                    type="text"
-                    placeholder="Add a comment..."
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAddComment();
-                      }
-                    }}
-                    className="flex-1"
-                  />
-                  <Button
-                    onClick={handleAddComment}
-                    disabled={!commentText.trim()}
-                    size="icon"
-                  >
-                    <SendIcon style={{ fontSize: 18 }} />
-                  </Button>
-                </div>
+                {isUserJoined ? (
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      placeholder="Add a comment..."
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleAddComment();
+                        }
+                      }}
+                      className="flex-1"
+                      disabled={isAddingComment}
+                    />
+                    <Button
+                      onClick={handleAddComment}
+                      disabled={!commentText.trim() || isAddingComment}
+                      size="icon"
+                    >
+                      <SendIcon style={{ fontSize: 18 }} />
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-2 bg-muted/50 rounded-lg">
+                    Join this event to add comments
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -439,4 +563,3 @@ export const EventDetailsPanel = ({ event, onClose, onJoin, onLeave, onEdit, onD
     </AnimatePresence>
   );
 };
-

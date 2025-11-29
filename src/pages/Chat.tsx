@@ -60,6 +60,8 @@ import { ReportUserModal } from "@/components/ReportUserModal";
 import { generateDummyChatMessages, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 import LocationSharingModal from "@/components/LocationSharingModalSimple";
 import { openGoogleMapsNavigation } from "@/utils/navigation";
+import { getUserData } from "@/services/authService";
+import { getDisplayName } from "@/utils/anonymousName";
 
 interface ChatUser {
   id: string; // Firebase UID
@@ -104,6 +106,33 @@ const Chat = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [isMessageRequest, setIsMessageRequest] = useState(false);
+  const [chatUserData, setChatUserData] = useState<{ username: string | null; activity: string | null } | null>(null);
+  const [displayName, setDisplayName] = useState<string>("");
+  
+  // Fetch chat user data to get username and activity for display name
+  useEffect(() => {
+    if (!chatUser?.id) {
+      setChatUserData(null);
+      setDisplayName("");
+      return;
+    }
+
+    const fetchChatUserData = async () => {
+      try {
+        const userData = await getUserData(chatUser.id);
+        const username = userData?.name || null; // name field contains username after profile setup
+        const activity = userData?.activity || null;
+        setChatUserData({ username, activity });
+        setDisplayName(getDisplayName(username, chatUser.id, activity));
+      } catch (error) {
+        console.error("Error fetching chat user data:", error);
+        // Fallback to anonymous name if fetch fails
+        setDisplayName(getDisplayName(null, chatUser.id, null));
+      }
+    };
+
+    fetchChatUserData();
+  }, [chatUser?.id]);
   
   // Get current user location when modal is open
   const { location: currentLocation, isGettingLocation } = useLocationHook(
@@ -215,7 +244,7 @@ const Chat = () => {
     try {
       await markMessagesAsRead(currentUser.uid, chatUser.id);
       setIsMessageRequest(false);
-      toast.success(`Accepted message from ${chatUser.name}`);
+      toast.success(`Accepted message from ${displayName || chatUser.name}`);
     } catch (error) {
       console.error("Error accepting message request:", error);
       toast.error("Failed to accept message request");
@@ -229,7 +258,7 @@ const Chat = () => {
     try {
       await deleteConversation(currentUser.uid, chatUser.id);
       setIsMessageRequest(false);
-      toast.success(`Declined message from ${chatUser.name}`);
+      toast.success(`Declined message from ${displayName || chatUser.name}`);
       navigate("/messages");
     } catch (error) {
       console.error("Error declining message request:", error);
@@ -294,7 +323,7 @@ const Chat = () => {
     
     try {
       await sendFriendRequest(currentUser.uid, chatUser.id);
-      toast.success(`Friend request sent to ${chatUser.name}`);
+      toast.success(`Friend request sent to ${displayName || chatUser.name}`);
       setShowProfile(false);
     } catch (error) {
       console.error("Error sending friend request:", error);
@@ -307,7 +336,7 @@ const Chat = () => {
     
     try {
       await acceptFriendRequest(currentUser.uid, chatUser.id);
-      toast.success(`You are now friends with ${chatUser.name}`);
+      toast.success(`You are now friends with ${displayName || chatUser.name}`);
       setShowProfile(false);
     } catch (error) {
       console.error("Error accepting friend request:", error);
@@ -380,7 +409,7 @@ const Chat = () => {
         `📍 My current location:\n${pendingLocation.lat.toFixed(6)}, ${pendingLocation.lng.toFixed(6)}`
       );
 
-      toast.success(`Location sent to ${chatUser.name}`);
+      toast.success(`Location sent to ${displayName || chatUser.name}`);
       setShowConfirmModal(false);
       setPendingLocation(null);
     } catch (error) {
@@ -400,12 +429,12 @@ const Chat = () => {
       const updated = mutedChats.filter((id: string) => id !== conversationId);
       localStorage.setItem("mutedChats", JSON.stringify(updated));
       setIsMuted(false);
-      toast.success(`Notifications enabled for ${chatUser.name}`);
+      toast.success(`Notifications enabled for ${displayName || chatUser.name}`);
     } else {
       mutedChats.push(conversationId);
       localStorage.setItem("mutedChats", JSON.stringify(mutedChats));
       setIsMuted(true);
-      toast.success(`Notifications muted for ${chatUser.name}`);
+      toast.success(`Notifications muted for ${displayName || chatUser.name}`);
     }
   };
 
@@ -415,7 +444,7 @@ const Chat = () => {
     try {
       await blockUser(currentUser.uid, chatUser.id);
       setIsBlocked(true);
-      toast.success(`${chatUser.name} has been blocked`);
+      toast.success(`${displayName || chatUser.name} has been blocked`);
       setShowBlockDialog(false);
       // Navigate back to messages after blocking
       setTimeout(() => navigate("/messages"), 1000);
@@ -459,7 +488,12 @@ const Chat = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-background border-b border-border">
+      <div 
+        className="sticky top-0 z-10 bg-background border-b border-border"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
+      >
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <motion.button
@@ -477,13 +511,13 @@ const Chat = () => {
               >
                 <Avatar
                   src={chatUser.avatar}
-                  alt={chatUser.name}
+                  alt={displayName || chatUser.name}
                   sx={{ width: 40, height: 40 }}
                   className="flex-shrink-0"
                 />
                 <div className="flex-1 min-w-0 text-left">
                   <h1 className="text-lg font-bold text-foreground truncate">
-                    {chatUser.name}
+                    {displayName || chatUser.name}
                   </h1>
                 </div>
               </motion.button>
@@ -583,7 +617,7 @@ const Chat = () => {
                     {showAvatar && (
                       <Avatar
                         src={chatUser.avatar}
-                        alt={chatUser.name}
+                        alt={displayName || chatUser.name}
                         sx={{ width: 32, height: 32 }}
                       />
                     )}
@@ -659,7 +693,7 @@ const Chat = () => {
           >
             <Avatar
               src={chatUser.avatar}
-              alt={chatUser.name}
+              alt={displayName || chatUser.name}
               sx={{ width: 32, height: 32 }}
             />
             <div className="bg-muted rounded-2xl rounded-bl-md px-4 py-3">
@@ -697,7 +731,7 @@ const Chat = () => {
           <div className="max-w-2xl mx-auto space-y-3">
             <div className="text-center space-y-1">
               <p className="text-sm font-semibold">
-                {chatUser.name} wants to message you
+                {displayName || chatUser.name} wants to message you
               </p>
               <p className="text-xs text-muted-foreground">
                 Accept to continue the conversation
@@ -790,7 +824,7 @@ const Chat = () => {
             </DialogHeader>
             <div className="space-y-4 py-4">
               <p className="text-sm text-muted-foreground">
-                You're about to share your current location with <span className="font-semibold">{chatUser.name}</span>
+                You're about to share your current location with <span className="font-semibold">{displayName || chatUser.name}</span>
               </p>
               <div className="bg-muted p-3 rounded-lg">
                 <p className="text-xs font-mono">
@@ -826,7 +860,7 @@ const Chat = () => {
         <ProfileView
           user={{
             id: chatUser.id,
-            name: chatUser.name,
+            name: displayName || chatUser.name,
             avatar: chatUser.avatar,
             distance: "In your chat",
             activity: "Active",
@@ -846,7 +880,7 @@ const Chat = () => {
         <ReportUserModal
           open={showReportModal}
           onOpenChange={setShowReportModal}
-          userName={chatUser.name}
+          userName={displayName || chatUser.name}
           onReport={handleReportUser}
         />
       )}

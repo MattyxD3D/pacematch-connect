@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { listenToEvents, Event as FirebaseEvent, joinEvent, leaveEvent, listenToEventCheckIns, createEvent, deleteEvent, updateEvent } from "@/services/eventService";
 import { getUserData } from "@/services/authService";
 import { calculateDistance, formatDistance } from "@/utils/distance";
-import { GoogleMap, Marker, InfoWindow, OverlayView, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, Marker, InfoWindow, OverlayView, useJsApiLoader, Autocomplete } from "@react-google-maps/api";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ExploreIcon from "@mui/icons-material/Explore";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
@@ -31,6 +34,7 @@ import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
+import MyLocationIcon from "@mui/icons-material/MyLocation";
 import Avatar from "@mui/material/Avatar";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Card } from "@/components/ui/card";
@@ -167,6 +171,33 @@ const Events = () => {
   const [mapZoom, setMapZoom] = useState(13);
   const [mapRef, setMapRef] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  
+  // Pin mode state for inline event creation
+  const [isPinMode, setIsPinMode] = useState(false);
+  const [selectedEventLocation, setSelectedEventLocation] = useState<{ lat: number; lng: number; address?: string } | null>(null);
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [pinModeAddress, setPinModeAddress] = useState<string>("");
+  
+  // Inline event form state
+  const [inlineEventForm, setInlineEventForm] = useState({
+    title: "",
+    description: "",
+    activityType: "running" as "running" | "cycling" | "walking" | "others",
+    date: "",
+    time: "",
+    maxParticipants: 10,
+  });
+  const [isSubmittingEvent, setIsSubmittingEvent] = useState(false);
+  
+  // Autocomplete for location search in pin mode
+  const [autocomplete, setAutocomplete] = useState<google.maps.places.Autocomplete | null>(null);
+  const [searchValue, setSearchValue] = useState("");
+  
+  // Pending location for center-pin mode (tracks map center as user drags)
+  const [pendingLocation, setPendingLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
+  // Flag to prevent handleMapIdle from overwriting search-selected location (using ref for sync update)
+  const isSearchLocationSetRef = useRef(false);
   
   // Google Maps API loader
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -347,13 +378,15 @@ const Events = () => {
     return () => unsubscribe();
   }, [currentUser?.uid, userLocation]);
 
-  // Center map on user location when available
+  // Center map on user location ONLY on initial load (not after searches)
+  const [hasInitiallycentered, setHasInitiallyCentered] = useState(false);
   useEffect(() => {
-    if (userLocation && mapRef) {
+    if (userLocation && mapRef && !hasInitiallycentered && !isPinMode) {
       setMapCenter({ lat: userLocation.lat, lng: userLocation.lng });
       mapRef.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+      setHasInitiallyCentered(true);
     }
-  }, [userLocation, mapRef]);
+  }, [userLocation, mapRef, hasInitiallycentered, isPinMode]);
 
   // Listen to check-ins for each event
   useEffect(() => {
@@ -391,33 +424,33 @@ const Events = () => {
   // Sort by distance
   const sortedEvents = [...filteredEvents].sort((a, b) => a.distanceValue - b.distanceValue);
 
-  // Auto-zoom to single search result
-  useEffect(() => {
-    // Only auto-zoom if:
-    // 1. Search query is not empty
-    // 2. There's exactly one filtered event
-    // 3. We're in map view mode
-    // 4. Map reference is available
-    if (
-      searchQuery.trim() !== "" &&
-      filteredEvents.length === 1 &&
-      viewMode === "map" &&
-      mapRef
-    ) {
-      const singleEvent = filteredEvents[0];
-      
-      // Small delay to avoid rapid re-zooms during typing
-      const timeoutId = setTimeout(() => {
-        mapRef.panTo({ lat: singleEvent.lat, lng: singleEvent.lng });
-        mapRef.setZoom(15);
-        setSelectedEvent(singleEvent);
-        setShowEventDetail(true);
-        setSelectedMarkerEvent(singleEvent);
-      }, 300); // 300ms debounce delay
+  // State for search results dropdown
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-      return () => clearTimeout(timeoutId);
+  // Handle selecting a search result
+  const handleSearchResultClick = (event: Event) => {
+    // Pan map to event location
+    if (mapRef) {
+      mapRef.panTo({ lat: event.lat, lng: event.lng });
+      mapRef.setZoom(15);
     }
-  }, [searchQuery, filteredEvents, viewMode, mapRef]);
+    setMapCenter({ lat: event.lat, lng: event.lng });
+    
+    // Show event details
+    setSelectedEvent(event);
+    setShowEventDetail(true);
+    setSelectedMarkerEvent(event);
+    
+    // Close search dropdown and clear search
+    setShowSearchResults(false);
+    setSearchQuery("");
+    
+    // Switch to map view if in list view
+    if (viewMode !== "map") {
+      setViewMode("map");
+    }
+  };
 
   const handleJoinEvent = async (eventId: string) => {
     if (!currentUser?.uid) {
@@ -428,7 +461,19 @@ const Events = () => {
     try {
       await joinEvent(eventId, currentUser.uid);
       toast.success("You've joined the event!");
-      // The real-time listener will update the events automatically
+      
+      // Update the selectedEvent to reflect the join immediately
+      setSelectedEvent((prev) => {
+        if (!prev || prev.id !== eventId) return prev;
+        const currentParticipants = Array.isArray(prev.participants) ? prev.participants : [];
+        if (!currentParticipants.includes(currentUser.uid)) {
+          return {
+            ...prev,
+            participants: [...currentParticipants, currentUser.uid]
+          };
+        }
+        return prev;
+      });
     } catch (error: any) {
       console.error("Error joining event:", error);
       toast.error(error.message || "Failed to join event");
@@ -444,7 +489,16 @@ const Events = () => {
     try {
       await leaveEvent(eventId, currentUser.uid);
       toast.success("You've left the event");
-      // The real-time listener will update the events automatically
+      
+      // Update the selectedEvent to reflect the leave immediately
+      setSelectedEvent((prev) => {
+        if (!prev || prev.id !== eventId) return prev;
+        const currentParticipants = Array.isArray(prev.participants) ? prev.participants : [];
+        return {
+          ...prev,
+          participants: currentParticipants.filter(id => id !== currentUser.uid)
+        };
+      });
     } catch (error: any) {
       console.error("Error leaving event:", error);
       toast.error(error.message || "Failed to leave event");
@@ -610,6 +664,190 @@ const Events = () => {
     }
   };
 
+  // Handle inline event form submission
+  const handleInlineEventSubmit = async () => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to create events");
+      return;
+    }
+    
+    if (!selectedEventLocation) {
+      toast.error("Please select a location on the map");
+      return;
+    }
+    
+    // Validate form
+    if (!inlineEventForm.title.trim()) {
+      toast.error("Please enter an event title");
+      return;
+    }
+    if (!inlineEventForm.description.trim()) {
+      toast.error("Please enter an event description");
+      return;
+    }
+    if (!inlineEventForm.date) {
+      toast.error("Please select a date");
+      return;
+    }
+    if (!inlineEventForm.time) {
+      toast.error("Please select a time");
+      return;
+    }
+
+    setIsSubmittingEvent(true);
+    
+    try {
+      // Get user data for host info
+      const userData = await getUserData(currentUser.uid);
+      
+      // Format date properly (ISO string)
+      const eventDate = new Date(inlineEventForm.date);
+      const formattedDate = eventDate.toISOString().split('T')[0];
+      
+      // Prepare event data
+      const eventPayload: any = {
+        title: inlineEventForm.title,
+        description: inlineEventForm.description,
+        type: inlineEventForm.activityType,
+        category: "user",
+        date: formattedDate,
+        time: inlineEventForm.time,
+        location: pinModeAddress || `${selectedEventLocation.lat.toFixed(6)}, ${selectedEventLocation.lng.toFixed(6)}`,
+        distance: "0.0 km",
+        distanceValue: 0,
+        lat: selectedEventLocation.lat,
+        lng: selectedEventLocation.lng,
+        hostName: userData?.name || currentUser.displayName || "User",
+        hostAvatar: userData?.photoURL || currentUser.photoURL || "",
+      };
+      
+      if (inlineEventForm.maxParticipants && inlineEventForm.maxParticipants > 0) {
+        eventPayload.maxParticipants = inlineEventForm.maxParticipants;
+      }
+      
+      // Create event in Firebase
+      await createEvent(currentUser.uid, eventPayload);
+      
+      toast.success("Event created successfully!");
+      
+      // Reset form and close
+      setShowEventForm(false);
+      setSelectedEventLocation(null);
+      setPinModeAddress("");
+      setInlineEventForm({
+        title: "",
+        description: "",
+        activityType: "running",
+        date: "",
+        time: "",
+        maxParticipants: 10,
+      });
+    } catch (error: any) {
+      console.error("Error creating event:", error);
+      toast.error(error.message || "Failed to create event");
+    } finally {
+      setIsSubmittingEvent(false);
+    }
+  };
+
+  // Cancel inline event creation
+  const handleCancelInlineEvent = () => {
+    setShowEventForm(false);
+    setSelectedEventLocation(null);
+    setPinModeAddress("");
+    setSearchValue("");
+    setInlineEventForm({
+      title: "",
+      description: "",
+      activityType: "running",
+      date: "",
+      time: "",
+      maxParticipants: 10,
+    });
+  };
+
+  // Handle place selection from autocomplete - only pan map, don't confirm location yet
+  const handlePlaceSelect = () => {
+    if (autocomplete) {
+      const place = autocomplete.getPlace();
+      if (place.geometry && place.geometry.location) {
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        
+        // Set flag to prevent handleMapIdle from overwriting this location (sync via ref)
+        isSearchLocationSetRef.current = true;
+        
+        // Update map center state to prevent snapping back
+        setMapCenter({ lat, lng });
+        setMapZoom(16);
+        
+        // Pan map to the selected location (pin stays in center)
+        if (mapRef) {
+          mapRef.panTo({ lat, lng });
+          mapRef.setZoom(16);
+        }
+        
+        // Update the pending location and address - this is the exact search result location
+        setPendingLocation({ lat, lng });
+        setPinModeAddress(place.formatted_address || place.name || "");
+        setSearchValue(place.formatted_address || place.name || "");
+      }
+    }
+  };
+
+  // Reset search location flag when user manually drags the map
+  const handleMapDragStart = useCallback(() => {
+    isSearchLocationSetRef.current = false;
+  }, []);
+
+  // Reverse geocode map center when user stops dragging
+  const handleMapIdle = useCallback(() => {
+    if (!isPinMode || !mapRef) return;
+    
+    // Skip if location was just set from search result (prevent overwriting)
+    if (isSearchLocationSetRef.current) {
+      return;
+    }
+    
+    const center = mapRef.getCenter();
+    if (!center) return;
+    
+    const lat = center.lat();
+    const lng = center.lng();
+    
+    setPendingLocation({ lat, lng });
+    setIsReverseGeocoding(true);
+    
+    // Reverse geocode to get address
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      setIsReverseGeocoding(false);
+      if (status === "OK" && results && results[0]) {
+        setPinModeAddress(results[0].formatted_address);
+      } else {
+        setPinModeAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+      }
+    });
+  }, [isPinMode, mapRef]);
+
+  // Confirm the current map center as the event location
+  const handleConfirmLocation = () => {
+    if (pendingLocation) {
+      setSelectedEventLocation(pendingLocation);
+      setShowEventForm(true);
+      setIsPinMode(false);
+    }
+  };
+
+  // Center map on user's GPS location
+  const handleCenterOnMe = () => {
+    if (userLocation && mapRef) {
+      setMapCenter({ lat: userLocation.lat, lng: userLocation.lng });
+      mapRef.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+      mapRef.setZoom(15);
+    }
+  };
+
   const getActivityIcon = (type: EventType) => {
     switch (type) {
       case "running":
@@ -639,19 +877,102 @@ const Events = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10 pb-20">
       {/* Top Bar with Workout Dropdown and Search */}
-      <EventsTopBar
-        activityFilter={activityFilter}
-        onActivityFilterChange={setActivityFilter}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        rightSlot={
-          <NotificationBell 
-            unreadCount={unreadCount}
-            onClick={() => setShowNotificationDrawer(true)}
-            variant="light"
-          />
-        }
-      />
+      <div className="relative">
+        <EventsTopBar
+          activityFilter={activityFilter}
+          onActivityFilterChange={setActivityFilter}
+          searchQuery={searchQuery}
+          onSearchChange={(query) => {
+            setSearchQuery(query);
+            setShowSearchResults(query.trim().length > 0);
+          }}
+          rightSlot={
+            <NotificationBell 
+              unreadCount={unreadCount}
+              onClick={() => setShowNotificationDrawer(true)}
+              variant="light"
+            />
+          }
+        />
+        
+        {/* Search Results Dropdown */}
+        <AnimatePresence>
+          {showSearchResults && searchQuery.trim() && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute left-0 right-0 z-30 mx-4 sm:mx-6 mt-1"
+            >
+              <div className="bg-card rounded-xl shadow-elevation-3 border border-border overflow-hidden max-h-[60vh] overflow-y-auto">
+                {filteredEvents.length > 0 ? (
+                  <>
+                    <div className="px-4 py-2 border-b border-border bg-muted/50">
+                      <p className="text-xs text-muted-foreground font-medium">
+                        {filteredEvents.length} event{filteredEvents.length !== 1 ? 's' : ''} found
+                      </p>
+                    </div>
+                    {filteredEvents.slice(0, 5).map((event) => (
+                      <button
+                        key={event.id}
+                        onClick={() => handleSearchResultClick(event)}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left border-b border-border/50 last:border-0"
+                      >
+                        {/* Activity Icon */}
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          event.type === "running" ? "bg-success/20" :
+                          event.type === "cycling" ? "bg-primary/20" :
+                          event.type === "walking" ? "bg-warning/20" : "bg-secondary/20"
+                        }`}>
+                          {event.type === "running" && <DirectionsRunIcon style={{ fontSize: 20 }} className="text-success" />}
+                          {event.type === "cycling" && <DirectionsBikeIcon style={{ fontSize: 20 }} className="text-primary" />}
+                          {event.type === "walking" && <DirectionsWalkIcon style={{ fontSize: 20 }} className="text-warning" />}
+                          {event.type === "others" && <FitnessCenterIcon style={{ fontSize: 20 }} className="text-secondary" />}
+                        </div>
+                        
+                        {/* Event Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-foreground truncate">{event.title}</p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{event.date}</span>
+                            <span>•</span>
+                            <span className="truncate">{event.location}</span>
+                          </div>
+                        </div>
+                        
+                        {/* Distance if available */}
+                        {event.distance && (
+                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                            {event.distance}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                    {filteredEvents.length > 5 && (
+                      <div className="px-4 py-2 bg-muted/30 text-center">
+                        <p className="text-xs text-muted-foreground">
+                          +{filteredEvents.length - 5} more results
+                        </p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="px-4 py-8 text-center">
+                    <SearchIcon style={{ fontSize: 32 }} className="text-muted-foreground/50 mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">No events found for "{searchQuery}"</p>
+                  </div>
+                )}
+              </div>
+              
+              {/* Click outside to close */}
+              <div 
+                className="fixed inset-0 -z-10" 
+                onClick={() => setShowSearchResults(false)}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-0 sm:px-4 sm:px-6 pb-20 sm:pb-24">
@@ -667,6 +988,138 @@ const Events = () => {
             >
               {/* Map Container */}
               <div className="relative w-full h-[calc(100vh-200px)] sm:h-[600px] rounded-2xl overflow-hidden shadow-elevation-3 border-2 border-border/50">
+                {/* Pin Mode Banner with Search */}
+                {isPinMode && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="absolute top-4 left-4 right-4 z-50"
+                  >
+                    <div className="bg-card rounded-xl shadow-lg border border-border overflow-hidden">
+                      {/* Search Input */}
+                      <div className="p-3 border-b border-border">
+                        <Autocomplete
+                          onLoad={(auto) => setAutocomplete(auto)}
+                          onPlaceChanged={handlePlaceSelect}
+                        >
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="Search for a location..."
+                              value={searchValue}
+                              onChange={(e) => setSearchValue(e.target.value)}
+                              className="w-full pl-10 pr-4 py-2.5 bg-muted/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                            />
+                            <LocationOnIcon 
+                              style={{ fontSize: 20 }} 
+                              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" 
+                            />
+                          </div>
+                        </Autocomplete>
+                      </div>
+                      
+                      {/* Current Address Display */}
+                      <div className="px-3 py-2.5 bg-muted/30 border-b border-border">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 min-w-0">
+                            {isReverseGeocoding ? (
+                              <div className="flex items-center gap-2 text-muted-foreground">
+                                <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                <span className="text-sm">Getting address...</span>
+                              </div>
+                            ) : pinModeAddress ? (
+                              <p className="text-sm text-foreground truncate">{pinModeAddress}</p>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">Drag map to select location</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Instructions */}
+                      <div className="px-3 py-2 bg-primary/5 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <MapIcon style={{ fontSize: 16 }} />
+                          <span className="text-xs">Drag the map to move the pin</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setIsPinMode(false);
+                            setSelectedEventLocation(null);
+                            setPendingLocation(null);
+                            setPinModeAddress("");
+                            setSearchValue("");
+                          }}
+                          className="text-destructive hover:bg-destructive/10 h-7 px-2 text-xs"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Center-fixed pin overlay when in pin mode (Uber-style) */}
+                {isPinMode && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-40">
+                    <div className="relative flex flex-col items-center">
+                      {/* Pin icon - positioned so tip is at center */}
+                      <div className="transform -translate-y-1/2">
+                        <LocationOnIcon 
+                          style={{ fontSize: 56, color: '#ef4444' }} 
+                          className="drop-shadow-lg"
+                        />
+                      </div>
+                      {/* Shadow dot at the exact center */}
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-black/30 rounded-full blur-sm" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Center on Me Button - Floating button in pin mode */}
+                {isPinMode && userLocation && (
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleCenterOnMe}
+                    className="absolute bottom-24 right-4 z-50 w-12 h-12 bg-card rounded-full shadow-lg border border-border flex items-center justify-center hover:bg-muted transition-colors"
+                    title="Center on my location"
+                  >
+                    <MyLocationIcon style={{ fontSize: 24 }} className="text-primary" />
+                  </motion.button>
+                )}
+
+                {/* Confirm Location Button - Bottom of map in pin mode */}
+                {isPinMode && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute bottom-4 left-4 right-4 z-50"
+                  >
+                    <Button
+                      onClick={handleConfirmLocation}
+                      disabled={!pendingLocation || isReverseGeocoding}
+                      className="w-full py-6 text-base font-semibold bg-primary hover:bg-primary/90 shadow-lg"
+                    >
+                      {isReverseGeocoding ? (
+                        <span className="flex items-center gap-2">
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Getting location...
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <CheckCircleIcon style={{ fontSize: 22 }} />
+                          Confirm Location
+                        </span>
+                      )}
+                    </Button>
+                  </motion.div>
+                )}
+
                 {loadError ? (
                   <div className="w-full h-full flex items-center justify-center bg-muted">
                     <div className="text-center">
@@ -693,12 +1146,15 @@ const Events = () => {
                       }
                     }}
                     onClick={() => {
-                      // Close event details panel when clicking on empty map space
+                      // In center-pin mode, clicking doesn't place markers - user drags map
+                      // Just close event details panel when clicking on empty map space
                       if (showEventDetail) {
                         setShowEventDetail(false);
                         setSelectedEvent(null);
                       }
                     }}
+                    onIdle={handleMapIdle}
+                    onDragStart={handleMapDragStart}
                     options={{
                       disableDefaultUI: true,
                       zoomControl: false,
@@ -716,6 +1172,19 @@ const Events = () => {
                           scaledSize: new window.google.maps.Size(32, 32),
                         }}
                         title="Your location"
+                      />
+                    )}
+
+                    {/* Selected Event Location Marker (shown after location is confirmed) */}
+                    {selectedEventLocation && showEventForm && (
+                      <Marker
+                        position={{ lat: selectedEventLocation.lat, lng: selectedEventLocation.lng }}
+                        icon={{
+                          url: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+                          scaledSize: new window.google.maps.Size(48, 48),
+                        }}
+                        title="New event location"
+                        animation={window.google.maps.Animation.DROP}
                       />
                     )}
 
@@ -797,30 +1266,50 @@ const Events = () => {
               </div>
 
               {/* Create Event Button - Bottom Right of Map (dark rounded button with pencil+plus icon) */}
-              <motion.button
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setShowCreateEvent(true)}
-                className="absolute bottom-20 right-4 touch-target bg-gray-900 text-white rounded-2xl shadow-elevation-3 hover:bg-gray-800 hover:shadow-elevation-4 transition-all duration-300 flex items-center gap-2 px-5 py-3 z-30"
-                title="Create event"
-              >
-                {/* Pencil icon with plus sign */}
-                <div className="relative flex items-center justify-center">
-                  <EditIcon style={{ fontSize: 20, color: "white" }} />
-                  <AddIcon 
-                    style={{ 
-                      fontSize: 12, 
-                      color: "white",
-                      position: "absolute",
-                      top: "-4px",
-                      left: "-2px"
-                    }} 
-                  />
-                </div>
-                <span className="text-sm font-medium text-white">Create Event</span>
-              </motion.button>
+              {!isPinMode && !showEventForm && (
+                <motion.button
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    setIsPinMode(true);
+                    setSelectedEventLocation(null);
+                    setPinModeAddress("");
+                    // Initialize pending location to current map center
+                    if (mapRef) {
+                      const center = mapRef.getCenter();
+                      if (center) {
+                        setPendingLocation({ lat: center.lat(), lng: center.lng() });
+                      }
+                    } else {
+                      setPendingLocation(mapCenter);
+                    }
+                  }}
+                  className="absolute left-0 right-0 z-30 px-4 pb-2"
+                  style={{
+                    bottom: `calc(5rem + env(safe-area-inset-bottom, 48px))`,
+                  }}
+                  title="Create event"
+                >
+                  <div className="bg-gray-900 text-white rounded-2xl shadow-elevation-3 hover:bg-gray-800 hover:shadow-elevation-4 transition-all duration-300 flex items-center justify-center gap-2 px-5 py-3 mx-auto max-w-xs">
+                    {/* Pencil icon with plus sign */}
+                    <div className="relative flex items-center justify-center">
+                      <EditIcon style={{ fontSize: 20, color: "white" }} />
+                      <AddIcon 
+                        style={{ 
+                          fontSize: 12, 
+                          color: "white",
+                          position: "absolute",
+                          top: "-4px",
+                          left: "-2px"
+                        }} 
+                      />
+                    </div>
+                    <span className="text-sm font-medium text-white">Create Event</span>
+                  </div>
+                </motion.button>
+              )}
 
               {/* Top Right Controls - Like MapScreen */}
               <div className="absolute top-4 right-4 flex flex-col gap-3 z-30">
@@ -905,6 +1394,175 @@ const Events = () => {
         onEdit={handleEditEvent}
         onDelete={handleDeleteEvent}
       />
+
+      {/* Inline Event Creation Form - Bottom Sheet */}
+      <AnimatePresence>
+        {showEventForm && selectedEventLocation && (
+          <motion.div
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="fixed inset-x-0 z-50 bg-card rounded-t-3xl shadow-elevation-4 border-t border-border"
+            style={{
+              bottom: `calc(4.5rem + env(safe-area-inset-bottom, 0px))`,
+              maxHeight: "calc(100vh - 6rem - env(safe-area-inset-bottom, 0px))",
+            }}
+          >
+            {/* Handle bar */}
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-12 h-1.5 bg-muted-foreground/30 rounded-full" />
+            </div>
+
+            {/* Header */}
+            <div className="px-5 pb-3 border-b border-border flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Create Event</h2>
+                <p className="text-sm text-muted-foreground truncate max-w-[280px]">
+                  <LocationOnIcon style={{ fontSize: 14 }} className="mr-1" />
+                  {pinModeAddress || "Selected location"}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleCancelInlineEvent}
+                className="h-9 w-9 rounded-full"
+              >
+                <CloseIcon style={{ fontSize: 20 }} />
+              </Button>
+            </div>
+
+            {/* Form Content */}
+            <div className="px-5 py-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 16rem)" }}>
+              {/* Activity Type Selection */}
+              <div className="mb-4">
+                <Label className="text-sm font-medium text-foreground mb-2 block">Activity Type</Label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(["running", "cycling", "walking", "others"] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setInlineEventForm(prev => ({ ...prev, activityType: type }))}
+                      className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
+                        inlineEventForm.activityType === type
+                          ? "border-primary bg-primary/10"
+                          : "border-border bg-muted/30 hover:border-primary/50"
+                      }`}
+                    >
+                      {type === "running" && <DirectionsRunIcon style={{ fontSize: 24 }} className={inlineEventForm.activityType === type ? "text-primary" : "text-muted-foreground"} />}
+                      {type === "cycling" && <DirectionsBikeIcon style={{ fontSize: 24 }} className={inlineEventForm.activityType === type ? "text-primary" : "text-muted-foreground"} />}
+                      {type === "walking" && <DirectionsWalkIcon style={{ fontSize: 24 }} className={inlineEventForm.activityType === type ? "text-primary" : "text-muted-foreground"} />}
+                      {type === "others" && <FitnessCenterIcon style={{ fontSize: 24 }} className={inlineEventForm.activityType === type ? "text-primary" : "text-muted-foreground"} />}
+                      <span className={`text-xs capitalize ${inlineEventForm.activityType === type ? "text-primary font-medium" : "text-muted-foreground"}`}>
+                        {type}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Event Title */}
+              <div className="mb-4">
+                <Label htmlFor="event-title" className="text-sm font-medium text-foreground mb-2 block">
+                  Event Title
+                </Label>
+                <Input
+                  id="event-title"
+                  placeholder="e.g., Morning Run at the Park"
+                  value={inlineEventForm.title}
+                  onChange={(e) => setInlineEventForm(prev => ({ ...prev, title: e.target.value }))}
+                  className="bg-muted/50"
+                />
+              </div>
+
+              {/* Date and Time */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <Label htmlFor="event-date" className="text-sm font-medium text-foreground mb-2 block">
+                    Date
+                  </Label>
+                  <Input
+                    id="event-date"
+                    type="date"
+                    value={inlineEventForm.date}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setInlineEventForm(prev => ({ ...prev, date: e.target.value }))}
+                    className="bg-muted/50"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="event-time" className="text-sm font-medium text-foreground mb-2 block">
+                    Time
+                  </Label>
+                  <Input
+                    id="event-time"
+                    type="time"
+                    value={inlineEventForm.time}
+                    onChange={(e) => setInlineEventForm(prev => ({ ...prev, time: e.target.value }))}
+                    className="bg-muted/50"
+                  />
+                </div>
+              </div>
+
+              {/* Max Participants */}
+              <div className="mb-4">
+                <Label htmlFor="max-participants" className="text-sm font-medium text-foreground mb-2 block">
+                  Max Participants
+                </Label>
+                <Input
+                  id="max-participants"
+                  type="number"
+                  min={2}
+                  max={1000}
+                  value={inlineEventForm.maxParticipants}
+                  onChange={(e) => setInlineEventForm(prev => ({ ...prev, maxParticipants: parseInt(e.target.value) || 10 }))}
+                  className="bg-muted/50"
+                />
+              </div>
+
+              {/* Description */}
+              <div className="mb-4">
+                <Label htmlFor="event-description" className="text-sm font-medium text-foreground mb-2 block">
+                  Description
+                </Label>
+                <Textarea
+                  id="event-description"
+                  placeholder="Tell people what to expect..."
+                  value={inlineEventForm.description}
+                  onChange={(e) => setInlineEventForm(prev => ({ ...prev, description: e.target.value }))}
+                  className="bg-muted/50 min-h-[80px]"
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="px-5 pt-3 pb-5 border-t border-border flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={handleCancelInlineEvent}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-primary hover:bg-primary/90"
+                onClick={handleInlineEventSubmit}
+                disabled={isSubmittingEvent}
+              >
+                {isSubmittingEvent ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Creating...
+                  </span>
+                ) : (
+                  "Create Event"
+                )}
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Keep Event Detail Modal as fallback for desktop if needed */}
       {showEventDetail && false && (
@@ -1110,7 +1768,10 @@ const Events = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="fixed bottom-20 left-0 right-0 z-40 px-4 pb-2"
+            className="fixed left-0 right-0 z-40 px-4 pb-2"
+            style={{
+              bottom: `calc(5rem + env(safe-area-inset-bottom, 48px))`, // 80px + safe area
+            }}
           >
             <div className="bg-card/95 backdrop-blur-md rounded-2xl p-3 shadow-elevation-3 border border-border/50 max-w-2xl mx-auto">
               <div className="flex items-center gap-2">

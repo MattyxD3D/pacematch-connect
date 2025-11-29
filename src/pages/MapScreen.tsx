@@ -49,11 +49,15 @@ import { useNearbyUsers } from "@/hooks/useNearbyUsers";
 import { useMatching } from "@/hooks/useMatching";
 import { useAuth } from "@/hooks/useAuth";
 import { useMovementDetection } from "@/hooks/useMovementDetection";
+import { Geolocation } from "@capacitor/geolocation";
+import { isNativePlatform } from "@/utils/platform";
 import { formatDistance } from "@/utils/distance";
 import { SearchFilter } from "@/services/matchingService";
+import { getDisplayName } from "@/utils/anonymousName";
 import { isWorkoutActive } from "@/utils/workoutState";
 import { createMapIcon } from "@/utils/mapIcons";
 import { preventMarkerOverlap, preventMarkerOverlapSimple, AdjustedPosition } from "@/utils/markerOverlap";
+import { getProfilePictureUrl } from "@/utils/profilePicture";
 import { updateUserProfile } from "@/services/authService";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
@@ -62,6 +66,7 @@ import { saveWorkout } from "@/services/workoutService";
 import { listenToFriendRequests, removeFriend, sendFriendRequest } from "@/services/friendService";
 import { getUserConversations } from "@/services/messageService";
 import { listenToPokes, sendPoke, acceptPoke, dismissPoke, hasPokedUser } from "@/services/pokeService";
+import { reportUser, blockUser } from "@/services/userService";
 import { PokeModal } from "@/components/PokeModal";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
@@ -321,6 +326,34 @@ const MapScreen = () => {
     isActive, // Use isActive instead of isActivityActive
     visible
   );
+
+  // Request location permissions when MapScreen loads (on native platforms)
+  useEffect(() => {
+    const requestLocationPermissions = async () => {
+      // Only request on native platforms (iOS/Android)
+      if (!isNativePlatform() || !user?.uid) {
+        return;
+      }
+
+      try {
+        console.log("📍 Requesting location permissions...");
+        const permissionStatus = await Geolocation.requestPermissions();
+        
+        if (permissionStatus.location === 'granted') {
+          console.log("✅ Location permission granted");
+        } else if (permissionStatus.location === 'denied') {
+          console.warn("⚠️ Location permission denied");
+        } else {
+          console.warn("⚠️ Location permission:", permissionStatus.location);
+        }
+      } catch (error) {
+        console.error("❌ Error requesting location permissions:", error);
+      }
+    };
+
+    // Request permissions when component mounts
+    requestLocationPermissions();
+  }, [user?.uid]); // Request when user is available
 
   // Ensure GPS tracking is fully stopped whenever workout is inactive
   useEffect(() => {
@@ -806,21 +839,25 @@ const MapScreen = () => {
         const cooldownUntil = declinedUsers[userId];
         return !cooldownUntil || cooldownUntil <= now;
       })
-      .map((match) => ({
-        id: match.user.uid,
-        // Use 'name' field from Firebase (username), not displayName from Google
-        name: match.user.name || "User",
-        distance: formatDistance(match.distance / 1000),
-        distanceValue: match.distance / 1000,
-        activity: match.user.activity || "Running",
-        avatar: match.user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(match.user.name || 'User')}&size=150`,
+      .map((match) => {
+        const username = match.user.name || null;
+        const activity = match.user.activity || null;
+        const displayName = getDisplayName(username, match.user.uid, activity);
+        return {
+          id: match.user.uid,
+          name: displayName,
+          distance: formatDistance(match.distance / 1000),
+          distanceValue: match.distance / 1000,
+          activity: match.user.activity || "Running",
+          avatar: getProfilePictureUrl(match.user.photoURL, match.user.avatar, displayName),
         lat: match.user.location.lat,
         lng: match.user.location.lng,
         matchScore: match.score,
         fitnessLevel: match.user.fitnessLevel,
         pace: match.user.pace,
-        timestamp: match.user.timestamp || null // Include timestamp for active workout filtering
-      }));
+          timestamp: match.user.timestamp || null // Include timestamp for active workout filtering
+        };
+      });
   }, [matches, declinedUsers, now]);
 
   // Use nearby users from hook, or fallback to mock data for UI features
@@ -829,19 +866,24 @@ const MapScreen = () => {
     if (matchedUsersForDisplay.length > 0) {
       result = matchedUsersForDisplay;
     } else if (nearbyUsersFromHook.length > 0) {
-      result = nearbyUsersFromHook.map((userData: any) => ({
-        id: userData.id,
-        name: userData.name || "User",
-        distance: formatDistance(userData.distance),
-        distanceValue: userData.distance,
-        activity: userData.activity || "Running",
-        avatar: userData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&size=150`,
+      result = nearbyUsersFromHook.map((userData: any) => {
+        const username = userData.name || null;
+        const activity = userData.activity || null;
+        const displayName = getDisplayName(username, userData.id, activity);
+        return {
+          id: userData.id,
+          name: displayName,
+          distance: formatDistance(userData.distance),
+          distanceValue: userData.distance,
+          activity: userData.activity || "Running",
+          avatar: getProfilePictureUrl(userData.photoURL, userData.avatar, displayName),
         lat: userData.lat,
         lng: userData.lng,
-        photos: [],
-        bio: "",
-        timestamp: userData.timestamp || null // Include timestamp for active workout filtering
-      }));
+          photos: [],
+          bio: "",
+          timestamp: userData.timestamp || null // Include timestamp for active workout filtering
+        };
+      });
     } else {
       result = [];
     }
@@ -989,14 +1031,19 @@ const MapScreen = () => {
       const existingIds = new Set(prev.map(u => u.id));
       const newUsers = currentNearbyUsers
         .filter(user => newUserIds.includes(user.id) && !existingIds.has(user.id))
-        .map(user => ({
-          id: user.id,
-          name: user.name,
-          avatar: user.avatar,
-          activity: user.activity,
-          distance: user.distance,
-          distanceValue: user.distanceValue
-        }));
+        .map(user => {
+          const userActivity = user.activity || "running";
+          const isSameActivity = selectedActivity && userActivity.toLowerCase() === selectedActivity.toLowerCase();
+          return {
+            id: user.id,
+            name: user.name,
+            avatar: user.avatar,
+            activity: userActivity,
+            distance: user.distance,
+            distanceValue: user.distanceValue,
+            isSameActivity: isSameActivity
+          };
+        });
       
       if (newUsers.length === 0) {
         return prev;
@@ -1005,7 +1052,7 @@ const MapScreen = () => {
       console.log(`✅ Added ${newUsers.length} real Firebase user(s) to workout tracking:`, newUsers.map(u => u.name));
       return [...prev, ...newUsers];
     });
-  }, [isActive, nearbyUserIdsString]);
+  }, [isActive, nearbyUserIdsString, selectedActivity]);
 
   // Filter users by activity
   const filteredUsers = activityFilter === "all" 
@@ -1268,6 +1315,7 @@ const MapScreen = () => {
       avatar: user.avatar,
       activity: user.activity,
       distance: user.distance,
+      isSameActivity: user.isSameActivity, // Preserve activity matching flag for summary display
     }));
 
     // Log what we're saving
@@ -1283,7 +1331,6 @@ const MapScreen = () => {
       duration: elapsedTime,
       distance,
       avgSpeed,
-      calories: 0, // Calories removed from UI but still required in data structure
       nearbyUsers: activeNearbyUsers,
       location: "Central Park, New York", // This would come from GPS in real app
     };
@@ -1500,6 +1547,42 @@ const MapScreen = () => {
     }
     setShowMessageModal(false);
     setSelectedUser(null);
+  };
+
+  // Report user handler
+  const handleReportUser = async (reason: string, details?: string) => {
+    if (!user?.uid || !selectedUser?.id) {
+      toast.error("Unable to report user");
+      return;
+    }
+    try {
+      await reportUser(user.uid, String(selectedUser.id), reason, details);
+      toast.success("User reported. Thank you for helping keep PaceMatch safe.");
+      setShowProfileView(false);
+      setSelectedUser(null);
+    } catch (error: any) {
+      console.error("Error reporting user:", error);
+      toast.error(error.message || "Failed to report user. Please try again.");
+    }
+  };
+
+  // Block user handler
+  const handleBlockUser = async () => {
+    if (!user?.uid || !selectedUser?.id) {
+      toast.error("Unable to block user");
+      return;
+    }
+    try {
+      await blockUser(user.uid, String(selectedUser.id));
+      toast.success("User has been blocked");
+      setShowProfileView(false);
+      setSelectedUser(null);
+      // Refresh to remove blocked user from view
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (error: any) {
+      console.error("Error blocking user:", error);
+      toast.error(error.message || "Failed to block user. Please try again.");
+    }
   };
 
   // Auto-follow user with camera offset in navigation-style mode
@@ -1783,7 +1866,7 @@ const MapScreen = () => {
       name: userData.name || "User", // Always use username from Firebase, never displayName
       distance: userData.distance || formatDistance(userData.distanceValue || 0),
       activity: userData.activity || "Running",
-      avatar: userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name || 'User')}&size=150`,
+      avatar: getProfilePictureUrl(userData.photoURL, userData.avatar, userData.name),
       photos: userData.photos || [],
       bio: userData.bio || ""
     });
@@ -2056,7 +2139,7 @@ const MapScreen = () => {
                               user: {
                                 id: conv.otherUserId,
                                 name: userData.name || "Unknown",
-                                avatar: userData.photoURL || ""
+                                avatar: getProfilePictureUrl(userData.photoURL, userData.avatar, userData.name)
                               }
                             }
                           });
@@ -2252,26 +2335,52 @@ const MapScreen = () => {
               const matchScore = userData.matchScore;
               const scorePercent = matchScore ? Math.round(matchScore * 100) : null;
               
-              // Get profile picture URL - check both photoURL and avatar fields
-              const photoURL = userData.photoURL || userData.avatar || null;
+              // Get profile picture URL using utility function for consistent fallback
               const userName = userData.name || "User";
+              const profilePictureUrl = getProfilePictureUrl(
+                userData.photoURL,
+                userData.avatar,
+                userName
+              );
               const fitnessLevel = userData.fitnessLevel;
+              const userActivity = userData.activity || "running";
               
-              // Create profile picture icon with fitness level glow
+              // Check if workout is active and if user's activity matches selected activity
+              const isSameActivity = isActive && userActivity.toLowerCase() === selectedActivity.toLowerCase();
+              const shouldGreyOut = isActive && !isSameActivity;
+              
+              // Create profile picture icon with fitness level glow, activity badge, and opacity
               const iconSize = hasTrail ? 56 : 48;
               const profileIcon = isLoaded && window.google 
-                ? createMapIcon(photoURL, userName, iconSize, fitnessLevel)
+                ? createMapIcon(
+                    profilePictureUrl, 
+                    userName, 
+                    iconSize, 
+                    fitnessLevel,
+                    shouldGreyOut ? 0.4 : undefined, // Apply opacity if different activity during workout
+                    userActivity as "running" | "cycling" | "walking" // Always show activity badge
+                  )
                 : null;
+              
+              // Set z-index: same-activity users on top, then different-activity, then by trail
+              let markerZIndex = hasTrail ? 100 : 99;
+              if (isActive) {
+                if (isSameActivity) {
+                  markerZIndex = hasTrail ? 102 : 101; // Same activity users on top
+                } else {
+                  markerZIndex = hasTrail ? 98 : 97; // Different activity users below
+                }
+              }
               
               return isLoaded && window.google && profileIcon ? (
                 <Marker
                   key={userData.id}
                   position={{ lat: userData.lat, lng: userData.lng }}
-                  title={`${userName}${hasTrail ? " (Moving)" : ""}${scorePercent ? ` - ${scorePercent}% match` : ""}`}
+                  title={`${userName}${hasTrail ? " (Moving)" : ""}${scorePercent ? ` - ${scorePercent}% match` : ""} - ${userActivity}`}
                   onClick={() => onMarkerClick(userData)}
                   icon={profileIcon}
                   animation={hasTrail && window.google.maps.Animation ? window.google.maps.Animation.DROP : undefined}
-                  zIndex={hasTrail ? 100 : 99}
+                  zIndex={markerZIndex}
                 />
               ) : null;
             })}
@@ -2344,7 +2453,12 @@ const MapScreen = () => {
 
       {/* Top Bar - Beacon Mode Header - Only visible when workout is not active */}
       {!isActive && (
-        <div className="absolute top-0 left-0 right-0 z-[60] bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+        <div 
+          className="absolute top-0 left-0 right-0 z-[60] bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between"
+          style={{
+            paddingTop: `calc(0.75rem + env(safe-area-inset-top))`,
+          }}
+        >
           <h2 className="text-lg font-semibold text-white">Beacon Mode</h2>
           {/* Notification Bell - Yellow when there are notifications */}
           <NotificationBell 
@@ -2513,6 +2627,8 @@ const MapScreen = () => {
             onPoke={isActive ? () => handlePoke(selectedUser.id) : undefined}
             hasPoked={hasPokedUsers[selectedUser.id] || false}
             isWorkoutActive={isActive}
+            onReport={handleReportUser}
+            onBlock={handleBlockUser}
           />
         )}
       </AnimatePresence>
@@ -2686,7 +2802,10 @@ const MapScreen = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 200, damping: 20 }}
-            className="absolute bottom-20 left-0 right-0 px-4 z-10"
+            className="absolute left-0 right-0 px-4 z-10"
+            style={{
+              bottom: `calc(5rem + env(safe-area-inset-bottom, 48px))`, // 80px + safe area
+            }}
           >
             <div
               className={`
@@ -2924,7 +3043,7 @@ const MapScreen = () => {
                         distance: formatDistance(distanceKm),
                         distanceValue: distanceKm,
                         activity: user.activity || "Running",
-                        avatar: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || "User")}&size=150`,
+                        avatar: getProfilePictureUrl(user.photoURL, user.avatar, user.name),
                         photos: user.photos || [],
                         bio: user.bio || "",
                         lat: (user as any)?.location?.lat ?? null,

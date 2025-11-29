@@ -10,6 +10,7 @@ import { ProfileView } from "@/pages/ProfileView";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation as useLocationHook } from "@/hooks/useLocation";
 import { useMatching } from "@/hooks/useMatching";
+import { useNearbyUsers } from "@/hooks/useNearbyUsers";
 import { useUser } from "@/contexts/UserContext";
 import { formatDistance, calculateDistance } from "@/utils/distance";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
@@ -30,9 +31,16 @@ import {
 } from "@/services/friendService";
 import { getUserData } from "@/services/authService";
 import {
+  listenToEncounteredUsers,
+  cleanupOldEncounters,
+  EncounteredUser,
+} from "@/services/encounteredUsersService";
+import {
   getLocationSharingSettings,
   setLocationSharing as saveLocationSharing,
 } from "@/lib/socialStorage";
+import { getDisplayName } from "@/utils/anonymousName";
+import { getProfilePictureUrl } from "@/utils/profilePicture";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import SearchIcon from "@mui/icons-material/Search";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
@@ -73,6 +81,9 @@ const Friends = () => {
     friendName: "",
   });
   const [hasPokedUsers, setHasPokedUsers] = useState<Record<string, boolean>>({});
+  const [encounteredUsers, setEncounteredUsers] = useState<Record<string, EncounteredUser>>({});
+  const [encounteredUsersLoading, setEncounteredUsersLoading] = useState(true);
+  const [encounteredUsersData, setEncounteredUsersData] = useState<Record<string, any>>({});
   
   // Get user location for nearby users
   const { location: currentLocation } = useLocationHook(user?.uid || null, false, true);
@@ -80,7 +91,7 @@ const Friends = () => {
   // Get initial tab from location state, default to "friends"
   const initialTab = (location.state as { tab?: string })?.tab || "friends";
   
-  // Get nearby users using matching algorithm
+  // Get nearby users using matching algorithm (for other features)
   const { matches, loading: matchesLoading } = useMatching({
     currentUserId: user?.uid || "",
     currentLocation: currentLocation,
@@ -94,6 +105,18 @@ const Friends = () => {
     searchFilter: "all",
     radiusPreference: userProfile?.radiusPreference || "normal"
   });
+
+  // Get all nearby users (not just matches) for discover tab
+  // This shows all users you've encountered nearby, regardless of matching criteria
+  const maxDistanceKm = userProfile?.radiusPreference === "wide" ? 10 : 
+                        userProfile?.radiusPreference === "narrow" ? 3 : 5;
+  const { nearbyUsers: allNearbyUsers, loading: nearbyUsersLoading } = useNearbyUsers(
+    currentLocation,
+    maxDistanceKm,
+    "all", // Show all activities
+    "all", // Show all genders
+    user?.uid || null
+  );
   
   // Listen to friends list from Firebase
   useEffect(() => {
@@ -157,30 +180,138 @@ const Friends = () => {
     return () => unsubscribe();
   }, [user?.uid]);
 
-  // Format nearby users for display (exclude friends)
+  // Listen to encountered users history and run cleanup
+  useEffect(() => {
+    if (!user?.uid) {
+      setEncounteredUsers({});
+      setEncounteredUsersLoading(false);
+      return;
+    }
+
+    // Run cleanup on mount
+    cleanupOldEncounters(user.uid).catch((error) => {
+      console.error("Error cleaning up old encounters:", error);
+    });
+
+    const unsubscribe = listenToEncounteredUsers(user.uid, (encounters) => {
+      setEncounteredUsers(encounters);
+      setEncounteredUsersLoading(false);
+      
+      // Fetch user data for encountered users
+      const fetchUserData = async () => {
+        const encounteredIds = Object.keys(encounters);
+        const dataMap: Record<string, any> = {};
+        
+        for (const encounteredId of encounteredIds) {
+          // Skip if already a friend (we have their data) or currently nearby
+          if (friends.includes(encounteredId)) continue;
+          
+          try {
+            const userData = await getUserData(encounteredId);
+            if (userData) {
+              dataMap[encounteredId] = userData;
+            }
+          } catch (error) {
+            // User might not exist anymore - skip silently
+          }
+        }
+        
+        setEncounteredUsersData(prev => ({ ...prev, ...dataMap }));
+      };
+      
+      fetchUserData();
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid, friends]);
+
+  // Format all nearby users for discover tab (exclude friends)
+  // Combines currently nearby users with historical encounters
   const nearbyUsersForDiscover = useMemo(() => {
-    if (!matches || matches.length === 0) return [];
-    
     const friendIds = new Set(friends);
+    const currentlyNearbyIds = new Set(allNearbyUsers.map(u => u.id));
+    const combinedUsers: Record<string, any> = {};
     
-    return matches
-      .filter(match => !friendIds.has(match.user.uid))
-      .map(match => ({
-        id: match.user.uid,
-        name: match.user.name || "User",
-        distance: formatDistance(match.distance / 1000),
-        distanceValue: match.distance / 1000,
-        activity: match.user.activity || "Running",
-        avatar: match.user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(match.user.name || 'User')}&size=150`,
-        lat: match.user.location.lat,
-        lng: match.user.location.lng,
-        matchScore: match.score,
-        fitnessLevel: match.user.fitnessLevel,
-        pace: match.user.pace,
-        bio: match.user.bio || "",
-        photos: match.user.photos || []
-      }));
-  }, [matches, friends]);
+    // Add currently nearby users (prioritized)
+    allNearbyUsers
+      .filter(user => !friendIds.has(user.id))
+      .forEach(user => {
+        const username = user.name || null;
+        const activity = user.activity || null;
+        const displayName = getDisplayName(username, user.id, activity);
+        
+        let distanceKm = user.distance;
+        if (!distanceKm && currentLocation && user.lat && user.lng) {
+          distanceKm = calculateDistance(
+            currentLocation.lat,
+            currentLocation.lng,
+            user.lat,
+            user.lng
+          );
+        }
+        
+        combinedUsers[user.id] = {
+          id: user.id,
+          name: displayName,
+          distance: formatDistance(distanceKm || 0),
+          distanceValue: distanceKm || 0,
+          activity: user.activity || "Running",
+          avatar: getProfilePictureUrl(user.photoURL, user.avatar, displayName),
+          lat: user.lat,
+          lng: user.lng,
+          fitnessLevel: user.fitnessLevel,
+          pace: user.pace,
+          bio: user.bio || "",
+          photos: user.photos || [],
+          isCurrentlyNearby: true,
+          lastSeenAt: Date.now()
+        };
+      });
+    
+    // Add historical encounters (not currently nearby)
+    Object.entries(encounteredUsers).forEach(([encounteredUserId, encounter]) => {
+      // Skip if already in currently nearby or is a friend
+      if (currentlyNearbyIds.has(encounteredUserId) || friendIds.has(encounteredUserId)) {
+        return;
+      }
+      
+      // Get user data if available
+      const userData = encounteredUsersData[encounteredUserId];
+      const username = userData?.name || userData?.username || null;
+      const activity = userData?.activity || userData?.activities?.[0] || null;
+      const displayName = getDisplayName(username, encounteredUserId, activity);
+      
+      if (!combinedUsers[encounteredUserId]) {
+        combinedUsers[encounteredUserId] = {
+          id: encounteredUserId,
+          name: displayName,
+          distance: formatDistance(encounter.distance),
+          distanceValue: encounter.distance,
+          activity: activity || "Unknown",
+          avatar: getProfilePictureUrl(userData?.photoURL, userData?.avatar, displayName),
+          lat: encounter.lat,
+          lng: encounter.lng,
+          fitnessLevel: userData?.fitnessLevel,
+          pace: userData?.pace,
+          bio: userData?.bio || "",
+          photos: userData?.photos || [],
+          isCurrentlyNearby: false,
+          lastSeenAt: encounter.lastSeenAt,
+          encounterCount: encounter.count
+        };
+      }
+    });
+    
+    // Convert to array and sort: currently nearby first, then by most recent encounter
+    return Object.values(combinedUsers)
+      .sort((a, b) => {
+        // Currently nearby users first
+        if (a.isCurrentlyNearby && !b.isCurrentlyNearby) return -1;
+        if (!a.isCurrentlyNearby && b.isCurrentlyNearby) return 1;
+        // Then sort by most recent encounter
+        return (b.lastSeenAt || 0) - (a.lastSeenAt || 0);
+      });
+  }, [allNearbyUsers, encounteredUsers, encounteredUsersData, friends, currentLocation]);
 
   const handleSendRequest = async (userId: string, username: string) => {
     if (!user?.uid) return;
@@ -390,8 +521,10 @@ const Friends = () => {
                   const friend = friendsData[friendId];
                   if (!friend) return null;
 
-                  const friendName = friend.name || friend.username || "User";
-                  const friendAvatar = friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&size=150`;
+                  const username = friend.name || friend.username || null;
+                  const activity = friend.activity || null;
+                  const friendName = getDisplayName(username, friendId, activity);
+                  const friendAvatar = getProfilePictureUrl(friend.photoURL, friend.avatar, friendName);
                   const friendBio = friend.bio || "Fitness enthusiast";
                   const friendActivities = friend.activities || (friend.activity ? [friend.activity] : []);
 
@@ -500,7 +633,9 @@ const Friends = () => {
                     const user = requestsData[userId];
                     if (!user) return null;
 
-                    const userName = user.name || user.username || "User";
+                    const username = user.name || user.username || null;
+                    const activity = user.activity || null;
+                    const userName = getDisplayName(username, userId, activity);
                     const userAvatar = user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&size=150`;
                     const userBio = user.bio || "Fitness enthusiast";
 
@@ -548,7 +683,9 @@ const Friends = () => {
                     const user = requestsData[userId];
                     if (!user) return null;
 
-                    const userName = user.name || user.username || "User";
+                    const username = user.name || user.username || null;
+                    const activity = user.activity || null;
+                    const userName = getDisplayName(username, userId, activity);
                     const userAvatar = user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&size=150`;
 
                     return (
@@ -575,9 +712,9 @@ const Friends = () => {
             </div>
           </TabsContent>
 
-          {/* Discover Tab - Nearby Users During Workout */}
+          {/* Discover Tab - All Nearby Users You've Encountered */}
           <TabsContent value="discover" className="space-y-3">
-            {matchesLoading ? (
+            {(nearbyUsersLoading || encounteredUsersLoading) ? (
               <Card className="p-12 text-center">
                 <p className="text-muted-foreground">Loading nearby users...</p>
               </Card>
@@ -585,7 +722,9 @@ const Friends = () => {
               <Card className="p-12 text-center">
                 <p className="text-muted-foreground">No nearby users found</p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Start a workout to discover people nearby!
+                  {currentLocation 
+                    ? "No other users are currently active nearby. Start a workout to discover people!"
+                    : "Enable location sharing to discover nearby users"}
                 </p>
               </Card>
             ) : (
@@ -597,6 +736,12 @@ const Friends = () => {
                 .map((user, index) => {
                   const isRequestPending = requests.outgoing.includes(user.id);
                   const hasPoked = hasPokedUsers[user.id] || false;
+                  const isCurrentlyNearby = user.isCurrentlyNearby || false;
+                  
+                  // Calculate days since last seen
+                  const daysSinceLastSeen = user.lastSeenAt 
+                    ? Math.floor((Date.now() - user.lastSeenAt) / (1000 * 60 * 60 * 24))
+                    : null;
                   
                   return (
                     <motion.div
@@ -618,10 +763,22 @@ const Friends = () => {
                         })}
                       >
                         <div className="flex items-center gap-3 mb-3">
-                          <Avatar src={user.avatar} alt={user.name} sx={{ width: 56, height: 56 }} />
+                          <div className="relative">
+                            <Avatar src={user.avatar} alt={user.name} sx={{ width: 56, height: 56 }} />
+                            {isCurrentlyNearby && (
+                              <div className="absolute -top-1 -right-1 w-4 h-4 bg-success rounded-full border-2 border-card flex items-center justify-center">
+                                <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                              </div>
+                            )}
+                          </div>
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
                               <h3 className="font-bold">{user.name}</h3>
+                              {isCurrentlyNearby && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success font-medium">
+                                  Nearby
+                                </span>
+                              )}
                               <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">
                                 {user.distance}
                               </span>
@@ -636,6 +793,18 @@ const Friends = () => {
                                 </>
                               )}
                             </div>
+                            {!isCurrentlyNearby && daysSinceLastSeen !== null && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Last seen {daysSinceLastSeen === 0 
+                                  ? "today" 
+                                  : daysSinceLastSeen === 1 
+                                  ? "yesterday" 
+                                  : `${daysSinceLastSeen} days ago`}
+                                {user.encounterCount && user.encounterCount > 1 && (
+                                  <span> • {user.encounterCount} encounters</span>
+                                )}
+                              </p>
+                            )}
                           </div>
                         </div>
                         
@@ -733,7 +902,9 @@ const Friends = () => {
             const friend = friendsData[selectedUser];
             if (!friend) return null;
             
-            const friendName = friend.name || friend.username || "User";
+            const username = friend.name || friend.username || null;
+            const activity = friend.activity || null;
+            const friendName = getDisplayName(username, selectedUser, activity);
             const friendAvatar = friend.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&size=150`;
             const friendActivities = friend.activities || (friend.activity ? [friend.activity] : []);
             
@@ -799,7 +970,9 @@ const Friends = () => {
               onUnfriend={() => {
                 if (isFriendId) {
                   const friend = friendsData[selectedUser];
-                  const friendName = friend?.name || friend?.username || "User";
+                  const username = friend?.name || friend?.username || null;
+                  const activity = friend?.activity || null;
+                  const friendName = getDisplayName(username, selectedUser, activity);
                   handleUnfriend(selectedUser, friendName);
                 }
               }}

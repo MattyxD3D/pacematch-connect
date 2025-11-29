@@ -179,10 +179,6 @@ const WorkoutHistoryPage = () => {
                                     <span className="text-xs">{convertSpeed(workout.avgSpeed).unit}</span>
                                   </div>
                                 </div>
-                                <div>
-                                  <div className="text-xs text-muted-foreground">Calories</div>
-                                  <div className="font-semibold">{workout.calories}</div>
-                                </div>
                               </div>
 
                               {/* Nearby Users Indicator */}

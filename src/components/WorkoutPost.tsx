@@ -5,6 +5,8 @@ import { Avatar } from "@mui/material";
 import { WorkoutPost as FirebaseWorkoutPost, toggleKudos } from "@/services/feedService";
 import { getUserData } from "@/services/authService";
 import { ProfileView } from "@/pages/ProfileView";
+import { getDisplayName } from "@/utils/anonymousName";
+import { getProfilePictureUrl } from "@/utils/profilePicture";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -35,10 +37,13 @@ export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: 
       try {
         const userData = await getUserData(post.userId);
         if (userData) {
+          const username = userData.name || userData.username || null;
+          const activity = userData.activity || null;
+          const displayName = getDisplayName(username, post.userId, activity);
           setUser({
             id: post.userId,
-            username: userData.username || userData.name || "User",
-            avatar: userData.photoURL || `https://ui-avatars.com/api/?name=${userData.name || 'User'}`,
+            username: displayName,
+            avatar: getProfilePictureUrl(userData.photoURL, userData.avatar, displayName),
             bio: userData.bio,
             photos: userData.photos || []
           });
@@ -176,10 +181,6 @@ export const WorkoutPost = ({ post, onCommentClick, useMetric, currentUserId }: 
         <div className="text-center">
           <div className="text-lg font-bold">{convertSpeed(post.workout.avgSpeed)}</div>
           <div className="text-xs text-muted-foreground">Pace</div>
-        </div>
-        <div className="text-center">
-          <div className="text-lg font-bold">{post.workout.calories}</div>
-          <div className="text-xs text-muted-foreground">Cal</div>
         </div>
       </div>
 

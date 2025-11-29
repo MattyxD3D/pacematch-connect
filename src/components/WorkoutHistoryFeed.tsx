@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@mui/material";
 import { listenToAllUsersWorkouts, WorkoutWithUser } from "@/services/workoutService";
+import { getDisplayName } from "@/utils/anonymousName";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
@@ -148,6 +149,9 @@ export const WorkoutHistoryFeed = ({
         const activityColor = getActivityColor(item.workout.activity);
         const user = item.userData;
         const workout = item.workout;
+        const username = user?.name || user?.username || null;
+        const activity = user?.activity || workout.activity || null;
+        const displayName = getDisplayName(username, item.userId, activity);
 
         return (
           <motion.div
@@ -160,8 +164,8 @@ export const WorkoutHistoryFeed = ({
           >
             <div className="relative">
               <Avatar
-                src={user?.photoURL || `https://ui-avatars.com/api/?name=${user?.name || user?.username || 'User'}`}
-                alt={user?.name || user?.username || "User"}
+                src={user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}`}
+                alt={displayName}
                 sx={{ width: 56, height: 56 }}
               />
               <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 border-card flex items-center justify-center ${activityColor === "text-success" ? "bg-success/20" : activityColor === "text-primary" ? "bg-primary/20" : "bg-warning/20"}`}>
@@ -172,7 +176,7 @@ export const WorkoutHistoryFeed = ({
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-sm truncate">
-                  {user?.name || user?.username || "User"}
+                  {displayName}
                 </h3>
               </div>
 
@@ -199,14 +203,6 @@ export const WorkoutHistoryFeed = ({
                 <span className="text-muted-foreground">
                   {convertSpeed(workout.avgSpeed)}
                 </span>
-                {workout.calories > 0 && (
-                  <>
-                    <span className="text-muted-foreground">•</span>
-                    <span className="text-muted-foreground">
-                      {workout.calories} cal
-                    </span>
-                  </>
-                )}
               </div>
 
               {workout.location && (

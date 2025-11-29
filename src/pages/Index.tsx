@@ -9,6 +9,7 @@ import { listenToWorkoutPosts, WorkoutPost as FirebaseWorkoutPost } from "@/serv
 import { listenToUserFriends, listenToFriendRequests, sendFriendRequest, acceptFriendRequest, declineFriendRequest, removeFriend } from "@/services/friendService";
 import { listenToAllUsers, updateUserVisibility } from "@/services/locationService";
 import { getUserData, updateUserProfile } from "@/services/authService";
+import { reportUser, blockUser } from "@/services/userService";
 import { generateDummyWorkoutPosts, ENABLE_DUMMY_DATA } from "@/lib/dummyData";
 import { formatDistance, calculateDistance } from "@/utils/distance";
 import { WorkoutPost } from "@/components/WorkoutPost";
@@ -49,6 +50,7 @@ import { useNotificationContext } from "@/contexts/NotificationContext";
 import { QuickCheckInModal } from "@/components/QuickCheckInModal";
 import { listenToUserVenuePreferences, listenToUsersByVenues, VenueUser } from "@/services/venuePreferenceService";
 import { getAllVenues, getVenueById } from "@/services/venueService";
+import { getProfilePictureUrl } from "@/utils/profilePicture";
 
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 
@@ -68,6 +70,7 @@ const Index = () => {
   const [friendsData, setFriendsData] = useState<Record<string, any>>({});
   const [userVisibility, setUserVisibility] = useState(true);
   const [selectedWorkoutHistoryItem, setSelectedWorkoutHistoryItem] = useState<WorkoutWithUser | null>(null);
+  const [selectedActiveFriend, setSelectedActiveFriend] = useState<{ id: string; name?: string; username?: string; photoURL?: string; activity?: string } | null>(null);
   const [friendRequests, setFriendRequests] = useState<{ incoming: string[]; outgoing: string[] }>({ incoming: [], outgoing: [] });
   const [friendStatuses, setFriendStatuses] = useState<Record<string, { status: FriendStatus; cooldownUntil?: number }>>({});
   // TODO: Set to false in production - this is for preview/demo purposes
@@ -79,6 +82,9 @@ const Index = () => {
   const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
   const [usersByVenue, setUsersByVenue] = useState<Record<string, VenueUser[]>>({});
   const [userVenuePreferences, setUserVenuePreferences] = useState<{ venues: string[]; activities: string[] } | null>(null);
+  const [username, setUsername] = useState<string>("");
+  const [activeFriendData, setActiveFriendData] = useState<any>(null);
+  const [loadingActiveFriendData, setLoadingActiveFriendData] = useState(false);
   
   // Notification context
   const { unreadCount, notifications, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
@@ -145,6 +151,10 @@ const Index = () => {
           setUserVisibility(userData.visible !== false);
           setProfileVisible(userData.profileVisible !== false);
           setGeneralLocation(userData.generalLocation || "");
+          // Load username from Firebase (stored as 'name' field)
+          if (userData.name) {
+            setUsername(userData.name);
+          }
         }
       } catch (error) {
         console.error("Error fetching user settings:", error);
@@ -280,6 +290,30 @@ const Index = () => {
       }
     };
   }, [currentUser?.uid]);
+
+  // Fetch active friend data when selected
+  useEffect(() => {
+    if (!selectedActiveFriend?.id) {
+      setActiveFriendData(null);
+      return;
+    }
+
+    const fetchFriendData = async () => {
+      try {
+        setLoadingActiveFriendData(true);
+        const data = await getUserData(selectedActiveFriend.id);
+        setActiveFriendData(data);
+      } catch (error) {
+        console.error("Error fetching active friend data:", error);
+        toast.error("Failed to load friend profile");
+        setActiveFriendData(null);
+      } finally {
+        setLoadingActiveFriendData(false);
+      }
+    };
+
+    fetchFriendData();
+  }, [selectedActiveFriend?.id]);
 
   // Listen to users by venues when preferences are set
   useEffect(() => {
@@ -421,6 +455,46 @@ const Index = () => {
     }
   };
 
+  const handleReportUser = async (userId: string, reason: string, details?: string) => {
+    if (!currentUser?.uid) {
+      toast.error("Unable to report user");
+      return;
+    }
+
+    try {
+      await reportUser(currentUser.uid, userId, reason, details);
+      toast.success("User reported. Thank you for helping keep PaceMatch safe.");
+      setSelectedActiveFriend(null);
+      setActiveFriendData(null);
+      setSelectedWorkoutHistoryItem(null);
+    } catch (error: any) {
+      console.error("Error reporting user:", error);
+      toast.error(error.message || "Failed to report user. Please try again.");
+    }
+  };
+
+  const handleBlockUser = async (userId: string) => {
+    if (!currentUser?.uid) {
+      toast.error("Unable to block user");
+      return;
+    }
+
+    try {
+      await blockUser(currentUser.uid, userId);
+      toast.success("User has been blocked");
+      setSelectedActiveFriend(null);
+      setActiveFriendData(null);
+      setSelectedWorkoutHistoryItem(null);
+      // Refresh to remove blocked user from view
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (error: any) {
+      console.error("Error blocking user:", error);
+      toast.error(error.message || "Failed to block user. Please try again.");
+    }
+  };
+
   // Use Firebase workout posts
   const allPosts = workoutPosts;
 
@@ -447,32 +521,14 @@ const Index = () => {
     if (!currentUser?.uid) return;
 
     try {
+      // Only update visibility status, do NOT share exact GPS coordinates
       await updateUserVisibility(currentUser.uid, checked);
       setUserVisibility(checked);
       
-      // If user has a current location, update it immediately with new visibility
-      if (location?.lat && location?.lng) {
-        const { updateUserLocation } = await import("@/services/locationService");
-        await updateUserLocation(currentUser.uid, location.lat, location.lng, checked);
-      }
-      
-      toast.success(checked ? "Location sharing enabled" : "Location sharing disabled");
+      toast.success(checked ? "Active status enabled" : "Active status disabled");
     } catch (error) {
       console.error("Error updating visibility:", error);
-      toast.error("Failed to update visibility");
-    }
-  };
-
-  const handleProfileVisibilityToggle = async (checked: boolean) => {
-    if (!currentUser?.uid) return;
-
-    try {
-      await updateUserProfile(currentUser.uid, { profileVisible: checked });
-      setProfileVisible(checked);
-      toast.success(checked ? "Your profile is now discoverable" : "Your profile is now hidden from discovery");
-    } catch (error) {
-      console.error("Error updating profile visibility:", error);
-      toast.error("Failed to update profile visibility");
+      toast.error("Failed to update active status");
     }
   };
 
@@ -486,6 +542,41 @@ const Index = () => {
     } catch (error) {
       console.error("Error updating location:", error);
       toast.error("Failed to update location");
+    }
+  };
+
+  /**
+   * Opens Google Maps with venue location
+   * Validates coordinates and handles cross-platform support (iOS, Android, Web)
+   */
+  const openVenueInMaps = (venue: { lat: number; lng: number; name: string } | null) => {
+    if (!venue) {
+      toast.error("Venue location not available");
+      return;
+    }
+
+    // Validate coordinates
+    const { lat, lng } = venue;
+    if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) {
+      toast.error("Invalid venue coordinates");
+      return;
+    }
+
+    // Validate coordinate ranges
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      toast.error("Venue coordinates are out of valid range");
+      return;
+    }
+
+    // Universal Google Maps URL that works on iOS, Android, and Web
+    // This URL will open in native Google Maps app if installed, otherwise in browser
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    
+    try {
+      window.open(mapsUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error("Error opening maps:", error);
+      toast.error("Failed to open maps. Please try again.");
     }
   };
 
@@ -570,22 +661,13 @@ const Index = () => {
       })
       .map((friendId) => {
         const friend = friendsData[friendId];
-        let distanceKm: number | null = null;
         
-        // Calculate distance if both users have locations
-        if (location?.lat && location?.lng && friend.lat && friend.lng) {
-          distanceKm = calculateDistance(
-            location.lat,
-            location.lng,
-            friend.lat,
-            friend.lng
-          );
-        }
-        
+        // Do NOT calculate distance - we're showing active status only, not exact location
+        // Return friend data without distance information
         return {
           id: friendId,
           ...friend,
-          distanceKm,
+          distanceKm: null, // Explicitly set to null to ensure no distance is shown
         };
       })
       .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)); // Most recent first
@@ -607,11 +689,14 @@ const Index = () => {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-10 border-b border-border/50"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
       >
         <div className="max-w-4xl mx-auto px-6 py-5">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <h1 className="text-3xl font-bold mb-1">Welcome back, {userProfile?.username || "Athlete"}! 👋</h1>
+              <h1 className="text-3xl font-bold mb-1">Welcome back, {username || userProfile?.username || currentUser?.displayName || "Athlete"}! 👋</h1>
               <p className="text-sm text-muted-foreground">Stay connected with your fitness community</p>
             </div>
             {/* Notification Bell - Yellow when there are notifications */}
@@ -653,114 +738,15 @@ const Index = () => {
           </Card>
         </motion.div>
 
-        {/* Profile Discovery Section */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.11 }}
-        >
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-xl font-bold">Meet New People</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Share your profile and general location to connect with others
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {/* Profile Visibility Toggle */}
-              <div className="flex items-center justify-between p-4 border border-border rounded-lg">
-                <div className="flex items-center gap-3 flex-1">
-                  {profileVisible ? (
-                    <PersonAddIcon className="text-success" style={{ fontSize: 24 }} />
-                  ) : (
-                    <PersonAddIcon className="text-muted-foreground" style={{ fontSize: 24 }} />
-                  )}
-                  <div className="flex flex-col flex-1">
-                    <span className="text-sm font-medium">
-                      Make my profile discoverable
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {profileVisible 
-                        ? "Others can find and connect with you" 
-                        : "Your profile is hidden from discovery"}
-                    </span>
-                  </div>
-                </div>
-                <Switch
-                  checked={profileVisible}
-                  onCheckedChange={handleProfileVisibilityToggle}
-                />
-              </div>
-
-              {/* General Location Input */}
-              <div className="p-4 border border-border rounded-lg space-y-3">
-                <div className="flex items-center gap-2">
-                  <LocationOnIcon className="text-primary" style={{ fontSize: 20 }} />
-                  <span className="text-sm font-medium">General Location</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Share your general area (e.g., "Pasig", "UP Diliman") to help others find you
-                </p>
-                {isEditingLocation ? (
-                  <div className="flex gap-2">
-                    <Input
-                      value={generalLocation}
-                      onChange={(e) => setGeneralLocation(e.target.value)}
-                      placeholder="e.g., Pasig, UP Diliman, Makati"
-                      className="flex-1"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          handleLocationSave();
-                        } else if (e.key === "Escape") {
-                          setIsEditingLocation(false);
-                        }
-                      }}
-                    />
-                    <Button
-                      size="sm"
-                      onClick={handleLocationSave}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIsEditingLocation(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <div>
-                    <span className="text-sm text-muted-foreground">
-                      {generalLocation || "No location set"}
-                    </span>
-                  </div>
-                )}
-                
-                {/* Quick Check-in Button */}
-                <Button
-                  variant="outline"
-                  onClick={() => setShowQuickCheckIn(true)}
-                  className="w-full h-10 border-border bg-background hover:bg-secondary mt-3"
-                >
-                  <LocationOnIcon style={{ fontSize: 18 }} className="mr-2" />
-                  <span className="text-sm font-semibold">Add location</span>
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </motion.div>
-
-        {/* Friends Section with Tabs */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.12 }}
-        >
+        {/* Conditional rendering: Show Friends first if user has venues, otherwise show Meet New People first */}
+        {userVenuePreferences && userVenuePreferences.venues.length > 0 ? (
+          <>
+            {/* Friends Section with Tabs - Show first if user has venues */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.11 }}
+            >
           <Card className="p-6">
             <Tabs value={activeFriendsTab} onValueChange={(value) => setActiveFriendsTab(value as "active" | "history")} className="w-full">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -779,10 +765,10 @@ const Index = () => {
                         )}
                         <div className="flex flex-col">
                           <span className="text-xs sm:text-sm font-medium">
-                            Share your workout location with friends
+                            Show your active status to friends
                           </span>
                           <span className="text-xs sm:text-sm text-muted-foreground">
-                            You will be visible when you start working out
+                            Friends will see you're working out, but not your exact location
                           </span>
                         </div>
                       </div>
@@ -814,14 +800,6 @@ const Index = () => {
                       Add location
                     </Button>
                   </div>
-                ) : !profileVisible ? (
-                  <div className="text-center py-8">
-                    <PersonAddIcon className="mx-auto text-muted-foreground" style={{ fontSize: 48 }} />
-                    <p className="text-muted-foreground mt-4">Enable profile discovery to see active users</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Turn on "Make my profile discoverable" above to see other users who have added locations
-                    </p>
-                  </div>
                 ) : (
                   <div className="space-y-6">
                     {userVenuePreferences.venues.map((venueId) => {
@@ -837,7 +815,7 @@ const Index = () => {
 
                       return (
                         <div key={venueId} className="space-y-3">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <LocationOnIcon className="text-primary" style={{ fontSize: 20 }} />
                             <h3 className="font-semibold text-base">
                               {venue.name}
@@ -847,6 +825,17 @@ const Index = () => {
                                 ({venueUsers.length})
                               </span>
                             )}
+                            {/* View on Maps button - hidden for now */}
+                            {/* <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => openVenueInMaps(venue)}
+                              className="h-8 px-2 text-xs ml-auto"
+                              title="View on Google Maps"
+                            >
+                              <MapIcon style={{ fontSize: 16 }} className="mr-1" />
+                              <span className="hidden sm:inline">View</span>
+                            </Button> */}
                           </div>
                           
                           {venueUsers.length === 0 ? (
@@ -855,7 +844,7 @@ const Index = () => {
                                 No active users in this venue yet
                               </p>
                               <p className="text-xs text-muted-foreground mt-2">
-                                Other users who have enabled "Make my profile discoverable" and added this venue will appear here
+                                Other users who have added this venue will appear here
                               </p>
                             </div>
                           ) : (
@@ -882,6 +871,13 @@ const Index = () => {
                                 console.log(`[Index] User ${venueUser.userId} avatar:`, venueUser.avatar);
                                 console.log(`[Index] User ${venueUser.userId} username:`, venueUser.username);
                                 
+                                // Get profile picture using utility function
+                                const profilePictureUrl = getProfilePictureUrl(
+                                  null, // photoURL not available in VenueUser, it's in avatar field
+                                  venueUser.avatar,
+                                  venueUser.username
+                                );
+                                
                                 return (
                                   <motion.div
                                     key={venueUser.userId || `user-${index}`}
@@ -895,18 +891,13 @@ const Index = () => {
                                     }}
                                   >
                                     <Avatar
-                                      src={venueUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(venueUser.username || 'User')}`}
+                                      src={profilePictureUrl}
                                       alt={venueUser.username || 'User'}
                                       sx={{ width: 40, height: 40 }}
                                     />
                                     <p className="text-xs font-medium mt-1.5 text-center truncate w-full max-w-[70px]">
-                                      {isCurrentUser ? "You" : venueUser.username || 'User'}
+                                      {venueUser.username || 'User'}
                                     </p>
-                                    {isCurrentUser && (
-                                      <span className="text-[10px] uppercase tracking-wide text-primary font-semibold">
-                                        Your profile
-                                      </span>
-                                    )}
                                     {activities.length > 0 && (
                                       <div className="flex gap-0.5 mt-1">
                                         {activities.map((activity) => {
@@ -969,21 +960,48 @@ const Index = () => {
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: index * 0.05 }}
-                          className="flex items-center gap-4 p-4 border border-border rounded-lg hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={() => navigate("/map")}
+                          className="flex items-center gap-4 p-4 border border-border rounded-lg hover:shadow-md transition-shadow"
                         >
-                          <div className="relative">
-                            <Avatar
-                              src={friend.photoURL || `https://ui-avatars.com/api/?name=${friend.name || friend.username || 'Friend'}`}
-                              alt={friend.name || friend.username}
-                              sx={{ width: 56, height: 56 }}
-                            />
+                          <div 
+                            className="relative cursor-pointer"
+                            onClick={() => setSelectedActiveFriend({
+                              id: friend.id,
+                              name: friend.name,
+                              username: friend.username,
+                              photoURL: friend.photoURL,
+                              activity: friend.activity
+                            })}
+                          >
+                            {(() => {
+                              // Get profile picture using utility function
+                              const profilePictureUrl = getProfilePictureUrl(
+                                friend.photoURL,
+                                friend.avatar,
+                                friend.name || friend.username
+                              );
+                              return (
+                                <Avatar
+                                  src={profilePictureUrl}
+                                  alt={friend.name || friend.username}
+                                  sx={{ width: 56, height: 56 }}
+                                />
+                              );
+                            })()}
                             <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-success rounded-full border-2 border-card flex items-center justify-center">
                               <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
                             </div>
                           </div>
                           
-                          <div className="flex-1 min-w-0">
+                          <div 
+                            className="flex-1 min-w-0 cursor-pointer"
+                            onClick={() => setSelectedActiveFriend({
+                              id: friend.id,
+                              name: friend.name,
+                              username: friend.username,
+                              photoURL: friend.photoURL,
+                              activity: friend.activity
+                            })}
+                          >
                             <div className="flex items-center gap-2">
                               <h3 className="font-semibold text-sm truncate">
                                 {friend.name || friend.username || "Friend"}
@@ -1006,27 +1024,41 @@ const Index = () => {
                             </div>
                           </div>
 
-                          <div className="text-right">
+                          <div className="flex items-center gap-2">
                             <Button
-                              variant="ghost"
+                              variant="outline"
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                // Navigate to map and pass friend location as state
-                                navigate("/map", {
-                                  state: {
-                                    focusFriend: {
-                                      id: friend.id,
-                                      lat: friend.lat,
-                                      lng: friend.lng,
-                                      name: friend.name || friend.username,
-                                      activity: friend.activity,
-                                    }
+                                setSelectedActiveFriend({
+                                  id: friend.id,
+                                  name: friend.name,
+                                  username: friend.username,
+                                  photoURL: friend.photoURL,
+                                  activity: friend.activity
+                                });
+                              }}
+                              className="flex items-center gap-1"
+                            >
+                              <PersonIcon style={{ fontSize: 16 }} />
+                              <span className="hidden sm:inline">Profile</span>
+                            </Button>
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate("/messages", {
+                                  state: { 
+                                    userId: friend.id, 
+                                    userName: friend.name || friend.username 
                                   }
                                 });
                               }}
+                              className="flex items-center gap-1"
                             >
-                              View
+                              <ChatIcon style={{ fontSize: 16 }} />
+                              <span className="hidden sm:inline">Message</span>
                             </Button>
                           </div>
                         </motion.div>
@@ -1038,6 +1070,403 @@ const Index = () => {
             </Tabs>
           </Card>
         </motion.div>
+
+            {/* Profile Discovery Section - Show below if user has venues */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.12 }}
+            >
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-xl font-bold">Meet New People</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Add your general location to connect with others
+                    </p>
+                  </div>
+                </div>
+
+                {/* General Location Input */}
+                <div className="p-4 border border-border rounded-lg space-y-3">
+                  <div className="flex items-center gap-2">
+                    <LocationOnIcon className="text-primary" style={{ fontSize: 20 }} />
+                    <span className="text-sm font-medium">General Location</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Select venues where you work out to connect with others nearby
+                  </p>
+                  <div>
+                    <span className="text-sm text-muted-foreground">
+                      {generalLocation || "No location set"}
+                    </span>
+                  </div>
+                  
+                  {/* Quick Check-in Button */}
+                  <Button
+                    variant="default"
+                    onClick={() => setShowQuickCheckIn(true)}
+                    className="w-full h-11 border-primary bg-primary hover:bg-primary/90 text-primary-foreground mt-3 shadow-sm"
+                  >
+                    <LocationOnIcon style={{ fontSize: 18 }} className="mr-2" />
+                    <span className="text-sm font-semibold">Add venues</span>
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          </>
+        ) : (
+          <>
+            {/* Profile Discovery Section - Show first if user has no venues */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.11 }}
+            >
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-xl font-bold">Meet New People</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Add your general location to connect with others
+                    </p>
+                  </div>
+                </div>
+
+                {/* General Location Input */}
+                <div className="p-4 border border-border rounded-lg space-y-3">
+                  <div className="flex items-center gap-2">
+                    <LocationOnIcon className="text-primary" style={{ fontSize: 20 }} />
+                    <span className="text-sm font-medium">General Location</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Select venues where you work out to connect with others nearby
+                  </p>
+                  <div>
+                    <span className="text-sm text-muted-foreground">
+                      {generalLocation || "No location set"}
+                    </span>
+                  </div>
+                  
+                  {/* Quick Check-in Button */}
+                  <Button
+                    variant="default"
+                    onClick={() => setShowQuickCheckIn(true)}
+                    className="w-full h-11 border-primary bg-primary hover:bg-primary/90 text-primary-foreground mt-3 shadow-sm"
+                  >
+                    <LocationOnIcon style={{ fontSize: 18 }} className="mr-2" />
+                    <span className="text-sm font-semibold">Add venues</span>
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+
+            {/* Friends Section with Tabs - Show below if user has no venues */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.12 }}
+            >
+              <Card className="p-6">
+                <Tabs value={activeFriendsTab} onValueChange={(value) => setActiveFriendsTab(value as "active" | "history")} className="w-full">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                    <TabsList className="grid grid-cols-2 w-full sm:w-auto flex-shrink-0">
+                      <TabsTrigger value="history" className="text-xs sm:text-sm">Active Users</TabsTrigger>
+                      <TabsTrigger value="active" className="text-xs sm:text-sm">Active Friends</TabsTrigger>
+                    </TabsList>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {activeFriendsTab === "active" && (
+                        <div className="flex items-center justify-between gap-3 w-full">
+                          <div className="flex items-center gap-3">
+                            {userVisibility ? (
+                              <LocationOnIcon className="text-success" style={{ fontSize: 20 }} />
+                            ) : (
+                              <LocationOffIcon className="text-muted-foreground" style={{ fontSize: 20 }} />
+                            )}
+                            <div className="flex flex-col">
+                              <span className="text-xs sm:text-sm font-medium">
+                                Show your active status to friends
+                              </span>
+                              <span className="text-xs sm:text-sm text-muted-foreground">
+                                Friends will see you're working out, but not your exact location
+                              </span>
+                            </div>
+                          </div>
+                          <Switch
+                            checked={userVisibility}
+                            onCheckedChange={handleVisibilityToggle}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <TabsContent value="history" className="mt-0">
+                    {!currentUser?.uid ? (
+                      <div className="text-center py-8">
+                        <p className="text-muted-foreground">Please sign in to view active users</p>
+                      </div>
+                    ) : !userVenuePreferences || userVenuePreferences.venues.length === 0 ? (
+                      <div className="text-center py-8">
+                        <LocationOnIcon className="mx-auto text-muted-foreground" style={{ fontSize: 48 }} />
+                        <p className="text-muted-foreground mt-4">No venues selected</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Use the "Add location" button to select venues and discover people nearby
+                        </p>
+                        <Button
+                          onClick={() => setShowQuickCheckIn(true)}
+                          className="mt-4"
+                        >
+                          Add location
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {userVenuePreferences.venues.map((venueId) => {
+                          const venue = getVenueById(venueId);
+                          const venueUsers = usersByVenue[venueId] || [];
+                          
+                          if (!venue) return null;
+
+                          return (
+                            <div key={venueId} className="space-y-3">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <LocationOnIcon className="text-primary" style={{ fontSize: 20 }} />
+                                <h3 className="font-semibold text-base">
+                                  {venue.name}
+                                </h3>
+                                {venueUsers.length > 0 && (
+                                  <span className="text-sm text-muted-foreground">
+                                    ({venueUsers.length})
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {venueUsers.length === 0 ? (
+                                <div className="text-center py-6 border border-border rounded-lg bg-muted/30">
+                                  <p className="text-sm text-muted-foreground">
+                                    No active users in this venue yet
+                                  </p>
+                                  <p className="text-xs text-muted-foreground mt-2">
+                                    Other users who have added this venue will appear here
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                                  {venueUsers.map((venueUser, index) => {
+                                    const activityIcons = {
+                                      running: DirectionsRunIcon,
+                                      cycling: DirectionsBikeIcon,
+                                      walking: DirectionsWalkIcon
+                                    };
+                                    
+                                    const activities = Array.isArray(venueUser.activities) 
+                                      ? venueUser.activities 
+                                      : venueUser.activities 
+                                        ? [venueUser.activities] 
+                                        : [];
+                                    
+                                    const isCurrentUser =
+                                      String(venueUser.userId || "") === String(currentUser?.uid || "");
+                                    
+                                    // Get profile picture using utility function
+                                    const profilePictureUrl = getProfilePictureUrl(
+                                      null, // photoURL not available in VenueUser, it's in avatar field
+                                      venueUser.avatar,
+                                      venueUser.username
+                                    );
+                                    
+                                    return (
+                                      <motion.div
+                                        key={venueUser.userId || `user-${index}`}
+                                        initial={{ opacity: 0, scale: 0.9 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        className={`flex flex-col items-center p-2 border border-border rounded-lg bg-card hover:bg-secondary transition-colors min-w-[80px] flex-shrink-0 cursor-pointer ${
+                                          isCurrentUser ? "ring-2 ring-primary/60" : ""
+                                        }`}
+                                      >
+                                        <Avatar
+                                          src={profilePictureUrl}
+                                          alt={venueUser.username || 'User'}
+                                          sx={{ width: 40, height: 40 }}
+                                        />
+                                        <p className="text-xs font-medium mt-1.5 text-center truncate w-full max-w-[70px]">
+                                          {venueUser.username || 'User'}
+                                        </p>
+                                        {activities.length > 0 && (
+                                          <div className="flex gap-0.5 mt-1">
+                                            {activities.map((activity) => {
+                                              const ActivityIcon = activityIcons[activity as keyof typeof activityIcons];
+                                              if (!ActivityIcon) return null;
+                                              return (
+                                                <ActivityIcon
+                                                  key={activity}
+                                                  className={
+                                                    activity === "running" ? "text-success" :
+                                                    activity === "cycling" ? "text-primary" :
+                                                    "text-warning"
+                                                  }
+                                                  style={{ fontSize: 14 }}
+                                                />
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </motion.div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="active" className="mt-0">
+                    {showDummyData && activeFriends.length > 0 && activeFriends[0]?.id?.startsWith('dummy-') && (
+                      <div className="mb-3">
+                        <span className="text-xs px-2 py-0.5 bg-warning/20 text-warning rounded-full">
+                          Demo Data
+                        </span>
+                      </div>
+                    )}
+                    {activeFriends.length === 0 ? (
+                      <div className="text-center py-8">
+                        <FitnessCenterIcon className="mx-auto text-muted-foreground" style={{ fontSize: 48 }} />
+                        <p className="text-muted-foreground mt-4">No active friends right now</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Friends will appear here when they start a workout
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {activeFriends.map((friend, index) => {
+                          const activityIcon = 
+                            friend.activity === "running" ? DirectionsRunIcon :
+                            friend.activity === "cycling" ? DirectionsBikeIcon :
+                            DirectionsWalkIcon;
+                          const ActivityIcon = activityIcon;
+                          
+                          return (
+                            <motion.div
+                              key={friend.id}
+                              initial={{ opacity: 0, x: -20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: index * 0.05 }}
+                              className="flex items-center gap-4 p-4 border border-border rounded-lg hover:shadow-md transition-shadow"
+                            >
+                              <div 
+                                className="relative cursor-pointer"
+                                onClick={() => setSelectedActiveFriend({
+                                  id: friend.id,
+                                  name: friend.name,
+                                  username: friend.username,
+                                  photoURL: friend.photoURL,
+                                  activity: friend.activity
+                                })}
+                              >
+                                {(() => {
+                                  // Get profile picture using utility function
+                                  const profilePictureUrl = getProfilePictureUrl(
+                                    friend.photoURL,
+                                    friend.avatar,
+                                    friend.name || friend.username
+                                  );
+                                  return (
+                                    <Avatar
+                                      src={profilePictureUrl}
+                                      alt={friend.name || friend.username}
+                                      sx={{ width: 56, height: 56 }}
+                                    />
+                                  );
+                                })()}
+                                <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-success rounded-full border-2 border-card flex items-center justify-center">
+                                  <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                                </div>
+                              </div>
+                              
+                              <div 
+                                className="flex-1 min-w-0 cursor-pointer"
+                                onClick={() => setSelectedActiveFriend({
+                                  id: friend.id,
+                                  name: friend.name,
+                                  username: friend.username,
+                                  photoURL: friend.photoURL,
+                                  activity: friend.activity
+                                })}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-semibold text-sm truncate">
+                                    {friend.name || friend.username || "Friend"}
+                                  </h3>
+                                  <FitnessCenterIcon className="text-success" style={{ fontSize: 16 }} />
+                                </div>
+                                
+                                <div className="flex items-center gap-2 mt-1">
+                                  <ActivityIcon 
+                                    className={
+                                      friend.activity === "running" ? "text-success" :
+                                      friend.activity === "cycling" ? "text-primary" :
+                                      "text-warning"
+                                    }
+                                    style={{ fontSize: 16 }}
+                                  />
+                                  <span className="text-xs text-muted-foreground capitalize">
+                                    {friend.activity || "working out"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedActiveFriend({
+                                      id: friend.id,
+                                      name: friend.name,
+                                      username: friend.username,
+                                      photoURL: friend.photoURL,
+                                      activity: friend.activity
+                                    });
+                                  }}
+                                  className="flex items-center gap-1"
+                                >
+                                  <PersonIcon style={{ fontSize: 16 }} />
+                                  <span className="hidden sm:inline">Profile</span>
+                                </Button>
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate("/messages", {
+                                      state: { 
+                                        userId: friend.id, 
+                                        userName: friend.name || friend.username 
+                                      }
+                                    });
+                                  }}
+                                  className="flex items-center gap-1"
+                                >
+                                  <ChatIcon style={{ fontSize: 16 }} />
+                                  <span className="hidden sm:inline">Message</span>
+                                </Button>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </Card>
+            </motion.div>
+          </>
+        )}
 
         {/* Top Matches Section */}
         {topMatches.length > 0 && (
@@ -1075,11 +1504,21 @@ const Index = () => {
                     >
                       <div className="flex items-start gap-3">
                         <div className="relative">
-                          <img
-                            src={user.photoURL || `https://ui-avatars.com/api/?name=${user.name || 'User'}`}
-                            alt={user.name}
-                            className="w-12 h-12 rounded-full border-2 border-primary"
-                          />
+                          {(() => {
+                            // Get profile picture using utility function
+                            const profilePictureUrl = getProfilePictureUrl(
+                              user.photoURL,
+                              user.avatar,
+                              user.name
+                            );
+                            return (
+                              <img
+                                src={profilePictureUrl}
+                                alt={user.name}
+                                className="w-12 h-12 rounded-full border-2 border-primary"
+                              />
+                            );
+                          })()}
                           <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
                             score >= 0.8 ? "bg-success text-white" :
                             score >= 0.6 ? "bg-primary text-white" :
@@ -1167,6 +1606,52 @@ const Index = () => {
         currentAvatar={currentUser?.photoURL || ""}
       />
 
+      {/* Profile View Modal for Active Friends */}
+      <AnimatePresence>
+        {selectedActiveFriend && activeFriendData && (() => {
+          const friendId = selectedActiveFriend.id;
+          const friendStatus = getFriendStatus(friendId);
+          const activityLabel = selectedActiveFriend.activity 
+            ? selectedActiveFriend.activity.charAt(0).toUpperCase() + selectedActiveFriend.activity.slice(1)
+            : "Active";
+          
+          return (
+            <ProfileView
+              user={{
+                id: friendId,
+                name: activeFriendData?.name || activeFriendData?.username || selectedActiveFriend.name || selectedActiveFriend.username || "Friend",
+                distance: "Active now", // Since we're not sharing exact location
+                activity: activityLabel,
+                avatar: activeFriendData?.photoURL || selectedActiveFriend.photoURL || `https://ui-avatars.com/api/?name=${activeFriendData?.name || activeFriendData?.username || selectedActiveFriend.name || selectedActiveFriend.username || 'Friend'}`,
+                photos: activeFriendData?.photos || [],
+                bio: activeFriendData?.bio,
+              }}
+              friendStatus={friendStatus}
+              onClose={() => {
+                setSelectedActiveFriend(null);
+                setActiveFriendData(null);
+              }}
+              onSendMessage={() => {
+                setSelectedActiveFriend(null);
+                setActiveFriendData(null);
+                navigate("/messages", {
+                  state: { 
+                    userId: friendId, 
+                    userName: activeFriendData?.name || activeFriendData?.username || selectedActiveFriend.name || selectedActiveFriend.username 
+                  }
+                });
+              }}
+              onAddFriend={() => handleAddFriend(friendId)}
+              onAcceptFriend={() => handleAcceptFriend(friendId)}
+              onDeclineFriend={() => handleDeclineFriend(friendId)}
+              onUnfriend={() => handleUnfriend(friendId)}
+              onReport={(reason, details) => handleReportUser(friendId, reason, details)}
+              onBlock={() => handleBlockUser(friendId)}
+            />
+          );
+        })()}
+      </AnimatePresence>
+
       {/* Profile View Modal for Workout History */}
       <AnimatePresence>
         {selectedWorkoutHistoryItem && (() => {
@@ -1213,6 +1698,8 @@ const Index = () => {
               onAcceptFriend={() => handleAcceptFriend(userId)}
               onDeclineFriend={() => handleDeclineFriend(userId)}
               onUnfriend={() => handleUnfriend(userId)}
+              onReport={(reason, details) => handleReportUser(userId, reason, details)}
+              onBlock={() => handleBlockUser(userId)}
             />
           );
         })()}

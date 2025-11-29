@@ -23,6 +23,8 @@ import {
 import { markMessagesAsRead, deleteConversation } from "@/services/messageService";
 import { toast } from "sonner";
 import { useNotificationContext } from "@/contexts/NotificationContext";
+import { getDisplayName } from "@/utils/anonymousName";
+import { getProfilePictureUrl } from "@/utils/profilePicture";
 
 interface Conversation {
   conversationId: string;
@@ -32,6 +34,7 @@ interface Conversation {
   unreadCount: number;
   userName?: string;
   avatar?: string;
+  activity?: string | null;
 }
 
 const Messages = () => {
@@ -64,17 +67,23 @@ const Messages = () => {
               const userSnapshot = await get(userRef);
               const userData = userSnapshot.exists() ? userSnapshot.val() : null;
               
+              const username = userData?.name || null;
+              const activity = userData?.activity || null;
+              const displayName = getDisplayName(username, conv.otherUserId, activity);
               return {
                 ...conv,
-                userName: userData?.name || "Unknown User",
-                avatar: userData?.photoURL || "",
+                userName: displayName,
+                avatar: getProfilePictureUrl(userData?.photoURL, userData?.avatar, displayName),
+                activity: activity,
               };
             } catch (error) {
               console.error(`Error fetching user ${conv.otherUserId}:`, error);
+              const fallbackName = getDisplayName(null, conv.otherUserId, null);
               return {
                 ...conv,
-                userName: "Unknown User",
-                avatar: "",
+                userName: fallbackName,
+                avatar: getProfilePictureUrl(null, null, fallbackName),
+                activity: null,
               };
             }
           })
@@ -145,16 +154,20 @@ const Messages = () => {
             const userSnapshot = await get(userRef);
             const userData = userSnapshot.exists() ? userSnapshot.val() : null;
             
+            const username = userData?.name || null;
+            const activity = userData?.activity || null;
             return {
               ...conv,
-              userName: userData?.name || "Unknown User",
+              userName: getDisplayName(username, conv.otherUserId, activity),
               avatar: userData?.photoURL || "",
+              activity: activity,
             };
           } catch (error) {
             return {
               ...conv,
-              userName: "Unknown User",
+              userName: getDisplayName(null, conv.otherUserId, null),
               avatar: "",
+              activity: null,
             };
           }
         })
@@ -183,16 +196,20 @@ const Messages = () => {
             const userSnapshot = await get(userRef);
             const userData = userSnapshot.exists() ? userSnapshot.val() : null;
             
+            const username = userData?.name || null;
+            const activity = userData?.activity || null;
             return {
               ...conv,
-              userName: userData?.name || "Unknown User",
+              userName: getDisplayName(username, conv.otherUserId, activity),
               avatar: userData?.photoURL || "",
+              activity: activity,
             };
           } catch (error) {
             return {
               ...conv,
-              userName: "Unknown User",
+              userName: getDisplayName(null, conv.otherUserId, null),
               avatar: "",
+              activity: null,
             };
           }
         })
@@ -351,7 +368,12 @@ const Messages = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-background border-b border-border">
+      <div 
+        className="sticky top-0 z-10 bg-background border-b border-border"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
+      >
         <div className="flex items-center justify-between p-4">
           {!showSearch ? (
             <>

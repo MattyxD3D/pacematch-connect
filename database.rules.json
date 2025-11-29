@@ -1,20 +1,29 @@
 {
   "rules": {
+    "adminEmails": {
+      ".read": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+      ".write": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+      "$email": {
+        ".read": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+        ".write": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true"
+      }
+    },
     "users": {
       ".read": "auth != null",
       "$uid": {
-        ".read": "$uid === auth.uid || (auth != null && (data.child('visible').val() == true || !data.child('visible').exists()) && data.child('timestamp').exists() && (now - data.child('timestamp').val()) <= 180000)",
-        ".write": "$uid === auth.uid",
-        ".validate": "newData.hasChildren(['name', 'email']) || !newData.exists()"
+        ".read": "$uid === auth.uid || (auth != null && (data.child('visible').val() == true || !data.child('visible').exists()) && data.child('timestamp').exists() && (now - data.child('timestamp').val()) <= 180000) || (auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)",
+        ".write": "$uid === auth.uid || (auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)",
+        ".validate": "newData.hasChildren(['name', 'email']) || !newData.exists() || (auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)"
       }
     },
     "workouts": {
+      ".read": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
       "$userId": {
         ".read": "$userId === auth.uid || auth != null",
-        ".write": "$userId === auth.uid",
+        ".write": "$userId === auth.uid || (auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)",
         "$workoutId": {
           ".read": "$userId === auth.uid || auth != null",
-          ".write": "$userId === auth.uid"
+          ".write": "$userId === auth.uid || (auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)"
         }
       }
     },
@@ -84,7 +93,7 @@
       ".write": "auth != null",
       "$eventId": {
         ".read": "auth != null",
-        ".write": "auth != null && (data.child('hostId').val() === auth.uid || newData.child('hostId').val() === auth.uid)",
+        ".write": "auth != null && (data.child('hostId').val() === auth.uid || newData.child('hostId').val() === auth.uid || root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)",
         "participants": {
           ".read": "auth != null",
           ".write": "auth != null"
@@ -180,13 +189,46 @@
         }
       }
     },
+    "encounteredUsers": {
+      "$userId": {
+        ".read": "$userId === auth.uid",
+        ".write": "$userId === auth.uid",
+        "$encounteredUserId": {
+          ".read": "$userId === auth.uid",
+          ".write": "$userId === auth.uid",
+          ".validate": "!newData.exists() || (newData.hasChildren(['userId', 'encounteredAt', 'lastSeenAt', 'distance', 'lat', 'lng', 'count']) && newData.child('userId').val() === $encounteredUserId && newData.child('encounteredAt').val() > 0 && newData.child('lastSeenAt').val() > 0 && newData.child('distance').val() >= 0 && newData.child('count').val() > 0)"
+        }
+      }
+    },
     "reports": {
-      ".read": false,
+      ".read": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
       ".write": "auth != null",
       "$reportId": {
-        ".read": false,
-        ".write": "auth != null && newData.child('reporterId').val() === auth.uid",
-        ".validate": "newData.hasChildren(['reporterId', 'reportedUserId', 'reason', 'reportedAt']) && newData.child('reporterId').val() === auth.uid && newData.child('reportedUserId').val() != null && newData.child('reason').val() != null && newData.child('reportedAt').val() > 0"
+        ".read": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+        ".write": "auth != null && (newData.child('reporterId').val() === auth.uid || root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)",
+        ".validate": "(newData.hasChildren(['reporterId', 'reportedUserId', 'reason', 'reportedAt']) && newData.child('reporterId').val() === auth.uid && newData.child('reportedUserId').val() != null && newData.child('reason').val() != null && newData.child('reportedAt').val() > 0) || (auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)"
+      }
+    },
+    "systemSettings": {
+      ".read": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+      ".write": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true"
+    },
+    "venueRequests": {
+      ".read": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+      ".write": "auth != null",
+      "$requestId": {
+        ".read": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+        ".write": "auth != null && (newData.child('userId').val() === auth.uid || root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)",
+        ".validate": "(newData.hasChildren(['id', 'userId', 'venueName', 'location', 'status', 'createdAt']) && newData.child('userId').val() === auth.uid && newData.child('status').val() === 'pending') || (auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)"
+      }
+    },
+    "venues": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+      "$venueId": {
+        ".read": "auth != null",
+        ".write": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+        ".validate": "newData.hasChildren(['id', 'name', 'description', 'lat', 'lng', 'radius', 'category', 'city'])"
       }
     }
   }

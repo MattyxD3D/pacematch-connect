@@ -11,8 +11,11 @@ import PersonRemoveIcon from "@mui/icons-material/PersonRemove";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
+import BlockIcon from "@mui/icons-material/Block";
+import ReportIcon from "@mui/icons-material/Report";
 import { Card } from "@/components/ui/card";
 import { useState } from "react";
+import { ReportUserModal } from "@/components/ReportUserModal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +50,8 @@ interface ProfileViewProps {
   onPoke?: () => void;
   hasPoked?: boolean;
   isWorkoutActive?: boolean;
+  onReport?: (reason: string, details?: string) => Promise<void>;
+  onBlock?: () => Promise<void>;
 }
 
 export const ProfileView = ({
@@ -62,9 +67,13 @@ export const ProfileView = ({
   onPoke,
   hasPoked = false,
   isWorkoutActive = false,
+  onReport,
+  onBlock,
 }: ProfileViewProps) => {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showUnfriendDialog, setShowUnfriendDialog] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showBlockDialog, setShowBlockDialog] = useState(false);
   
   const displayPhotos = user.photos && user.photos.length > 0 
     ? user.photos 
@@ -298,6 +307,30 @@ export const ProfileView = ({
                   Unfriend
                 </Button>
               )}
+
+              {/* Report and Block Buttons */}
+              <div className="flex gap-2 pt-2 border-t border-border">
+                {onReport && (
+                  <Button
+                    onClick={() => setShowReportModal(true)}
+                    variant="outline"
+                    className="flex-1 h-11"
+                  >
+                    <ReportIcon className="mr-2" style={{ fontSize: 18 }} />
+                    Report
+                  </Button>
+                )}
+                {onBlock && (
+                  <Button
+                    onClick={() => setShowBlockDialog(true)}
+                    variant="outline"
+                    className="flex-1 h-11 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                  >
+                    <BlockIcon className="mr-2" style={{ fontSize: 18 }} />
+                    Block
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </Card>
@@ -329,6 +362,44 @@ export const ProfileView = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Report User Modal */}
+      {onReport && (
+        <ReportUserModal
+          open={showReportModal}
+          onOpenChange={setShowReportModal}
+          userName={user.name}
+          onReport={onReport}
+        />
+      )}
+
+      {/* Block User Confirmation Dialog */}
+      {onBlock && (
+        <AlertDialog open={showBlockDialog} onOpenChange={setShowBlockDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Block {user.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will prevent {user.name} from sending you messages and you won't see them on the map. You can unblock them later from settings.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={async () => {
+                  if (onBlock) {
+                    await onBlock();
+                  }
+                  setShowBlockDialog(false);
+                }}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                Block
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </motion.div>
   );
 };

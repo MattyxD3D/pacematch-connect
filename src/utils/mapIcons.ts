@@ -10,6 +10,8 @@ interface IconOptions {
   borderColor?: string;
   shadow?: boolean;
   fitnessLevel?: FitnessLevel | string;
+  opacity?: number; // Opacity for the entire icon (0.0 to 1.0)
+  activity?: "running" | "cycling" | "walking"; // Activity type for badge
 }
 
 const DEFAULT_SIZE = 48;
@@ -17,6 +19,8 @@ const DEFAULT_BORDER_WIDTH = 3;
 const DEFAULT_BORDER_COLOR = '#ffffff';
 const CACHE_SIZE = 100; // Limit cache size to prevent memory issues
 const GLOW_SIZE = 8; // Additional pixels for glow effect around the avatar
+const ACTIVITY_BADGE_SIZE = 18; // Size of activity icon badge
+const ACTIVITY_BADGE_OFFSET = 4; // Offset from edge for badge positioning
 
 // Cache for generated icons to avoid regenerating the same icon
 const iconCache = new Map<string, string>();
@@ -53,6 +57,159 @@ function getFitnessLevelColors(fitnessLevel?: FitnessLevel | string): { glowColo
 }
 
 /**
+ * Gets the color for an activity type
+ * @param activity - Activity type
+ * @returns Color hex code
+ */
+function getActivityColor(activity?: "running" | "cycling" | "walking"): string {
+  switch (activity) {
+    case "running":
+      return "#22c55e"; // Green
+    case "cycling":
+      return "#3b82f6"; // Blue
+    case "walking":
+      return "#eab308"; // Yellow
+    default:
+      return "#6b7280"; // Gray
+  }
+}
+
+/**
+ * Draws an activity icon badge in the top-right corner
+ * @param ctx - Canvas context
+ * @param canvasSize - Total canvas size
+ * @param avatarOffset - Offset for avatar positioning
+ * @param activity - Activity type
+ */
+function drawActivityBadge(
+  ctx: CanvasRenderingContext2D,
+  canvasSize: number,
+  avatarOffset: number,
+  activity: "running" | "cycling" | "walking"
+): void {
+  const badgeSize = ACTIVITY_BADGE_SIZE;
+  const badgeX = canvasSize - avatarOffset - ACTIVITY_BADGE_OFFSET - badgeSize / 2;
+  const badgeY = avatarOffset + ACTIVITY_BADGE_OFFSET + badgeSize / 2;
+  const badgeRadius = badgeSize / 2;
+  const activityColor = getActivityColor(activity);
+
+  // Draw white background circle
+  ctx.beginPath();
+  ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.strokeStyle = activityColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Draw activity icon based on type
+  ctx.fillStyle = activityColor;
+  ctx.strokeStyle = activityColor;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  switch (activity) {
+    case "running":
+      // Draw running person icon (simplified)
+      drawRunningIcon(ctx, badgeX, badgeY, badgeRadius * 0.7);
+      break;
+    case "cycling":
+      // Draw bike icon (simplified)
+      drawBikeIcon(ctx, badgeX, badgeY, badgeRadius * 0.7);
+      break;
+    case "walking":
+      // Draw walking person icon (simplified)
+      drawWalkingIcon(ctx, badgeX, badgeY, badgeRadius * 0.7);
+      break;
+  }
+}
+
+/**
+ * Draws a simplified running person icon
+ */
+function drawRunningIcon(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+  // Head (circle)
+  ctx.beginPath();
+  ctx.arc(x, y - size * 0.4, size * 0.15, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Body (line)
+  ctx.beginPath();
+  ctx.moveTo(x, y - size * 0.25);
+  ctx.lineTo(x, y + size * 0.2);
+  ctx.stroke();
+
+  // Arms (running motion)
+  ctx.beginPath();
+  ctx.moveTo(x, y - size * 0.1);
+  ctx.lineTo(x - size * 0.25, y + size * 0.1);
+  ctx.moveTo(x, y - size * 0.1);
+  ctx.lineTo(x + size * 0.25, y - size * 0.1);
+  ctx.stroke();
+
+  // Legs (running motion)
+  ctx.beginPath();
+  ctx.moveTo(x, y + size * 0.2);
+  ctx.lineTo(x - size * 0.2, y + size * 0.5);
+  ctx.moveTo(x, y + size * 0.2);
+  ctx.lineTo(x + size * 0.2, y + size * 0.5);
+  ctx.stroke();
+}
+
+/**
+ * Draws a simplified bike icon
+ */
+function drawBikeIcon(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+  // Wheels (two circles)
+  ctx.beginPath();
+  ctx.arc(x - size * 0.2, y, size * 0.25, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x + size * 0.2, y, size * 0.25, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Frame (triangle-like shape)
+  ctx.beginPath();
+  ctx.moveTo(x - size * 0.2, y);
+  ctx.lineTo(x, y - size * 0.3);
+  ctx.lineTo(x + size * 0.2, y);
+  ctx.stroke();
+}
+
+/**
+ * Draws a simplified walking person icon
+ */
+function drawWalkingIcon(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+  // Head (circle)
+  ctx.beginPath();
+  ctx.arc(x, y - size * 0.4, size * 0.15, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Body (line)
+  ctx.beginPath();
+  ctx.moveTo(x, y - size * 0.25);
+  ctx.lineTo(x, y + size * 0.2);
+  ctx.stroke();
+
+  // Arms (relaxed)
+  ctx.beginPath();
+  ctx.moveTo(x, y - size * 0.1);
+  ctx.lineTo(x - size * 0.2, y);
+  ctx.moveTo(x, y - size * 0.1);
+  ctx.lineTo(x + size * 0.2, y);
+  ctx.stroke();
+
+  // Legs (walking)
+  ctx.beginPath();
+  ctx.moveTo(x, y + size * 0.2);
+  ctx.lineTo(x - size * 0.15, y + size * 0.45);
+  ctx.moveTo(x, y + size * 0.2);
+  ctx.lineTo(x + size * 0.15, y + size * 0.45);
+  ctx.stroke();
+}
+
+/**
  * Creates a circular profile picture icon for Google Maps markers
  * This is an async function that loads the image and returns a data URL
  * @param photoURL - URL of the profile picture, or null/undefined for fallback
@@ -70,20 +227,24 @@ export async function createProfileIconAsync(
     borderWidth = DEFAULT_BORDER_WIDTH,
     borderColor = DEFAULT_BORDER_COLOR,
     shadow = true,
-    fitnessLevel
+    fitnessLevel,
+    opacity = 1.0,
+    activity
   } = options;
 
   // Get fitness level colors
   const fitnessColors = getFitnessLevelColors(fitnessLevel);
   const hasGlow = !!fitnessColors;
   
-  // Increase canvas size to accommodate glow
-  const canvasSize = hasGlow ? size + GLOW_SIZE * 2 : size;
+  // Increase canvas size to accommodate glow and activity badge
+  const badgeSpace = activity ? ACTIVITY_BADGE_SIZE + ACTIVITY_BADGE_OFFSET * 2 : 0;
+  const canvasSize = hasGlow ? size + GLOW_SIZE * 2 + badgeSpace : size + badgeSpace;
   const avatarOffset = hasGlow ? GLOW_SIZE : 0;
-  const avatarCenter = canvasSize / 2;
+  // Avatar center is in the middle of the avatar area (not including badge space)
+  const avatarCenter = avatarOffset + size / 2;
 
-  // Create cache key
-  const cacheKey = `${photoURL || name}-${size}-${borderWidth}-${borderColor}-${shadow}-${fitnessLevel || 'none'}`;
+  // Create cache key including opacity and activity
+  const cacheKey = `${photoURL || name}-${size}-${borderWidth}-${borderColor}-${shadow}-${fitnessLevel || 'none'}-${opacity}-${activity || 'none'}`;
   
   // Check cache first
   if (iconCache.has(cacheKey)) {
@@ -104,6 +265,11 @@ export async function createProfileIconAsync(
   if (!ctx) {
     // Fallback to default icon if canvas is not supported
     return 'https://maps.google.com/mapfiles/ms/icons/red-dot.png';
+  }
+
+  // Apply opacity to entire icon if specified
+  if (opacity < 1.0) {
+    ctx.globalAlpha = opacity;
   }
 
   // Draw fitness level glow if available (drawn first, behind everything)
@@ -177,6 +343,21 @@ export async function createProfileIconAsync(
   }
 
   ctx.restore();
+
+  // Reset globalAlpha before drawing activity badge (badge should be fully opaque)
+  if (opacity < 1.0) {
+    ctx.globalAlpha = 1.0;
+  }
+
+  // Draw activity badge in top-right corner if activity is specified
+  if (activity) {
+    drawActivityBadge(ctx, canvasSize, avatarOffset, activity);
+  }
+
+  // Reset globalAlpha if it was changed
+  if (opacity < 1.0) {
+    ctx.globalAlpha = 1.0;
+  }
   
   const dataUrl = canvas.toDataURL('image/png');
   iconCache.set(cacheKey, dataUrl);
@@ -196,20 +377,24 @@ export function createProfileIcon(
     size = DEFAULT_SIZE,
     borderWidth = DEFAULT_BORDER_WIDTH,
     borderColor = DEFAULT_BORDER_COLOR,
-    fitnessLevel
+    fitnessLevel,
+    opacity = 1.0,
+    activity
   } = options;
 
   // Get fitness level colors
   const fitnessColors = getFitnessLevelColors(fitnessLevel);
   const hasGlow = !!fitnessColors;
   
-  // Increase canvas size to accommodate glow
-  const canvasSize = hasGlow ? size + GLOW_SIZE * 2 : size;
+  // Increase canvas size to accommodate glow and activity badge
+  const badgeSpace = activity ? ACTIVITY_BADGE_SIZE + ACTIVITY_BADGE_OFFSET * 2 : 0;
+  const canvasSize = hasGlow ? size + GLOW_SIZE * 2 + badgeSpace : size + badgeSpace;
   const avatarOffset = hasGlow ? GLOW_SIZE : 0;
-  const avatarCenter = canvasSize / 2;
+  // Avatar center is in the middle of the avatar area (not including badge space)
+  const avatarCenter = avatarOffset + size / 2;
 
-  // Create cache key
-  const cacheKey = `${photoURL || name}-${size}-${borderWidth}-${borderColor}-${fitnessLevel || 'none'}`;
+  // Create cache key including opacity and activity
+  const cacheKey = `${photoURL || name}-${size}-${borderWidth}-${borderColor}-${fitnessLevel || 'none'}-${opacity}-${activity || 'none'}`;
   
   // Check cache first
   if (iconCache.has(cacheKey)) {
@@ -223,6 +408,11 @@ export function createProfileIcon(
   
   if (!ctx) {
     return 'https://maps.google.com/mapfiles/ms/icons/red-dot.png';
+  }
+
+  // Apply opacity to entire icon if specified
+  if (opacity < 1.0) {
+    ctx.globalAlpha = opacity;
   }
 
   // Draw fitness level glow if available (drawn first, behind everything)
@@ -265,6 +455,11 @@ export function createProfileIcon(
         // Clear and redraw everything
         ctx.clearRect(0, 0, canvasSize, canvasSize);
         
+        // Apply opacity to entire icon if specified
+        if (opacity < 1.0) {
+          ctx.globalAlpha = opacity;
+        }
+        
         // Redraw glow
         if (hasGlow && fitnessColors) {
           drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, fitnessColors.glowColor);
@@ -300,6 +495,22 @@ export function createProfileIcon(
         }
         
         ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+        ctx.restore();
+
+        // Reset globalAlpha before drawing activity badge (badge should be fully opaque)
+        if (opacity < 1.0) {
+          ctx.globalAlpha = 1.0;
+        }
+
+        // Draw activity badge in top-right corner if activity is specified
+        if (activity) {
+          drawActivityBadge(ctx, canvasSize, avatarOffset, activity);
+        }
+
+        // Reset globalAlpha if it was changed
+        if (opacity < 1.0) {
+          ctx.globalAlpha = 1.0;
+        }
         
         // Update cache with final image
         const dataUrl = canvas.toDataURL('image/png');
@@ -315,6 +526,21 @@ export function createProfileIcon(
   }
 
   ctx.restore();
+
+  // Reset globalAlpha before drawing activity badge (badge should be fully opaque)
+  if (opacity < 1.0) {
+    ctx.globalAlpha = 1.0;
+  }
+
+  // Draw activity badge in top-right corner if activity is specified
+  if (activity) {
+    drawActivityBadge(ctx, canvasSize, avatarOffset, activity);
+  }
+
+  // Reset globalAlpha if it was changed
+  if (opacity < 1.0) {
+    ctx.globalAlpha = 1.0;
+  }
   
   const dataUrl = canvas.toDataURL('image/png');
   iconCache.set(cacheKey, dataUrl);
@@ -461,17 +687,22 @@ function drawFallbackAvatar(
  * @param name - User's name for fallback
  * @param size - Size of the icon in pixels
  * @param fitnessLevel - User's fitness level for glow effect
+ * @param opacity - Opacity for the entire icon (0.0 to 1.0)
+ * @param activity - Activity type for badge display
  * @returns Google Maps icon configuration object
  */
 export function createMapIcon(
   photoURL: string | null | undefined,
   name: string = 'User',
   size: number = DEFAULT_SIZE,
-  fitnessLevel?: FitnessLevel | string
+  fitnessLevel?: FitnessLevel | string,
+  opacity?: number,
+  activity?: "running" | "cycling" | "walking"
 ): google.maps.Icon {
   const hasGlow = !!getFitnessLevelColors(fitnessLevel);
-  const actualSize = hasGlow ? size + GLOW_SIZE * 2 : size;
-  const iconUrl = createProfileIcon(photoURL, name, { size, fitnessLevel });
+  const badgeSpace = activity ? ACTIVITY_BADGE_SIZE + ACTIVITY_BADGE_OFFSET * 2 : 0;
+  const actualSize = hasGlow ? size + GLOW_SIZE * 2 + badgeSpace : size + badgeSpace;
+  const iconUrl = createProfileIcon(photoURL, name, { size, fitnessLevel, opacity, activity });
   
   return {
     url: iconUrl,

@@ -12,7 +12,10 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
-  updateProfile
+  confirmPasswordReset,
+  ActionCodeSettings,
+  updateProfile,
+  fetchSignInMethodsForEmail
 } from "firebase/auth";
 import { ref, set, get, onValue } from "firebase/database";
 import { auth, googleProvider, database } from "./firebase";
@@ -20,6 +23,93 @@ import { clearUserLocation } from "./locationService";
 
 // Export ConfirmationResult type for use in components
 export type { ConfirmationResult };
+
+/**
+ * Validate Firebase configuration
+ * Checks if Firebase is properly initialized and configured
+ * @returns {Promise<{valid: boolean, errors: string[], warnings: string[]}>} Validation result
+ */
+export const validateFirebaseConfig = async (): Promise<{
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}> => {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  try {
+    // Check if auth is initialized
+    if (!auth) {
+      errors.push("Firebase Auth is not initialized");
+      return { valid: false, errors, warnings };
+    }
+
+    // Check if app exists
+    if (!auth.app) {
+      errors.push("Firebase App is not initialized");
+      return { valid: false, errors, warnings };
+    }
+
+    // Get Firebase config from the app
+    const app = auth.app;
+    const config = app.options;
+
+    // Validate required config fields
+    if (!config.apiKey) {
+      errors.push("Firebase API Key is missing");
+    }
+    if (!config.authDomain) {
+      errors.push("Firebase Auth Domain is missing");
+    }
+    if (!config.projectId) {
+      errors.push("Firebase Project ID is missing");
+    }
+    if (!config.appId) {
+      errors.push("Firebase App ID is missing");
+    }
+
+    // Expected values based on project
+    const expectedProjectId = "pacematch-gps";
+    if (config.projectId !== expectedProjectId) {
+      warnings.push(`Project ID is "${config.projectId}", expected "${expectedProjectId}"`);
+    }
+
+    const expectedAuthDomain = "pacematch-gps.firebaseapp.com";
+    if (config.authDomain !== expectedAuthDomain) {
+      warnings.push(`Auth Domain is "${config.authDomain}", expected "${expectedAuthDomain}"`);
+    }
+
+    // Try to get current user (test auth is working)
+    try {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        console.log("✅ Firebase Auth is working - user is authenticated:", currentUser.uid);
+      } else {
+        console.log("ℹ️ Firebase Auth is initialized but no user is currently signed in");
+      }
+    } catch (authError: any) {
+      warnings.push(`Could not check auth state: ${authError.message}`);
+    }
+
+    // Log configuration for debugging (without sensitive data)
+    console.log("🔍 Firebase Configuration Check:", {
+      projectId: config.projectId,
+      authDomain: config.authDomain,
+      hasApiKey: !!config.apiKey,
+      hasAppId: !!config.appId,
+      databaseURL: config.databaseURL || "Not configured",
+    });
+
+  } catch (error: any) {
+    errors.push(`Firebase validation error: ${error.message}`);
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
+};
 
 /**
  * Check if running in a mobile device or Capacitor
@@ -385,6 +475,32 @@ export const onAuthStateChange = (callback: (user: User | null) => void) => {
 };
 
 /**
+ * Check if an email address is already associated with an existing account
+ * @param {string} email - Email address to check
+ * @returns {Promise<boolean>} True if email exists, false otherwise
+ */
+export const checkEmailExists = async (email: string): Promise<boolean> => {
+  try {
+    // Validate email format first
+    if (!email || !email.includes('@')) {
+      return false;
+    }
+
+    // Fetch sign-in methods for the email
+    // If any methods are returned, the email is already registered
+    const signInMethods = await fetchSignInMethodsForEmail(auth, email);
+    
+    // If signInMethods array has any items, email is already in use
+    return signInMethods.length > 0;
+  } catch (error: any) {
+    // If there's an error (e.g., invalid email format), return false
+    // The actual signup will catch and handle the error properly
+    console.error("Error checking email existence:", error);
+    return false;
+  }
+};
+
+/**
  * Sign up with email and password
  * @param {string} email - User email address
  * @param {string} password - User password
@@ -527,8 +643,14 @@ export const resetPassword = async (email: string): Promise<void> => {
 
     console.log("📧 Sending password reset email to:", email);
     
-    // Send password reset email
-    await sendPasswordResetEmail(auth, email);
+    // Configure action code settings to redirect to our app's password reset page
+    const actionCodeSettings: ActionCodeSettings = {
+      url: `${window.location.origin}/reset-password`,
+      handleCodeInApp: false, // Open link in browser, not app
+    };
+    
+    // Send password reset email with custom redirect URL
+    await sendPasswordResetEmail(auth, email, actionCodeSettings);
     
     console.log("✅ Password reset email sent successfully");
   } catch (error: any) {
@@ -540,6 +662,49 @@ export const resetPassword = async (email: string): Promise<void> => {
     }
     if (error.code === 'auth/invalid-email') {
       throw new Error("Invalid email address. Please check and try again.");
+    }
+    
+    throw error;
+  }
+};
+
+/**
+ * Confirm password reset with the code from email link
+ * @param {string} oobCode - The action code from the email link
+ * @param {string} newPassword - The new password to set
+ * @returns {Promise<void>}
+ */
+export const confirmPasswordResetCode = async (
+  oobCode: string,
+  newPassword: string
+): Promise<void> => {
+  try {
+    // Validate inputs
+    if (!oobCode) {
+      throw new Error("Invalid reset code. Please use the link from your email.");
+    }
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error("Password must be at least 6 characters long.");
+    }
+
+    console.log("🔐 Confirming password reset...");
+    
+    // Confirm the password reset using Firebase's confirmPasswordReset
+    await confirmPasswordReset(auth, oobCode, newPassword);
+    
+    console.log("✅ Password reset successful!");
+  } catch (error: any) {
+    console.error("❌ Error confirming password reset:", error);
+    
+    // Handle specific errors
+    if (error.code === 'auth/invalid-action-code') {
+      throw new Error("Invalid or expired reset link. Please request a new password reset email.");
+    }
+    if (error.code === 'auth/expired-action-code') {
+      throw new Error("This reset link has expired. Please request a new password reset email.");
+    }
+    if (error.code === 'auth/weak-password') {
+      throw new Error("Password is too weak. Please choose a stronger password.");
     }
     
     throw error;
@@ -877,10 +1042,15 @@ export const sendPhoneVerificationCode = async (phoneNumber: string): Promise<Co
     if (confirmationResult?.verificationId) {
       console.log("✅ Verification ID received - SMS should be on its way!");
       console.log("📱 Check your phone for the SMS code");
-      console.log("⚠️ Note: If SMS doesn't arrive, check:");
-      console.log("   1. Firebase Console > Authentication > Settings > Phone numbers for testing");
-      console.log("   2. Firebase Console > Usage & Billing > Check SMS quota");
-      console.log("   3. Phone number format is correct (+63XXXXXXXXXX)");
+      console.log("⚠️ Production Mode Check:");
+      console.log("   If SMS doesn't arrive, you may be in TEST MODE.");
+      console.log("   To enable PRODUCTION MODE (send SMS to any number):");
+      console.log("   1. Go to Firebase Console > Authentication > Settings > Phone numbers for testing");
+      console.log("   2. REMOVE all test phone numbers from the list");
+      console.log("   3. Production mode activates automatically when test list is empty (requires billing enabled)");
+      console.log("   4. Verify billing is enabled: Firebase Console > Usage & Billing");
+      console.log("   5. Ensure phone number format is correct (+63XXXXXXXXXX)");
+      console.log("   📖 See PHONE_AUTH_PRODUCTION_SETUP.md for detailed instructions");
     }
     
     return confirmationResult;
@@ -901,6 +1071,48 @@ export const sendPhoneVerificationCode = async (phoneNumber: string): Promise<Co
     }
     
     // Handle specific errors with more detailed messages
+    if (error.code === 'auth/billing-not-enabled') {
+      throw new Error("Billing error detected. Please verify: 1) You're on the Blaze plan (not just Spark), 2) Phone Authentication is enabled in Firebase Console > Authentication > Sign-in method, 3) Wait 5-15 minutes for billing changes to propagate, then refresh the page. If billing is already enabled, try refreshing the app and waiting a few minutes.");
+    }
+    if (error.code === 'auth/invalid-app-credential') {
+      // Run validation to get more diagnostic info
+      console.error("🔍 Running Firebase configuration validation...");
+      const validation = await validateFirebaseConfig();
+      
+      let errorMessage = "Invalid app credentials detected. ";
+      
+      // Add specific validation errors if found
+      if (validation.errors.length > 0) {
+        errorMessage += `\n\n❌ Configuration Errors:\n${validation.errors.map(e => `• ${e}`).join('\n')}`;
+      }
+      
+      if (validation.warnings.length > 0) {
+        errorMessage += `\n\n⚠️ Configuration Warnings:\n${validation.warnings.map(w => `• ${w}`).join('\n')}`;
+      }
+      
+      // If validation passed, configuration looks correct - likely billing propagation delay
+      if (validation.valid && validation.errors.length === 0) {
+        errorMessage += "\n\n✅ Configuration validation passed - your Firebase config looks correct.";
+        errorMessage += "\n\n⏰ Most Likely Cause: Billing/Blaze plan activation delay";
+        errorMessage += "\n\nThis error usually means billing changes are still propagating. Even if everything is enabled, it can take 5-15 minutes (sometimes up to 30 minutes) for all Firebase services to recognize billing activation.";
+        errorMessage += "\n\n🔍 What to Check:\n";
+        errorMessage += "• When did you enable billing? If less than 15-30 minutes ago, wait longer\n";
+        errorMessage += "• Go to Firebase Console > Usage & Billing and verify Blaze plan shows as 'Active'\n";
+        errorMessage += "• Check Firebase Console > Authentication > Sign-in method > Phone - ensure it's enabled\n";
+        errorMessage += "• Try again in 5-10 minutes after waiting\n";
+      }
+      
+      errorMessage += "\n\n📋 Complete Troubleshooting Steps:\n";
+      errorMessage += "1. ⏱️ Wait 15-30 minutes if you just enabled billing/Blaze plan (activation takes time)\n";
+      errorMessage += "2. ✅ Verify Phone Authentication: Firebase Console > Authentication > Sign-in method > Phone > Enable\n";
+      errorMessage += "3. 🔍 Verify Firebase config: Firebase Console > Project Settings > Your apps > Check config matches code\n";
+      errorMessage += "4. 💳 Verify billing status: Firebase Console > Usage & Billing > Blaze plan must show 'Active'\n";
+      errorMessage += "5. 📱 Check authorized domains: Firebase Console > Authentication > Settings > Authorized domains\n";
+      errorMessage += "6. 🔄 Hard refresh: Clear cache (Cmd+Shift+R or Ctrl+Shift+R) and try again\n";
+      errorMessage += "\n📖 For detailed steps, see: INVALID_APP_CREDENTIALS_TROUBLESHOOTING.md\n";
+      
+      throw new Error(errorMessage);
+    }
     if (error.code === 'auth/invalid-phone-number') {
       throw new Error("Invalid phone number. Please check the format (include country code, e.g., +1234567890).");
     }
@@ -908,7 +1120,7 @@ export const sendPhoneVerificationCode = async (phoneNumber: string): Promise<Co
       throw new Error("Too many requests. Please wait a few minutes before trying again.");
     }
     if (error.code === 'auth/quota-exceeded') {
-      throw new Error("SMS quota exceeded. Please try again later.");
+      throw new Error("SMS quota exceeded. Please try again later or check Firebase Console > Usage & Billing for quota limits.");
     }
     if (error.code === 'auth/operation-not-allowed') {
       throw new Error("Phone authentication is not enabled. Please enable Phone Authentication in Firebase Console under Authentication > Sign-in method.");
@@ -928,6 +1140,11 @@ export const sendPhoneVerificationCode = async (phoneNumber: string): Promise<Co
       if (errorMsg.includes('app verification') || errorMsg.includes('app check')) {
         throw new Error("App verification failed. Please check Firebase Console configuration.");
       }
+      // Check if this might be a test mode restriction (SMS not arriving)
+      const errorMsgLower = error.message?.toLowerCase() || '';
+      if (!errorMsgLower.includes('recaptcha') && !errorMsgLower.includes('captcha')) {
+        throw new Error(`Authentication error: ${error.message || 'Unknown error'}. If SMS code was sent but not received, you may be in TEST MODE. To enable PRODUCTION MODE, remove all test phone numbers from Firebase Console > Authentication > Settings > Phone numbers for testing.`);
+      }
       throw new Error(`Authentication error: ${error.message || 'Unknown error'}. Please check that Phone Authentication is enabled in Firebase Console and try again.`);
     }
     
@@ -945,7 +1162,8 @@ export const sendPhoneVerificationCode = async (phoneNumber: string): Promise<Co
       throw new Error(`Failed to send verification code: ${error.message}`);
     }
     
-    throw new Error("Failed to send verification code. Please check that Phone Authentication is enabled in Firebase Console and try again.");
+    // Generic error message with production mode guidance
+    throw new Error("Failed to send verification code. If SMS code was sent but not received, check Firebase Console > Authentication > Settings > Phone numbers for testing - remove all test numbers to enable PRODUCTION MODE. Ensure Phone Authentication is enabled and billing is configured.");
   }
 };
 

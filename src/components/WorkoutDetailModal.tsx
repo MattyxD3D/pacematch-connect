@@ -11,7 +11,6 @@ import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import TimerIcon from "@mui/icons-material/Timer";
 import SpeedIcon from "@mui/icons-material/Speed";
-import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import PeopleIcon from "@mui/icons-material/People";
 import CloseIcon from "@mui/icons-material/Close";
@@ -256,14 +255,6 @@ export const WorkoutDetailModal = ({
                     {speedData.value}
                   </div>
                   <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">{speedData.unit}</div>
-                </CardContent>
-              </Card>
-
-              <Card className={`${config.bgClass} border-2 ${config.borderClass}`}>
-                <CardContent className="p-3 sm:p-4 text-center">
-                  <LocalFireDepartmentIcon className="text-warning" sx={{ fontSize: { xs: 20, sm: 28 } }} />
-                  <div className="text-lg sm:text-2xl font-bold mt-1 sm:mt-2">{workout.calories}</div>
-                  <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">Calories</div>
                 </CardContent>
               </Card>
             </div>

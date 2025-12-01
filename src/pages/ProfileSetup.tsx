@@ -12,7 +12,6 @@ import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import InfoIcon from "@mui/icons-material/Info";
 import PersonIcon from "@mui/icons-material/Person";
 import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -267,7 +266,12 @@ const ProfileSetup = () => {
     }
   };
 
-  const activities = [
+  const activities: Array<{
+    id: "running" | "cycling" | "walking";
+    label: string;
+    icon: typeof DirectionsRunIcon;
+    color: string;
+  }> = [
     { id: "running", label: "Running", icon: DirectionsRunIcon, color: "success" },
     { id: "cycling", label: "Cycling", icon: DirectionsBikeIcon, color: "primary" },
     { id: "walking", label: "Walking", icon: DirectionsWalkIcon, color: "warning" },

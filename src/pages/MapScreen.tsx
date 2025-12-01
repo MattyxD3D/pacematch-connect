@@ -13,20 +13,8 @@ import {
 import {
   Box,
   Button as MuiButton,
-  Fab,
-  Paper,
   Typography,
-  CircularProgress,
-  Alert,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemText,
-  ListItemAvatar,
-  Avatar as MuiAvatar,
-  IconButton,
-  Divider,
-  Slider
+  CircularProgress
 } from "@mui/material";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -60,42 +48,26 @@ import { preventMarkerOverlap, preventMarkerOverlapSimple, AdjustedPosition } fr
 import { getProfilePictureUrl } from "@/utils/profilePicture";
 import { updateUserProfile } from "@/services/authService";
 import FilterListIcon from "@mui/icons-material/FilterList";
-import { NearbyUsersAccordion } from "@/components/NearbyUsersAccordion";
-import { updateUserVisibility, listenToAllUsers, clearUserLocation } from "@/services/locationService";
+import { updateUserVisibility, listenToAllUsers } from "@/services/locationService";
 import { saveWorkout } from "@/services/workoutService";
 import { listenToFriendRequests, removeFriend, sendFriendRequest } from "@/services/friendService";
 import { getUserConversations, markMessagesAsRead } from "@/services/messageService";
-import { listenToPokes, sendPoke, acceptPoke, dismissPoke, hasPokedUser } from "@/services/pokeService";
+import { listenToPokes, sendPoke, acceptPoke, dismissPoke } from "@/services/pokeService";
 import { reportUser, blockUser } from "@/services/userService";
 import { PokeModal } from "@/components/PokeModal";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
 import PauseIcon from "@mui/icons-material/Pause";
-import ExploreIcon from "@mui/icons-material/Explore";
-import SettingsIcon from "@mui/icons-material/Settings";
 import PeopleIcon from "@mui/icons-material/People";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
-import GroupIcon from "@mui/icons-material/Group";
 import NotificationsIcon from "@mui/icons-material/Notifications";
-import PublicIcon from "@mui/icons-material/Public";
-import TimerIcon from "@mui/icons-material/Timer";
-import SpeedIcon from "@mui/icons-material/Speed";
-import FavoriteIcon from "@mui/icons-material/Favorite";
 import {
-  Settings as SettingsIconMui,
   MyLocation as MyLocationMui,
   CenterFocusStrong,
-  People as PeopleMui,
   Close,
-  PlayArrow,
-  Stop,
-  DirectionsRun as DirectionsRunMui,
-  ViewInAr,
   ViewComfy,
-  Navigation,
-  Explore as ExploreMui,
   ZoomIn,
   ZoomOut
 } from "@mui/icons-material";
@@ -200,7 +172,7 @@ const MapScreen = () => {
   const navigate = useNavigate();
   const routerLocation = useRouterLocation();
   const { user } = useAuth();
-  const { userProfile, hasActivity, useMetric, addWorkout, setUserProfile } = useUser();
+  const { userProfile, useMetric, addWorkout, setUserProfile } = useUser();
   const { addNotification, unreadMessageCount, unreadFriendRequestCount, notifications, unreadCount, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
   
   // Get focusFriend from navigation state (when coming from Index page)
@@ -211,7 +183,6 @@ const MapScreen = () => {
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapZoom, setMapZoom] = useState(15);
   const [mapRef, setMapRef] = useState<MapRef | null>(null);
-  const [showUserList, setShowUserList] = useState(false);
   const [locationHistory, setLocationHistory] = useState<LocationHistoryPoint[]>([]);
   const [userTrails, setUserTrails] = useState<UserTrails>({});
   const [mapTilt, setMapTilt] = useState(0);
@@ -373,7 +344,7 @@ const MapScreen = () => {
         }
       );
     }
-  }, [user?.uid, mapRef, isNativePlatform()]);
+  }, [user?.uid, mapRef]);
 
   // Request location permissions when MapScreen loads (on native platforms)
   useEffect(() => {
@@ -1606,7 +1577,7 @@ const MapScreen = () => {
     }
   };
 
-  const handleConfirmStop = async () => {
+  const handleConfirmStop = () => {
     // Force-stop GPS watcher immediately
     stopTracking();
     // Stop activity - show summary
@@ -1616,17 +1587,6 @@ const MapScreen = () => {
     setPausedDueToInactivity(false); // Reset inactivity state
     setShowStopConfirmation(false);
     setShowInactivityWarning(false); // Close warning if open
-    
-    // Clear user location from Firebase when workout stops
-    // This ensures other users see that you've stopped working out immediately
-    if (user?.uid) {
-      try {
-        await clearUserLocation(user.uid);
-        console.log("✅ Location cleared from Firebase - other users will no longer see you");
-      } catch (error) {
-        console.error("❌ Error clearing location:", error);
-      }
-    }
     
     // Log real Firebase users detected during workout
     if (workoutNearbyUsers.length > 0) {
@@ -1813,7 +1773,7 @@ const MapScreen = () => {
         type: "workout_complete",
         fromUserId: user.uid, // Use fromUserId for Firebase format
         fromUserName: "Workout Complete",
-        fromUserAvatar: userProfile?.photoURL || "",
+        fromUserAvatar: user?.photoURL || "",
         message: `Great job! You completed ${distance.toFixed(2)} km of ${selectedActivity}`,
         workoutId: workoutId,
         linkType: "workout" // Link to workout when tapped
@@ -2412,7 +2372,6 @@ const MapScreen = () => {
         setMapCenter(newCenter);
         setMapZoom(16);
       }, 100);
-      setShowUserList(false);
       setSelectedUser(userData);
     }
   };

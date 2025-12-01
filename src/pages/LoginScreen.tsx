@@ -16,7 +16,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import PersonIcon from "@mui/icons-material/Person";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import PeopleIcon from "@mui/icons-material/People";
-import { sendPhoneVerificationCode, verifyPhoneCode, ConfirmationResult, signUpWithEmail, signInWithEmail, resetPassword, checkEmailExists } from "@/services/authService";
+import { sendPhoneVerificationCode, verifyPhoneCode, ConfirmationResult, signUpWithEmail, signInWithEmail, resetPassword, checkEmailExists, sendEmailVerificationCode, verifyEmailCode, signInWithGoogle, handleRedirectResult } from "@/services/authService";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { auth } from "@/services/firebase";
@@ -35,6 +35,10 @@ const LoginScreen = () => {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [resetEmail, setResetEmail] = useState("");
+  // Email verification state
+  const [emailVerificationCode, setEmailVerificationCode] = useState("");
+  const [emailVerificationSent, setEmailVerificationSent] = useState(false);
+  const [emailCodeVerified, setEmailCodeVerified] = useState(false);
   // Phone login state
   const [phoneNumber, setPhoneNumber] = useState("+63");
   const [otpCode, setOtpCode] = useState("");
@@ -62,6 +66,31 @@ const LoginScreen = () => {
     
     return isMobileUA || isMobileView || isChromeMobileView;
   };
+
+  // Handle Google sign-in redirect result (prevents redirect loop)
+  useEffect(() => {
+    const checkRedirectResult = async () => {
+      // Only check on login page
+      if (location.pathname !== "/login") {
+        return;
+      }
+
+      try {
+        const result = await handleRedirectResult();
+        if (result) {
+          console.log("✅ Google sign-in redirect handled successfully");
+          // User will be automatically redirected by the auth check below
+          // Don't set hasRedirected here - let the auth check handle it
+        }
+      } catch (error) {
+        console.error("Error handling redirect result:", error);
+        // Don't show error - user can try again
+      }
+    };
+
+    // Check redirect result when component mounts or pathname changes
+    checkRedirectResult();
+  }, [location.pathname]);
 
   // Redirect if user is already authenticated
   useEffect(() => {
@@ -224,22 +253,94 @@ const LoginScreen = () => {
     await handleSendCode();
   };
 
-  const handleEmailSignUp = async () => {
+  const handleSendEmailVerification = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      // Check if email is already registered before attempting to create account
-      console.log("🔍 Checking if email is already registered:", email);
-      const emailExists = await checkEmailExists(email);
-      
-      if (emailExists) {
-        setError("This email is already registered. Please sign in instead.");
+      // Validate inputs before sending code
+      if (!email || !email.includes('@')) {
+        setError("Please enter a valid email address");
+        setLoading(false);
+        return;
+      }
+      if (!displayName || displayName.trim().length === 0) {
+        setError("Please enter your name");
         setLoading(false);
         return;
       }
 
-      console.log("📧 Signing up with email:", email);
+      console.log("📧 Sending verification code to:", email);
+      const code = await sendEmailVerificationCode(email);
+      
+      // For development: show code in console and toast
+      console.log("🔐 Verification code:", code);
+      toast.success("Verification code sent! Check your email.", {
+        description: `Development mode: Code is ${code} (check console)`,
+        duration: 10000,
+      });
+      
+      setEmailVerificationSent(true);
+      setLoading(false);
+    } catch (err: any) {
+      console.error("❌ Error sending verification code:", err);
+      setError(err.message || "Failed to send verification code. Please try again.");
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmailCode = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (!emailVerificationCode || emailVerificationCode.length !== 6) {
+        setError("Please enter the 6-digit verification code");
+        setLoading(false);
+        return;
+      }
+
+      console.log("🔐 Verifying email code...");
+      const isValid = await verifyEmailCode(email, emailVerificationCode);
+      
+      if (!isValid) {
+        setError("Invalid verification code. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      console.log("✅ Email verified successfully!");
+      setEmailCodeVerified(true);
+      toast.success("Email verified! Creating your account...");
+      
+      // Now proceed with account creation
+      await handleCreateAccount();
+    } catch (err: any) {
+      console.error("❌ Error verifying code:", err);
+      setError(err.message || "Invalid verification code. Please try again.");
+      setLoading(false);
+    }
+  };
+
+  const handleResendEmailCode = async () => {
+    setEmailVerificationCode("");
+    setEmailCodeVerified(false);
+    await handleSendEmailVerification();
+  };
+
+  const handleCreateAccount = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Validate password
+      if (!password || password.length < 6) {
+        setError("Password must be at least 6 characters");
+        setLoading(false);
+        return;
+      }
+
+      console.log("📧 Creating account with verified email:", email);
       const user = await signUpWithEmail(email, password, displayName);
       
       console.log("✅ Sign-up successful! User:", user.uid);
@@ -321,6 +422,54 @@ const LoginScreen = () => {
       console.error("❌ Error sending password reset:", err);
       setError(err.message || "Failed to send password reset email.");
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      console.log("🔐 Signing in with Google...");
+      const userData = await signInWithGoogle();
+      
+      // If redirect was initiated, userData will be null
+      // The redirect result will be handled by useEffect
+      if (userData) {
+        // Popup method - user signed in immediately
+        console.log("✅ Sign-in successful! User:", userData.uid);
+        
+        // Wait for auth state to update
+        const delay = isMobile() ? 2000 : 500;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        if (!auth.currentUser) {
+          setLoading(false);
+          return;
+        }
+        
+        // Check if user has completed profile setup
+        const { getUserData } = await import("@/services/authService");
+        const userDataFromDb = await getUserData(auth.currentUser.uid);
+        
+        hasRedirected.current = true;
+        if (userDataFromDb && userDataFromDb.activity) {
+          navigate("/", { replace: true });
+        } else {
+          navigate("/profile-setup", { replace: true });
+        }
+      } else {
+        // Redirect method - will be handled by useEffect
+        console.log("📱 Redirect initiated, waiting for callback...");
+        toast.info("Redirecting to Google sign-in...");
+        // Don't set loading to false - let redirect happen
+        return;
+      }
+      setLoading(false);
+    } catch (err: any) {
+      console.error("❌ Error signing in with Google:", err);
+      setError(err.message || "Failed to sign in with Google. Please try again.");
       setLoading(false);
     }
   };
@@ -457,6 +606,52 @@ const LoginScreen = () => {
           transition={{ duration: 0.5, delay: 0.6 }}
           className="space-y-4"
         >
+          {/* Google Sign-In Button - First Option */}
+          <Button
+            onClick={handleGoogleSignIn}
+            disabled={loading}
+            className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300 bg-white hover:bg-gray-50 text-gray-900 border border-gray-300"
+          >
+            {loading ? (
+              <>
+                <div className="mr-3 h-5 w-5 border-2 border-gray-900 border-t-transparent rounded-full animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              <>
+                <svg className="mr-3 h-5 w-5" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                  />
+                </svg>
+                Continue with Google
+              </>
+            )}
+          </Button>
+
+          {/* Divider */}
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-muted"></div>
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
+            </div>
+          </div>
+
           {/* Toggle Buttons - Phone login temporarily hidden */}
           {/* 
           <div className="flex gap-2 p-1 bg-muted rounded-lg">
@@ -689,89 +884,200 @@ const LoginScreen = () => {
               ) : isSignUp ? (
                 /* Sign Up Form */
                 <>
-                  <div className="space-y-2">
-                    <label htmlFor="name" className="text-sm font-medium text-muted-foreground">
-                      Full Name
-                    </label>
-                    <div className="relative">
-                      <PersonIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                      <Input
-                        id="name"
-                        type="text"
-                        placeholder="John Doe"
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        className="pl-10 h-12 text-base"
+                  {!emailVerificationSent ? (
+                    /* Step 1: Enter Details */
+                    <>
+                      <div className="space-y-2">
+                        <label htmlFor="name" className="text-sm font-medium text-muted-foreground">
+                          Full Name
+                        </label>
+                        <div className="relative">
+                          <PersonIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
+                          <Input
+                            id="name"
+                            type="text"
+                            placeholder="John Doe"
+                            value={displayName}
+                            onChange={(e) => setDisplayName(e.target.value)}
+                            className="pl-10 h-12 text-base"
+                            disabled={loading}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="email" className="text-sm font-medium text-muted-foreground">
+                          Email Address
+                        </label>
+                        <div className="relative">
+                          <EmailIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
+                          <Input
+                            id="email"
+                            type="email"
+                            placeholder="your@email.com"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="pl-10 h-12 text-base"
+                            disabled={loading}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          We'll send a verification code to this email
+                        </p>
+                      </div>
+
+                      <Button
+                        onClick={handleSendEmailVerification}
+                        disabled={loading || !email.trim() || !displayName.trim()}
+                        className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
+                      >
+                        {loading ? (
+                          <>
+                            <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                            Sending Code...
+                          </>
+                        ) : (
+                          <>
+                            <EmailIcon className="mr-2" style={{ fontSize: 20 }} />
+                            Send Verification Code
+                          </>
+                        )}
+                      </Button>
+
+                      <div className="text-center">
+                        <button
+                          onClick={() => {
+                            setIsSignUp(false);
+                            setError(null);
+                            setEmailVerificationSent(false);
+                            setEmailVerificationCode("");
+                          }}
+                          className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          Already have an account? Sign in
+                        </button>
+                      </div>
+                    </>
+                  ) : !emailCodeVerified ? (
+                    /* Step 2: Verify Email Code */
+                    <>
+                      <div className="space-y-2">
+                        <label htmlFor="emailCode" className="text-sm font-medium text-muted-foreground">
+                          Enter 6-Digit Verification Code
+                        </label>
+                        <Input
+                          id="emailCode"
+                          type="text"
+                          placeholder="123456"
+                          value={emailVerificationCode}
+                          onChange={(e) => {
+                            const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                            setEmailVerificationCode(value);
+                          }}
+                          className="h-12 text-base text-center text-2xl tracking-widest font-mono"
+                          disabled={loading}
+                          maxLength={6}
+                          autoFocus
+                        />
+                        <p className="text-xs text-muted-foreground text-center">
+                          Check your email ({email}) for the verification code
+                        </p>
+                        <p className="text-xs text-muted-foreground/70 text-center italic mt-1">
+                          Code expires in 10 minutes
+                        </p>
+                      </div>
+
+                      <Button
+                        onClick={handleVerifyEmailCode}
+                        disabled={loading || emailVerificationCode.length !== 6}
+                        className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
+                      >
+                        {loading ? (
+                          <>
+                            <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                            Verifying...
+                          </>
+                        ) : (
+                          "Verify Code"
+                        )}
+                      </Button>
+
+                      <Button
+                        onClick={handleResendEmailCode}
+                        variant="outline"
                         disabled={loading}
-                      />
-                    </div>
-                  </div>
+                        className="w-full h-10 text-sm"
+                      >
+                        Resend Code
+                      </Button>
 
-                  <div className="space-y-2">
-                    <label htmlFor="email" className="text-sm font-medium text-muted-foreground">
-                      Email Address
-                    </label>
-                    <div className="relative">
-                      <EmailIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                      <Input
-                        id="email"
-                        type="email"
-                        placeholder="your@email.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="pl-10 h-12 text-base"
-                        disabled={loading}
-                      />
-                    </div>
-                  </div>
+                      <Button
+                        onClick={() => {
+                          setEmailVerificationSent(false);
+                          setEmailVerificationCode("");
+                          setError(null);
+                        }}
+                        variant="ghost"
+                        className="w-full h-10 text-sm"
+                      >
+                        Change Email
+                      </Button>
+                    </>
+                  ) : (
+                    /* Step 3: Set Password */
+                    <>
+                      <div className="space-y-2">
+                        <label htmlFor="password" className="text-sm font-medium text-muted-foreground">
+                          Create Password
+                        </label>
+                        <div className="relative">
+                          <LockIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
+                          <Input
+                            id="password"
+                            type="password"
+                            placeholder="At least 6 characters"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="pl-10 h-12 text-base"
+                            disabled={loading}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Password must be at least 6 characters
+                        </p>
+                      </div>
 
-                  <div className="space-y-2">
-                    <label htmlFor="password" className="text-sm font-medium text-muted-foreground">
-                      Password
-                    </label>
-                    <div className="relative">
-                      <LockIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                      <Input
-                        id="password"
-                        type="password"
-                        placeholder="At least 6 characters"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="pl-10 h-12 text-base"
-                        disabled={loading}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Password must be at least 6 characters
-                    </p>
-                  </div>
+                      <Button
+                        onClick={handleCreateAccount}
+                        disabled={loading || !password.trim() || password.length < 6}
+                        className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
+                      >
+                        {loading ? (
+                          <>
+                            <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                            Creating Account...
+                          </>
+                        ) : (
+                          "Create Account"
+                        )}
+                      </Button>
 
-                  <Button
-                    onClick={handleEmailSignUp}
-                    disabled={loading || !email.trim() || !password.trim() || !displayName.trim()}
-                    className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
-                  >
-                    {loading ? (
-                      <>
-                        <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                        Creating Account...
-                      </>
-                    ) : (
-                      "Create Account"
-                    )}
-                  </Button>
-
-                  <div className="text-center">
-                    <button
-                      onClick={() => {
-                        setIsSignUp(false);
-                        setError(null);
-                      }}
-                      className="text-sm text-muted-foreground hover:text-primary transition-colors"
-                    >
-                      Already have an account? Sign in
-                    </button>
-                  </div>
+                      <div className="text-center">
+                        <button
+                          onClick={() => {
+                            setIsSignUp(false);
+                            setError(null);
+                            setEmailVerificationSent(false);
+                            setEmailCodeVerified(false);
+                            setEmailVerificationCode("");
+                          }}
+                          className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          Already have an account? Sign in
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 /* Sign In Form */

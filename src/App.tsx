@@ -36,6 +36,7 @@ import { AdminProtectedRoute } from "./components/AdminProtectedRoute";
 import { useAuth } from "./hooks/useAuth";
 import { auth } from "./services/firebase";
 import { checkAdminStatus } from "./services/adminService";
+import { handleRedirectResult } from "./services/authService";
 
 const queryClient = new QueryClient();
 
@@ -176,6 +177,26 @@ const AdminRoute = () => {
 
 const AppContent = () => {
   const { notifications, dismissNotification, handleNotificationTap } = useNotificationContext();
+  const { user } = useAuth();
+
+  // Handle Google sign-in redirect result (prevents redirect loop)
+  useEffect(() => {
+    const checkRedirectResult = async () => {
+      try {
+        const result = await handleRedirectResult();
+        if (result) {
+          console.log("✅ Google sign-in redirect handled successfully");
+          // User will be automatically redirected by ProtectedRoute or LoginScreen
+        }
+      } catch (error) {
+        console.error("Error handling redirect result:", error);
+        // Don't show error to user - they can try again
+      }
+    };
+
+    // Only check redirect result once on mount
+    checkRedirectResult();
+  }, []); // Empty dependency array - only run once on mount
 
   return (
     <>

@@ -501,7 +501,138 @@ export const checkEmailExists = async (email: string): Promise<boolean> => {
 };
 
 /**
- * Sign up with email and password
+ * Generate a 6-digit verification code
+ * @returns {string} 6-digit code
+ */
+const generateVerificationCode = (): string => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+/**
+ * Send email verification code
+ * @param {string} email - User email address
+ * @returns {Promise<string>} Verification code (for development/testing)
+ */
+export const sendEmailVerificationCode = async (email: string): Promise<string> => {
+  try {
+    // Validate email format
+    if (!email || !email.includes('@')) {
+      throw new Error("Please enter a valid email address");
+    }
+
+    // Check if email is already registered
+    const emailExists = await checkEmailExists(email);
+    if (emailExists) {
+      throw new Error("This email is already registered. Please sign in instead.");
+    }
+
+    // Generate 6-digit code
+    const code = generateVerificationCode();
+    
+    // Store code in Firebase Realtime Database with 10-minute expiration
+    const verificationRef = ref(database, `emailVerifications/${email.replace(/[.#$[\]]/g, '_')}`);
+    await set(verificationRef, {
+      code: code,
+      email: email,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+      attempts: 0
+    });
+
+    console.log("📧 Verification code generated for:", email);
+    console.log("🔐 Code:", code); // For development - remove in production
+
+    // TODO: Send email with code
+    // You'll need to implement email sending via:
+    // - Firebase Cloud Functions + SendGrid/AWS SES/Resend
+    // - Or use a service like EmailJS, SendGrid, etc.
+    // 
+    // Example email content:
+    // Subject: "PaceMatch - Email Verification Code"
+    // Body: "Your verification code is: {code}. This code expires in 10 minutes."
+    
+    // For now, we'll return the code for development/testing
+    // In production, remove this return and implement actual email sending
+    return code;
+  } catch (error: any) {
+    console.error("❌ Error sending verification code:", error);
+    throw error;
+  }
+};
+
+/**
+ * Verify email verification code
+ * @param {string} email - User email address
+ * @param {string} code - 6-digit verification code
+ * @returns {Promise<boolean>} True if code is valid, false otherwise
+ */
+export const verifyEmailCode = async (email: string, code: string): Promise<boolean> => {
+  try {
+    if (!email || !code || code.length !== 6) {
+      return false;
+    }
+
+    const verificationRef = ref(database, `emailVerifications/${email.replace(/[.#$[\]]/g, '_')}`);
+    const snapshot = await get(verificationRef);
+
+    if (!snapshot.exists()) {
+      return false;
+    }
+
+    const verificationData = snapshot.val();
+    
+    // Check if code expired
+    if (Date.now() > verificationData.expiresAt) {
+      // Clean up expired code
+      await set(verificationRef, null);
+      throw new Error("Verification code has expired. Please request a new one.");
+    }
+
+    // Check attempt limit (max 5 attempts)
+    if (verificationData.attempts >= 5) {
+      await set(verificationRef, null);
+      throw new Error("Too many failed attempts. Please request a new verification code.");
+    }
+
+    // Verify code
+    if (verificationData.code !== code) {
+      // Increment attempts
+      await set(verificationRef, {
+        ...verificationData,
+        attempts: verificationData.attempts + 1
+      });
+      return false;
+    }
+
+    // Code is valid - mark as verified (don't delete yet, will be used during signup)
+    await set(verificationRef, {
+      ...verificationData,
+      verified: true,
+      verifiedAt: Date.now()
+    });
+
+    return true;
+  } catch (error: any) {
+    console.error("❌ Error verifying code:", error);
+    throw error;
+  }
+};
+
+/**
+ * Clean up verification code after successful signup
+ * @param {string} email - User email address
+ */
+const cleanupVerificationCode = async (email: string): Promise<void> => {
+  try {
+    const verificationRef = ref(database, `emailVerifications/${email.replace(/[.#$[\]]/g, '_')}`);
+    await set(verificationRef, null);
+  } catch (error) {
+    console.error("Error cleaning up verification code:", error);
+  }
+};
+
+/**
+ * Sign up with email and password (requires email verification first)
  * @param {string} email - User email address
  * @param {string} password - User password
  * @param {string} displayName - User display name
@@ -524,7 +655,15 @@ export const signUpWithEmail = async (
       throw new Error("Please enter your name");
     }
 
-    console.log("📧 Creating account with email:", email);
+    // Verify that email was verified before allowing signup
+    const verificationRef = ref(database, `emailVerifications/${email.replace(/[.#$[\]]/g, '_')}`);
+    const snapshot = await get(verificationRef);
+    
+    if (!snapshot.exists() || !snapshot.val().verified) {
+      throw new Error("Please verify your email address first by entering the 6-digit code sent to your email.");
+    }
+
+    console.log("📧 Creating account with verified email:", email);
     
     // Create user account
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -536,6 +675,9 @@ export const signUpWithEmail = async (
     }
     
     console.log("✅ Account created successfully! User:", user.uid);
+    
+    // Clean up verification code
+    await cleanupVerificationCode(email);
     
     // Save user to Firebase Realtime Database
     await saveUserToDatabase(user);

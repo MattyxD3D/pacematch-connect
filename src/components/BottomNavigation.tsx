@@ -91,26 +91,40 @@ const BottomNavigation = () => {
               key={item.path}
               whileTap={{ scale: 0.9 }}
               onClick={() => navigate(item.path)}
-              className="flex flex-col items-center gap-1 min-w-[60px] touch-target relative"
+              className="flex flex-col items-center gap-1.5 min-w-[60px] touch-target relative"
             >
               <motion.div
                 animate={{
-                  scale: active ? 1.1 : 1,
-                  y: active ? -2 : 0,
+                  scale: active ? 1.15 : 1,
+                  y: active ? -3 : 0,
                 }}
                 transition={{ type: "spring", stiffness: 400, damping: 17 }}
                 className="relative"
               >
-                <Icon
-                  style={{ fontSize: 26 }}
-                  className={
-                    isMessages
-                      ? messageIconColor
-                      : active
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                  }
-                />
+                {/* Icon container with gradient background when active */}
+                <div
+                  className={`relative p-2.5 rounded-xl transition-all duration-300 ${
+                    active
+                      ? "bg-gradient-to-br from-primary via-primary to-success"
+                      : "bg-transparent"
+                  }`}
+                >
+                  <Icon
+                    style={{ fontSize: active ? 28 : 26 }}
+                    className={
+                      isMessages
+                        ? hasUnreadMessages
+                          ? "text-yellow-400"
+                          : active
+                          ? "text-white"
+                          : "text-muted-foreground"
+                        : active
+                        ? "text-white drop-shadow-sm"
+                        : "text-muted-foreground"
+                    }
+                  />
+                </div>
+                
                 {/* Red dot badge for unread messages */}
                 {hasUnreadMessages && (
                   <motion.div
@@ -123,8 +137,10 @@ const BottomNavigation = () => {
                 )}
               </motion.div>
               <span
-                className={`text-xs font-medium transition-colors ${
-                  active ? "text-primary" : "text-muted-foreground"
+                className={`text-xs font-semibold transition-all duration-300 ${
+                  active 
+                    ? "text-primary" 
+                    : "text-muted-foreground"
                 }`}
               >
                 {item.label}
@@ -132,7 +148,7 @@ const BottomNavigation = () => {
               {active && (
                 <motion.div
                   layoutId="activeTab"
-                  className="absolute -bottom-3 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary"
+                  className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-gradient-to-r from-primary via-primary to-success shadow-sm"
                   transition={{ type: "spring", stiffness: 400, damping: 30 }}
                 />
               )}

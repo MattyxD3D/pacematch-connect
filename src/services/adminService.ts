@@ -228,6 +228,61 @@ export const banUser = async (userId: string, reason: string = "Violation of ter
 };
 
 /**
+ * Request username change due to misuse
+ * Changes username to default format and sends notification
+ * @param {string} userId - User ID to change username
+ * @param {string} reason - Reason for username change
+ * @param {string} adminId - Admin user ID
+ * @param {string} adminName - Admin name
+ * @returns {Promise<void>}
+ */
+export const requestUsernameChange = async (
+  userId: string,
+  reason: string = "Inappropriate username",
+  adminId: string,
+  adminName: string
+): Promise<void> => {
+  try {
+    const userRef = ref(database, `users/${userId}`);
+    const snapshot = await get(userRef);
+    
+    if (!snapshot.exists()) {
+      throw new Error("User not found");
+    }
+    
+    const userData = snapshot.val();
+    const defaultUsername = `user ${userId.substring(0, 8)}`;
+    
+    // Update username to default format
+    await set(userRef, {
+      ...userData,
+      username: defaultUsername,
+      usernameChanged: true,
+      usernameChangeReason: reason,
+      usernameChangedAt: Date.now(),
+      usernameChangedBy: adminId,
+      updatedAt: Date.now()
+    });
+    
+    // Send notification to user
+    await createNotification(userId, {
+      type: "username_change_required",
+      fromUserId: adminId,
+      fromUserName: adminName || "Admin",
+      fromUserAvatar: "",
+      message: `Your username has been changed due to misuse. Please update it to an appropriate username. Reason: ${reason}`,
+      reason,
+      adminId
+    });
+    
+    console.log(`✅ Username changed for user ${userId} to ${defaultUsername}`);
+  } catch (error) {
+    console.error("Error requesting username change:", error);
+    throw error;
+  }
+};
+
+/**
  * Unban user account
  * @param {string} userId - User ID to unban
  * @returns {Promise<void>}

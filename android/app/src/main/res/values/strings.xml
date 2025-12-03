@@ -4,4 +4,6 @@
     <string name="title_activity_main">PaceMatch</string>
     <string name="package_name">com.pacematch.app</string>
     <string name="custom_url_scheme">com.pacematch.app</string>
+    <string name="default_web_client_id">891545961086-cs7aq62rgshps172c95ijdcnh2lsej5r.apps.googleusercontent.com</string>
+    <string name="server_client_id">891545961086-cs7aq62rgshps172c95ijdcnh2lsej5r.apps.googleusercontent.com</string>
 </resources>

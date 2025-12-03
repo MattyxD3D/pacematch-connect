@@ -18,7 +18,8 @@ export type NotificationType =
   | "admin_event_cancelled"
   | "admin_warning"
   | "admin_comment_suspended"
-  | "admin_comment_restored";
+  | "admin_comment_restored"
+  | "username_change_required"; // Admin requested username change due to misuse
 
 export interface Notification {
   id: string;

@@ -9,7 +9,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { listenToEvents, Event as FirebaseEvent, joinEvent, leaveEvent, listenToEventCheckIns, createEvent, deleteEvent, updateEvent } from "@/services/eventService";
 import { getUserData } from "@/services/authService";
 import { calculateDistance, formatDistance } from "@/utils/distance";
-import { GoogleMap, Marker, InfoWindow, OverlayView, useJsApiLoader, Autocomplete } from "@react-google-maps/api";
+import { openGoogleMapsNavigation } from "@/utils/navigation";
+import { GoogleMap, Marker, InfoWindow, OverlayView, useJsApiLoader, Autocomplete, Polyline } from "@react-google-maps/api";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ExploreIcon from "@mui/icons-material/Explore";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
@@ -20,6 +21,7 @@ import EventIcon from "@mui/icons-material/Event";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import PeopleIcon from "@mui/icons-material/People";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
+import NavigationIcon from "@mui/icons-material/Navigation";
 import StarIcon from "@mui/icons-material/Star";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
@@ -28,6 +30,8 @@ import MapIcon from "@mui/icons-material/Map";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
+import ClearIcon from "@mui/icons-material/Clear";
+import LaunchIcon from "@mui/icons-material/Launch";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import MailIcon from "@mui/icons-material/Mail";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
@@ -35,6 +39,7 @@ import TouchAppIcon from "@mui/icons-material/TouchApp";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import MyLocationIcon from "@mui/icons-material/MyLocation";
+import FitScreenIcon from "@mui/icons-material/FitScreen";
 import Avatar from "@mui/material/Avatar";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Card } from "@/components/ui/card";
@@ -108,7 +113,23 @@ const EventMarker = ({ event, checkInCount, countdown, onClick }: EventMarkerPro
     }
   };
 
+  const getActivityIcon = (type: EventType) => {
+    switch (type) {
+      case "running":
+        return <DirectionsRunIcon style={{ fontSize: 16 }} className="text-success" />;
+      case "cycling":
+        return <DirectionsBikeIcon style={{ fontSize: 16 }} className="text-primary" />;
+      case "walking":
+        return <DirectionsWalkIcon style={{ fontSize: 16 }} className="text-warning" />;
+      case "others":
+        return <FitnessCenterIcon style={{ fontSize: 16 }} className="text-secondary" />;
+      default:
+        return <FitnessCenterIcon style={{ fontSize: 16 }} className="text-muted-foreground" />;
+    }
+  };
+
   const borderColor = getActivityColor(event.type);
+  const participantsCount = Array.isArray(event.participants) ? event.participants.length : 0;
 
   return (
     <div
@@ -133,16 +154,28 @@ const EventMarker = ({ event, checkInCount, countdown, onClick }: EventMarkerPro
             e.currentTarget.src = `https://ui-avatars.com/api/?name=${event.hostName || 'User'}`;
           }}
         />
-        {/* Check-in Count Badge */}
-        {checkInCount > 0 && (
+        {/* Check-in Count Badge - Only show if no participants */}
+        {checkInCount > 0 && participantsCount === 0 && (
           <div className="absolute -bottom-1 -right-1 bg-primary text-primary-foreground text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center border-2 border-background shadow-md">
             +{checkInCount}
           </div>
         )}
       </div>
-      {/* Countdown Timer Badge */}
-      <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-background/90 backdrop-blur-sm text-xs font-semibold px-2 py-1 rounded-full border border-border shadow-md whitespace-nowrap">
-        {countdown}
+      {/* Activity Type Icon Badge with Countdown and Participant Count - Outside Top Right */}
+      <div className="absolute -top-2 -right-2 flex flex-col items-center gap-1 z-10">
+        {/* Countdown Timer - Above Activity Icon */}
+        <div className="bg-background/95 backdrop-blur-sm text-xs font-semibold px-2 py-1 rounded-full border border-border shadow-md whitespace-nowrap">
+          {countdown}
+        </div>
+        <div className="bg-background rounded-full p-1.5 border-2 shadow-lg" style={{ borderColor: borderColor }}>
+          {getActivityIcon(event.type)}
+        </div>
+        {/* Participant Count - Below Activity Icon */}
+        {participantsCount > 0 && (
+          <div className="bg-success text-white text-xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5 border-2 border-background shadow-lg">
+            {participantsCount}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -150,7 +183,7 @@ const EventMarker = ({ event, checkInCount, countdown, onClick }: EventMarkerPro
 
 const Events = () => {
   const navigate = useNavigate();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, loading: authLoading } = useAuth();
   const { unreadCount, notifications, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
   const [viewMode, setViewMode] = useState<"map" | "list">("map");
   const [activityFilter, setActivityFilter] = useState<EventType | "all">("all");
@@ -166,7 +199,6 @@ const Events = () => {
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false); // Mobile drawer state
   const [checkInCounts, setCheckInCounts] = useState<Record<string, number>>({});
-  const [selectedMarkerEvent, setSelectedMarkerEvent] = useState<Event | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 14.5995, lng: 120.9842 });
   const [mapZoom, setMapZoom] = useState(13);
   const [mapRef, setMapRef] = useState<any>(null);
@@ -185,7 +217,7 @@ const Events = () => {
     activityType: "running" as "running" | "cycling" | "walking" | "others",
     date: "",
     time: "",
-    maxParticipants: 10,
+    maxParticipants: undefined as number | undefined,
   });
   const [isSubmittingEvent, setIsSubmittingEvent] = useState(false);
   
@@ -199,33 +231,168 @@ const Events = () => {
   // Flag to prevent handleMapIdle from overwriting search-selected location (using ref for sync update)
   const isSearchLocationSetRef = useRef(false);
   
+  // Route state for showing directions
+  const [routePath, setRoutePath] = useState<google.maps.LatLng[]>([]);
+  const [showRoute, setShowRoute] = useState(false);
+  const [routeDestination, setRouteDestination] = useState<{ lat: number; lng: number } | null>(null);
+  
   // Google Maps API loader
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const hasApiKey = googleMapsApiKey && googleMapsApiKey.trim().length > 0;
+  
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: googleMapsApiKey || '',
-    libraries: libraries
+    googleMapsApiKey: hasApiKey ? googleMapsApiKey : '',
+    libraries: libraries,
+    version: 'weekly', // Use weekly version for latest features and fixes
   });
 
-  // Get user location - try to get from browser geolocation once
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  
+  // Track if we've already logged an error to prevent spam
+  const errorLoggedRef = useRef(false);
+
+  // Log error details for debugging (with debouncing to prevent spam)
   useEffect(() => {
-    if (navigator.geolocation && currentUser?.uid) {
+    if (loadError && !errorLoggedRef.current) {
+      // Only log once to prevent console spam from rapid retries
+      errorLoggedRef.current = true;
+      
+      console.error('🗺️ Google Maps Load Error:', loadError);
+      if (!hasApiKey) {
+        console.error('❌ VITE_GOOGLE_MAPS_API_KEY is missing or empty in .env file');
+        console.error('💡 Solution: Create a .env file in the project root with:');
+        console.error('   VITE_GOOGLE_MAPS_API_KEY=your_api_key_here');
+        console.error('');
+        console.error('📖 To get an API key:');
+        console.error('   1. Go to https://console.cloud.google.com/');
+        console.error('   2. Enable "Maps JavaScript API"');
+        console.error('   3. Create an API key in "Credentials"');
+        console.error('   4. Add it to your .env file');
+      } else {
+        console.error('❌ API Key exists but Google Maps failed to load');
+        console.error('💡 Troubleshooting steps:');
+        console.error('   1. Verify API key is valid in Google Cloud Console');
+        console.error('   2. Ensure "Maps JavaScript API" is enabled');
+        console.error('   3. Check API key restrictions (HTTP referrers, IP addresses)');
+        console.error('   4. Verify your domain is allowed in API key restrictions');
+        console.error('   5. Check browser console network tab for detailed error');
+        console.error('   6. Restart your dev server after adding/changing .env file');
+      }
+    }
+    
+    // Reset error flag if load succeeds
+    if (isLoaded) {
+      errorLoggedRef.current = false;
+    }
+  }, [loadError, hasApiKey, isLoaded]);
+
+  // User location state - loaded lazily when needed
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  
+  // Lazy load user location with better error handling
+  const requestUserLocation = useCallback((): Promise<{ lat: number; lng: number } | null> => {
+    return new Promise((resolve) => {
+      // If location already exists, return it immediately
+      if (userLocation) {
+        resolve(userLocation);
+        return;
+      }
+
+      // If already requesting, wait for it
+      if (isGettingLocation) {
+        // Wait for location to be set
+        const checkInterval = setInterval(() => {
+          if (userLocation) {
+            clearInterval(checkInterval);
+            resolve(userLocation);
+          }
+        }, 100);
+        setTimeout(() => clearInterval(checkInterval), 5000); // Timeout after 5 seconds
+        return;
+      }
+
+      if (!navigator.geolocation) {
+        toast.error("Geolocation is not supported by your browser");
+        resolve(null);
+        return;
+      }
+
+      setIsGettingLocation(true);
+
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          setUserLocation({
+          const location = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-          });
+          };
+          setUserLocation(location);
+          setIsGettingLocation(false);
+          resolve(location);
+          // Note: Nearest event navigation is handled by useEffect that watches userLocation
         },
         (error) => {
+          setIsGettingLocation(false);
+          let errorMessage = "Could not get your location";
+          
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = "Location access denied. Please enable location permissions in your browser settings to use this feature.";
+              toast.error(errorMessage, { duration: 5000 });
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = "Location information is unavailable. Please check your GPS connection.";
+              toast.error(errorMessage, { duration: 4000 });
+              break;
+            case error.TIMEOUT:
+              errorMessage = "Location request timed out. Please try again.";
+              toast.error(errorMessage, { duration: 3000 });
+              break;
+            default:
+              errorMessage = "An unknown error occurred while getting your location.";
+              toast.error(errorMessage, { duration: 3000 });
+              break;
+          }
+          
           console.warn("Could not get user location:", error);
-          // Set default location or try to get from user data
+          resolve(null);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000, // 10 second timeout
+          maximumAge: 60000 // Accept cached location up to 1 minute old
         }
       );
+    });
+  }, [userLocation, isGettingLocation]);
+
+  // Calculate estimated travel time based on distance
+  const calculateTravelTime = useCallback((distanceKm: number, mode: 'walking' | 'driving' | 'cycling' = 'driving'): string => {
+    if (!distanceKm || distanceKm === Infinity) return "Unknown";
+    
+    let speedKmh: number;
+    switch (mode) {
+      case 'walking':
+        speedKmh = 5; // Average walking speed
+        break;
+      case 'cycling':
+        speedKmh = 15; // Average cycling speed
+        break;
+      case 'driving':
+      default:
+        speedKmh = 50; // Average city driving speed
+        break;
     }
-  }, [currentUser?.uid]);
+    
+    const hours = distanceKm / speedKmh;
+    const minutes = Math.round(hours * 60);
+    
+    if (minutes < 1) return "< 1 min";
+    if (minutes < 60) return `${minutes} min`;
+    
+    const hrs = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+  }, []);
 
   // Countdown timer utility function
   const calculateCountdown = useCallback((date: string, time: string): string => {
@@ -295,6 +462,77 @@ const Events = () => {
     }
   }, [currentTime]);
 
+  // Function to get directions from user location to event location
+  const showDirectionsToEvent = useCallback((destinationLat: number, destinationLng: number) => {
+    if (!userLocation || !isLoaded || !window.google) {
+      toast.error("Location services are not available");
+      return;
+    }
+
+    if (!window.google.maps.DirectionsService || !window.google.maps.DirectionsRenderer) {
+      toast.error("Directions service is not available");
+      return;
+    }
+
+    const directionsService = new window.google.maps.DirectionsService();
+    const origin = new window.google.maps.LatLng(userLocation.lat, userLocation.lng);
+    const destination = new window.google.maps.LatLng(destinationLat, destinationLng);
+
+    directionsService.route(
+      {
+        origin: origin,
+        destination: destination,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === window.google.maps.DirectionsStatus.OK && result) {
+          // Extract the route path from the result
+          const path: google.maps.LatLng[] = [];
+          result.routes[0].legs[0].steps.forEach((step) => {
+            step.path.forEach((point) => {
+              path.push(point);
+            });
+          });
+          
+          setRoutePath(path);
+          setRouteDestination({ lat: destinationLat, lng: destinationLng });
+          setShowRoute(true);
+          
+          // Adjust map view to fit both origin and destination
+          if (mapRef) {
+            const bounds = new window.google.maps.LatLngBounds();
+            bounds.extend(origin);
+            bounds.extend(destination);
+            mapRef.fitBounds(bounds);
+            
+            // Add some padding
+            mapRef.setOptions({
+              padding: { top: 100, right: 100, bottom: 100, left: 100 }
+            });
+          }
+          
+          toast.success("Route displayed on map");
+        } else {
+          toast.error("Could not calculate route. Please try again.");
+        }
+      }
+    );
+  }, [userLocation, isLoaded, mapRef]);
+
+  // Function to clear the route
+  const clearRoute = useCallback(() => {
+    setShowRoute(false);
+    setRoutePath([]);
+    setRouteDestination(null);
+  }, []);
+
+  // Function to open route in Google Maps for navigation
+  const openRouteInGoogleMaps = useCallback(() => {
+    if (routeDestination) {
+      openGoogleMapsNavigation(routeDestination.lat, routeDestination.lng);
+    }
+  }, [routeDestination]);
+
   // Update current time every minute for countdown
   useEffect(() => {
     const interval = setInterval(() => {
@@ -311,8 +549,14 @@ const Events = () => {
     }
   }, [showNotificationDrawer, unreadCount, markAllAsRead]);
 
-  // Listen to events from Firebase
+  // Listen to events from Firebase (only when authenticated)
   useEffect(() => {
+    // Don't set up listener if auth is still loading or user is not authenticated
+    if (authLoading || !currentUser?.uid) {
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = listenToEvents((firebaseEvents: FirebaseEvent[]) => {
       // Transform Firebase events to match local Event interface
       let transformedEvents: Event[] = firebaseEvents.map((event) => {
@@ -376,17 +620,7 @@ const Events = () => {
     });
 
     return () => unsubscribe();
-  }, [currentUser?.uid, userLocation]);
-
-  // Center map on user location ONLY on initial load (not after searches)
-  const [hasInitiallycentered, setHasInitiallyCentered] = useState(false);
-  useEffect(() => {
-    if (userLocation && mapRef && !hasInitiallycentered && !isPinMode) {
-      setMapCenter({ lat: userLocation.lat, lng: userLocation.lng });
-      mapRef.panTo({ lat: userLocation.lat, lng: userLocation.lng });
-      setHasInitiallyCentered(true);
-    }
-  }, [userLocation, mapRef, hasInitiallycentered, isPinMode]);
+  }, [currentUser?.uid, userLocation, authLoading]);
 
   // Listen to check-ins for each event
   useEffect(() => {
@@ -469,7 +703,8 @@ const Events = () => {
         if (!currentParticipants.includes(currentUser.uid)) {
           return {
             ...prev,
-            participants: [...currentParticipants, currentUser.uid]
+            participants: [...currentParticipants, currentUser.uid],
+            isJoined: true
           };
         }
         return prev;
@@ -496,7 +731,8 @@ const Events = () => {
         const currentParticipants = Array.isArray(prev.participants) ? prev.participants : [];
         return {
           ...prev,
-          participants: currentParticipants.filter(id => id !== currentUser.uid)
+          participants: currentParticipants.filter(id => id !== currentUser.uid),
+          isJoined: false
         };
       });
     } catch (error: any) {
@@ -506,6 +742,11 @@ const Events = () => {
   };
 
   const handleEventClick = (event: Event) => {
+    // Clear any existing route when selecting a new event
+    setShowRoute(false);
+    setRoutePath([]);
+    setRouteDestination(null);
+    
     // Zoom to event location if map is available and in map view
     if (mapRef && viewMode === "map") {
       mapRef.panTo({ lat: event.lat, lng: event.lng });
@@ -740,7 +981,7 @@ const Events = () => {
         activityType: "running",
         date: "",
         time: "",
-        maxParticipants: 10,
+        maxParticipants: undefined,
       });
     } catch (error: any) {
       console.error("Error creating event:", error);
@@ -762,7 +1003,7 @@ const Events = () => {
       activityType: "running",
       date: "",
       time: "",
-      maxParticipants: 10,
+      maxParticipants: undefined,
     });
   };
 
@@ -840,11 +1081,49 @@ const Events = () => {
   };
 
   // Center map on user's GPS location
-  const handleCenterOnMe = () => {
-    if (userLocation && mapRef) {
-      setMapCenter({ lat: userLocation.lat, lng: userLocation.lng });
-      mapRef.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+  const handleCenterOnMe = async () => {
+    // Request location if not available
+    const location = await requestUserLocation();
+    
+    if (location && mapRef) {
+      setMapCenter({ lat: location.lat, lng: location.lng });
+      mapRef.panTo({ lat: location.lat, lng: location.lng });
       mapRef.setZoom(15);
+    }
+  };
+
+  // Fit all events on the map
+  const handleFitAllEvents = () => {
+    if (!mapRef || !isLoaded || sortedEvents.length === 0) {
+      toast.info("No events to display");
+      return;
+    }
+
+    try {
+      const bounds = new window.google.maps.LatLngBounds();
+      
+      // Add all event locations to bounds
+      sortedEvents.forEach((event) => {
+        if (event.lat && event.lng) {
+          bounds.extend(new window.google.maps.LatLng(event.lat, event.lng));
+        }
+      });
+
+      // If user location is available, include it in bounds
+      if (userLocation) {
+        bounds.extend(new window.google.maps.LatLng(userLocation.lat, userLocation.lng));
+      }
+
+      // Fit bounds with padding
+      mapRef.fitBounds(bounds);
+      mapRef.setOptions({
+        padding: { top: 100, right: 100, bottom: 200, left: 100 } // Extra bottom padding for action bar
+      });
+
+      toast.success(`Showing ${sortedEvents.length} event${sortedEvents.length !== 1 ? 's' : ''}`);
+    } catch (error) {
+      console.error("Error fitting events to bounds:", error);
+      toast.error("Could not fit all events on map");
     }
   };
 
@@ -876,103 +1155,27 @@ const Events = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-success/10 pb-20">
-      {/* Top Bar with Workout Dropdown and Search */}
-      <div className="relative">
-        <EventsTopBar
-          activityFilter={activityFilter}
-          onActivityFilterChange={setActivityFilter}
-          searchQuery={searchQuery}
-          onSearchChange={(query) => {
-            setSearchQuery(query);
-            setShowSearchResults(query.trim().length > 0);
-          }}
-          rightSlot={
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-10 border-b border-border/50"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
+      >
+        <div className="max-w-2xl mx-auto px-6 py-5">
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-bold">Events</h1>
+            {/* Notification Bell - Always Visible */}
             <NotificationBell 
               unreadCount={unreadCount}
               onClick={() => setShowNotificationDrawer(true)}
               variant="light"
             />
-          }
-        />
-        
-        {/* Search Results Dropdown */}
-        <AnimatePresence>
-          {showSearchResults && searchQuery.trim() && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="absolute left-0 right-0 z-30 mx-4 sm:mx-6 mt-1"
-            >
-              <div className="bg-card rounded-xl shadow-elevation-3 border border-border overflow-hidden max-h-[60vh] overflow-y-auto">
-                {filteredEvents.length > 0 ? (
-                  <>
-                    <div className="px-4 py-2 border-b border-border bg-muted/50">
-                      <p className="text-xs text-muted-foreground font-medium">
-                        {filteredEvents.length} event{filteredEvents.length !== 1 ? 's' : ''} found
-                      </p>
-                    </div>
-                    {filteredEvents.slice(0, 5).map((event) => (
-                      <button
-                        key={event.id}
-                        onClick={() => handleSearchResultClick(event)}
-                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left border-b border-border/50 last:border-0"
-                      >
-                        {/* Activity Icon */}
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                          event.type === "running" ? "bg-success/20" :
-                          event.type === "cycling" ? "bg-primary/20" :
-                          event.type === "walking" ? "bg-warning/20" : "bg-secondary/20"
-                        }`}>
-                          {event.type === "running" && <DirectionsRunIcon style={{ fontSize: 20 }} className="text-success" />}
-                          {event.type === "cycling" && <DirectionsBikeIcon style={{ fontSize: 20 }} className="text-primary" />}
-                          {event.type === "walking" && <DirectionsWalkIcon style={{ fontSize: 20 }} className="text-warning" />}
-                          {event.type === "others" && <FitnessCenterIcon style={{ fontSize: 20 }} className="text-secondary" />}
-                        </div>
-                        
-                        {/* Event Info */}
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-foreground truncate">{event.title}</p>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>{event.date}</span>
-                            <span>•</span>
-                            <span className="truncate">{event.location}</span>
-                          </div>
-                        </div>
-                        
-                        {/* Distance if available */}
-                        {event.distance && (
-                          <span className="text-xs text-muted-foreground flex-shrink-0">
-                            {event.distance}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                    {filteredEvents.length > 5 && (
-                      <div className="px-4 py-2 bg-muted/30 text-center">
-                        <p className="text-xs text-muted-foreground">
-                          +{filteredEvents.length - 5} more results
-                        </p>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="px-4 py-8 text-center">
-                    <SearchIcon style={{ fontSize: 32 }} className="text-muted-foreground/50 mx-auto mb-2" />
-                    <p className="text-sm text-muted-foreground">No events found for "{searchQuery}"</p>
-                  </div>
-                )}
-              </div>
-              
-              {/* Click outside to close */}
-              <div 
-                className="fixed inset-0 -z-10" 
-                onClick={() => setShowSearchResults(false)}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+          </div>
+        </div>
+      </motion.div>
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-0 sm:px-4 sm:px-6 pb-20 sm:pb-24">
@@ -1121,10 +1324,33 @@ const Events = () => {
                 )}
 
                 {loadError ? (
-                  <div className="w-full h-full flex items-center justify-center bg-muted">
-                    <div className="text-center">
-                      <p className="text-destructive font-semibold">Error loading map</p>
-                      <p className="text-sm text-muted-foreground">Please check your Google Maps API key</p>
+                  <div className="w-full h-full flex items-center justify-center bg-muted p-4">
+                    <div className="text-center max-w-md">
+                      <p className="text-destructive font-semibold mb-2 text-lg">⚠️ Error loading Google Maps</p>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        {!hasApiKey 
+                          ? "Google Maps API key is missing. Please add VITE_GOOGLE_MAPS_API_KEY to your .env file and restart the dev server."
+                          : loadError.message || "Unable to load Google Maps. Please check the troubleshooting steps below:"}
+                      </p>
+                      {hasApiKey && (
+                        <ul className="text-xs text-muted-foreground text-left list-disc list-inside space-y-1 mt-3">
+                          <li>API key is valid in Google Cloud Console</li>
+                          <li>Maps JavaScript API is enabled</li>
+                          <li>API key restrictions allow this domain/localhost</li>
+                          <li>Internet connection is active</li>
+                          <li>Check browser console for detailed error messages</li>
+                        </ul>
+                      )}
+                      {!hasApiKey && (
+                        <div className="mt-4 p-3 bg-primary/10 rounded-lg text-left">
+                          <p className="text-xs font-semibold mb-2">Quick Fix:</p>
+                          <ol className="text-xs text-muted-foreground list-decimal list-inside space-y-1">
+                            <li>Create a <code className="bg-background px-1 py-0.5 rounded">.env</code> file in the project root</li>
+                            <li>Add: <code className="bg-background px-1 py-0.5 rounded">VITE_GOOGLE_MAPS_API_KEY=your_key_here</code></li>
+                            <li>Restart your dev server</li>
+                          </ol>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : !isLoaded ? (
@@ -1151,6 +1377,9 @@ const Events = () => {
                       if (showEventDetail) {
                         setShowEventDetail(false);
                         setSelectedEvent(null);
+                        setShowRoute(false);
+                        setRoutePath([]);
+                        setRouteDestination(null);
                       }
                     }}
                     onIdle={handleMapIdle}
@@ -1161,6 +1390,20 @@ const Events = () => {
                       streetViewControl: false,
                       mapTypeControl: false,
                       fullscreenControl: false,
+                      clickableIcons: false, // Disable clicking on places/landmarks to prevent clutter
+                      styles: [
+                        // Hide/mute small POIs to reduce clutter
+                        {
+                          featureType: "poi",
+                          elementType: "all",
+                          stylers: [{ visibility: "off" }]
+                        },
+                        {
+                          featureType: "poi.business",
+                          elementType: "all",
+                          stylers: [{ visibility: "off" }]
+                        }
+                      ]
                     }}
                   >
                     {/* User Location Marker */}
@@ -1192,7 +1435,6 @@ const Events = () => {
                     {sortedEvents.map((event) => {
                       const checkInCount = checkInCounts[event.id] || 0;
                       const countdown = calculateCountdown(event.date, event.time);
-                      const isSelected = selectedMarkerEvent?.id === event.id;
 
                       return (
                         <OverlayView
@@ -1207,7 +1449,6 @@ const Events = () => {
                               countdown={countdown}
                               onClick={() => {
                                 handleEventClick(event);
-                                setSelectedMarkerEvent(event);
                               }}
                             />
                           </div>
@@ -1215,110 +1456,88 @@ const Events = () => {
                       );
                     })}
 
-                    {/* InfoWindow for selected marker */}
-                    {selectedMarkerEvent && (
-                      <InfoWindow
-                        position={{ lat: selectedMarkerEvent.lat, lng: selectedMarkerEvent.lng }}
-                        onCloseClick={() => setSelectedMarkerEvent(null)}
-                      >
-                        <div className="p-2 min-w-[200px]">
-                          <h3 className="font-bold text-base mb-2">{selectedMarkerEvent.title}</h3>
-                          <div className="space-y-1 text-sm">
-                            <div className="flex items-center gap-2">
-                              {getActivityIcon(selectedMarkerEvent.type)}
-                              <span className="capitalize">{selectedMarkerEvent.type}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <AccessTimeIcon style={{ fontSize: 16 }} />
-                              <span>{selectedMarkerEvent.date} at {selectedMarkerEvent.time}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <span className="font-semibold">Countdown: {calculateCountdown(selectedMarkerEvent.date, selectedMarkerEvent.time)}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <PeopleIcon style={{ fontSize: 16 }} />
-                              <span>
-                                {checkInCounts[selectedMarkerEvent.id] || 0} checked in · {selectedMarkerEvent.participants.length} participants
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <LocationOnIcon style={{ fontSize: 16 }} />
-                              <span>{selectedMarkerEvent.distance}</span>
-                            </div>
-                            <Button
-                              onClick={() => {
-                                if (selectedMarkerEvent) {
-                                  handleEventClick(selectedMarkerEvent);
-                                  setSelectedMarkerEvent(null);
-                                }
-                              }}
-                              className="w-full mt-2 h-8 text-xs"
-                              size="sm"
-                            >
-                              View Details
-                            </Button>
-                          </div>
-                        </div>
-                      </InfoWindow>
+                    {/* Route Polyline - Show route from user location to event */}
+                    {showRoute && routePath.length > 0 && isLoaded && window.google && (
+                      <Polyline
+                        path={routePath}
+                        options={{
+                          strokeColor: "#3b82f6",
+                          strokeOpacity: 0.8,
+                          strokeWeight: 5,
+                          geodesic: true,
+                          icons: window.google.maps ? [
+                            {
+                              icon: {
+                                path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                                scale: 4,
+                                strokeColor: "#3b82f6",
+                              },
+                              offset: "50%",
+                              repeat: "100px",
+                            },
+                          ] : undefined,
+                        }}
+                      />
                     )}
+
                   </GoogleMap>
                 )}
               </div>
 
-              {/* Create Event Button - Bottom Right of Map (dark rounded button with pencil+plus icon) */}
-              {!isPinMode && !showEventForm && (
-                <motion.button
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => {
-                    setIsPinMode(true);
-                    setSelectedEventLocation(null);
-                    setPinModeAddress("");
-                    // Initialize pending location to current map center
-                    if (mapRef) {
-                      const center = mapRef.getCenter();
-                      if (center) {
-                        setPendingLocation({ lat: center.lat(), lng: center.lng() });
-                      }
-                    } else {
-                      setPendingLocation(mapCenter);
-                    }
-                  }}
-                  className="absolute left-0 right-0 z-30 px-4 pb-2"
-                  style={{
-                    bottom: `calc(5rem + env(safe-area-inset-bottom, 48px))`,
-                  }}
-                  title="Create event"
-                >
-                  <div className="bg-gray-900 text-white rounded-2xl shadow-elevation-3 hover:bg-gray-800 hover:shadow-elevation-4 transition-all duration-300 flex items-center justify-center gap-2 px-5 py-3 mx-auto max-w-xs">
-                    {/* Pencil icon with plus sign */}
-                    <div className="relative flex items-center justify-center">
-                      <EditIcon style={{ fontSize: 20, color: "white" }} />
-                      <AddIcon 
-                        style={{ 
-                          fontSize: 12, 
-                          color: "white",
-                          position: "absolute",
-                          top: "-4px",
-                          left: "-2px"
-                        }} 
-                      />
-                    </div>
-                    <span className="text-sm font-medium text-white">Create Event</span>
-                  </div>
-                </motion.button>
-              )}
+              {/* Route Controls - Floating panel when route is shown */}
+              <AnimatePresence>
+                {showRoute && routeDestination && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 20 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                    className="absolute bottom-20 left-0 right-0 z-40 px-4"
+                    style={{
+                      bottom: `calc(5rem + env(safe-area-inset-bottom, 48px))`,
+                    }}
+                  >
+                    <Card className="bg-card/95 backdrop-blur-md border-border shadow-elevation-4 p-4 max-w-md mx-auto">
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          {/* Clear Route Button */}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={clearRoute}
+                            className="flex-1 gap-2"
+                          >
+                            <ClearIcon style={{ fontSize: 18 }} />
+                            <span>Clear Route</span>
+                          </Button>
+                          
+                          {/* Open in Google Maps Button */}
+                          <Button
+                            onClick={openRouteInGoogleMaps}
+                            className="flex-1 gap-2 bg-gradient-to-r from-primary via-primary to-success hover:from-primary/90 hover:via-primary/90 hover:to-success/90 text-white"
+                          >
+                            <LaunchIcon style={{ fontSize: 18 }} />
+                            <span>Open in Google Maps</span>
+                          </Button>
+                        </div>
+                        
+                        {/* Helper text */}
+                        <p className="text-xs text-muted-foreground text-center">
+                          Opens Google Maps app or browser for turn-by-turn navigation
+                        </p>
+                      </div>
+                    </Card>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              {/* Top Right Controls - Like MapScreen */}
-              <div className="absolute top-4 right-4 flex flex-col gap-3 z-30">
-
-                {/* Events Drawer/List Button - Mobile only */}
+              {/* Middle Right Controls - Events List and Create Event FAB */}
+              <div className="fixed top-1/2 -translate-y-1/2 right-4 flex flex-col gap-3 z-50">
+                {/* Events Drawer/List Button */}
                 <motion.button
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setDrawerOpen(true)}
-                  className="sm:hidden touch-target rounded-full shadow-elevation-3 border-2 bg-card/90 backdrop-blur-sm text-foreground border-border"
+                  className="touch-target rounded-full shadow-elevation-3 border-2 bg-card/90 backdrop-blur-sm text-foreground border-border"
                   style={{ width: 56, height: 56 }}
                   title="Events list"
                 >
@@ -1332,6 +1551,71 @@ const Events = () => {
                   )}
                 </motion.button>
 
+                {/* Fit All Events Button */}
+                {viewMode === "map" && sortedEvents.length > 0 && !isPinMode && (
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleFitAllEvents}
+                    className="touch-target rounded-full shadow-elevation-3 border-2 bg-card/90 backdrop-blur-sm text-foreground border-border w-14 h-14 flex items-center justify-center"
+                    title="Fit all events on map"
+                  >
+                    <FitScreenIcon style={{ fontSize: 28 }} />
+                  </motion.button>
+                )}
+
+                {/* Create Event FAB / Cancel Button */}
+                <AnimatePresence mode="wait">
+                  {!isPinMode && !showEventForm && !showRoute && !showEventDetail && (
+                    <motion.button
+                      key="create-event"
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      transition={{ delay: 0.3, duration: 0.2, type: "spring", stiffness: 200 }}
+                      whileTap={{ scale: 0.9 }}
+                      whileHover={{ scale: 1.05 }}
+                      onClick={() => {
+                        setIsPinMode(true);
+                        setSelectedEventLocation(null);
+                        setPinModeAddress("");
+                        // Initialize pending location to current map center
+                        if (mapRef) {
+                          const center = mapRef.getCenter();
+                          if (center) {
+                            setPendingLocation({ lat: center.lat(), lng: center.lng() });
+                          }
+                        } else {
+                          setPendingLocation(mapCenter);
+                        }
+                      }}
+                      className="w-14 h-14 rounded-full bg-gradient-to-r from-primary via-primary to-success shadow-elevation-4 hover:shadow-elevation-5 transition-all duration-300 flex items-center justify-center touch-target"
+                      title="Create event"
+                    >
+                      {/* Plus icon */}
+                      <AddIcon style={{ fontSize: 28, color: "white" }} />
+                    </motion.button>
+                  )}
+                  {isPinMode && !showEventForm && (
+                    <motion.button
+                      key="cancel-event"
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      transition={{ duration: 0.2, type: "spring", stiffness: 200 }}
+                      whileTap={{ scale: 0.9 }}
+                      whileHover={{ scale: 1.05 }}
+                      onClick={() => {
+                        handleCancelInlineEvent();
+                        setIsPinMode(false);
+                      }}
+                      className="w-14 h-14 rounded-full bg-destructive hover:bg-destructive/90 shadow-elevation-4 hover:shadow-elevation-5 transition-all duration-300 flex items-center justify-center touch-target"
+                      title="Cancel"
+                    >
+                      {/* X icon */}
+                      <CloseIcon style={{ fontSize: 28, color: "white" }} />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
               </div>
             </motion.div>
           ) : (
@@ -1388,21 +1672,34 @@ const Events = () => {
         onClose={() => {
           setShowEventDetail(false);
           setSelectedEvent(null);
+          // Only clear route if user manually closes (not when showing directions)
+          // Route will be cleared when a new event is selected or map is clicked
         }}
         onJoin={handleJoinEvent}
         onLeave={handleLeaveEvent}
         onEdit={handleEditEvent}
         onDelete={handleDeleteEvent}
+        onShowRoute={(lat, lng) => {
+          // Show the route on the map
+          showDirectionsToEvent(lat, lng);
+          // Close the event details panel so user can see the route
+          setShowEventDetail(false);
+          setSelectedEvent(null);
+          // Switch to map view if not already there
+          if (viewMode !== "map") {
+            setViewMode("map");
+          }
+        }}
       />
 
       {/* Inline Event Creation Form - Bottom Sheet */}
       <AnimatePresence>
         {showEventForm && selectedEventLocation && (
           <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             className="fixed inset-x-0 z-50 bg-card rounded-t-3xl shadow-elevation-4 border-t border-border"
             style={{
               bottom: `calc(4.5rem + env(safe-area-inset-bottom, 0px))`,
@@ -1508,17 +1805,24 @@ const Events = () => {
               {/* Max Participants */}
               <div className="mb-4">
                 <Label htmlFor="max-participants" className="text-sm font-medium text-foreground mb-2 block">
-                  Max Participants
+                  Max Participants (Optional)
                 </Label>
                 <Input
                   id="max-participants"
                   type="number"
                   min={2}
                   max={1000}
-                  value={inlineEventForm.maxParticipants}
-                  onChange={(e) => setInlineEventForm(prev => ({ ...prev, maxParticipants: parseInt(e.target.value) || 10 }))}
+                  placeholder="Leave empty for unlimited"
+                  value={inlineEventForm.maxParticipants || ""}
+                  onChange={(e) => setInlineEventForm(prev => ({ 
+                    ...prev, 
+                    maxParticipants: e.target.value ? parseInt(e.target.value) : undefined 
+                  }))}
                   className="bg-muted/50"
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Leave empty for unlimited participants
+                </p>
               </div>
 
               {/* Description */}
@@ -1602,19 +1906,25 @@ const Events = () => {
       {/* Mobile Events Drawer */}
       <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DrawerContent className="max-h-[85vh]">
-          <DrawerHeader className="border-b border-border">
-            <div className="flex items-center justify-between">
-              <div>
-                <DrawerTitle>Events</DrawerTitle>
-                <DrawerDescription>
-                  {sortedEvents.length} event{sortedEvents.length !== 1 ? "s" : ""} found
-                </DrawerDescription>
+          <DrawerHeader className="border-b border-border pb-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="p-2 bg-primary/10 rounded-lg flex-shrink-0">
+                  <EventIcon className="text-primary" style={{ fontSize: 24 }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <DrawerTitle className="text-xl font-bold">Events</DrawerTitle>
+                  <DrawerDescription className="text-xs mt-0.5">
+                    {sortedEvents.length} event{sortedEvents.length !== 1 ? "s" : ""} found
+                  </DrawerDescription>
+                </div>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setDrawerOpen(false)}
-                className="h-8 w-8"
+                className="h-8 w-8 flex-shrink-0"
+                aria-label="Close events drawer"
               >
                 <CloseIcon style={{ fontSize: 20 }} />
               </Button>
@@ -1624,7 +1934,9 @@ const Events = () => {
           <div className="overflow-y-auto flex-1">
             {/* Filters inside drawer - Only activity filters */}
             <div className="p-4 border-b border-border bg-muted/30">
-              <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">Filter by Activity</p>
+              <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
+                Filter by Activity
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 <motion.button
                   whileTap={{ scale: 0.95 }}
@@ -1692,9 +2004,9 @@ const Events = () => {
             {/* Event List */}
             <div className="p-4 space-y-3">
               {sortedEvents.length === 0 ? (
-                <div className="text-center py-8">
-                  <EventIcon className="text-muted-foreground/30 mx-auto mb-2" style={{ fontSize: 48 }} />
-                  <p className="text-sm text-muted-foreground">No events found</p>
+                <div className="text-center py-12">
+                  <EventIcon className="text-muted-foreground/30 mx-auto mb-3" style={{ fontSize: 48 }} />
+                  <p className="text-sm font-medium text-muted-foreground">No events found</p>
                   <p className="text-xs text-muted-foreground mt-1">Try adjusting your filters</p>
                 </div>
               ) : (
@@ -1709,29 +2021,36 @@ const Events = () => {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
                       onClick={() => {
-                        if (mapRef) {
-                          mapRef.panTo({ lat: event.lat, lng: event.lng });
-                          mapRef.setZoom(15);
-                        }
-                        handleEventClick(event);
-                        setSelectedMarkerEvent(event);
+                        // Close drawer immediately first
                         setDrawerOpen(false);
-                        if (viewMode !== "map") {
-                          setViewMode("map");
-                        }
+                        
+                        // Then handle event click after a brief delay to allow drawer to close
+                        setTimeout(() => {
+                          if (mapRef) {
+                            mapRef.panTo({ lat: event.lat, lng: event.lng });
+                            mapRef.setZoom(15);
+                          }
+                          handleEventClick(event);
+                          if (viewMode !== "map") {
+                            setViewMode("map");
+                          }
+                        }, 100);
                       }}
                       className="cursor-pointer"
                     >
-                      <Card className="p-3 hover:shadow-elevation-2 transition-all border border-border">
+                      <Card className="p-4 hover:shadow-elevation-2 transition-all border border-border">
                         <div className="flex items-start gap-3">
                           <Avatar
                             src={event.hostAvatar}
                             alt={event.hostName}
                             sx={{ width: 48, height: 48 }}
+                            className="flex-shrink-0"
                           />
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              {getActivityIcon(event.type)}
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <div className="flex-shrink-0">
+                                {getActivityIcon(event.type)}
+                              </div>
                               <h4 className="font-semibold text-sm truncate">{event.title}</h4>
                             </div>
                             <p className="text-xs text-muted-foreground mb-2">
@@ -1762,7 +2081,7 @@ const Events = () => {
       
       {/* Quick Check-in, My Events, and View Toggle - Above Bottom Navigation */}
       <AnimatePresence>
-        {!showEventDetail && !selectedEvent && (
+        {!showEventDetail && !selectedEvent && !isPinMode && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1787,31 +2106,18 @@ const Events = () => {
                   <span className="text-sm font-semibold">My Events</span>
                 </Button>
 
-                {/* View Toggle - Grouped */}
-                <div className="flex gap-1 bg-muted rounded-xl p-1">
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setViewMode("map")}
-                className={`px-3 py-2 rounded-lg transition-all ${
-                  viewMode === "map"
-                    ? "bg-primary text-primary-foreground shadow-elevation-1"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <MapIcon style={{ fontSize: 20 }} />
-              </motion.button>
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setViewMode("list")}
-                className={`px-3 py-2 rounded-lg transition-all ${
-                  viewMode === "list"
-                    ? "bg-primary text-primary-foreground shadow-elevation-1"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <ViewListIcon style={{ fontSize: 20 }} />
-              </motion.button>
-            </div>
+                {/* Center User on Map Button */}
+                {viewMode === "map" && (
+                  <Button
+                    variant="outline"
+                    onClick={handleCenterOnMe}
+                    className="h-10 border-border bg-background hover:bg-secondary"
+                    disabled={isGettingLocation}
+                  >
+                    <MyLocationIcon style={{ fontSize: 16 }} className="mr-2" />
+                    <span className="text-sm font-semibold">Center</span>
+                  </Button>
+                )}
           </div>
         </div>
       </motion.div>
@@ -1845,9 +2151,11 @@ const Events = () => {
               {/* Header */}
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h2 className="text-2xl font-bold text-foreground">Notifications</h2>
+                  <h2 className="text-2xl font-bold text-foreground">Notification History</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'All caught up!'}
+                    {notifications.length > 0 
+                      ? `${notifications.length} total notification${notifications.length !== 1 ? 's' : ''}${unreadCount > 0 ? ` • ${unreadCount} unread` : ''}`
+                      : 'No notifications yet'}
                   </p>
                 </div>
                 <Button
@@ -1882,6 +2190,8 @@ const Events = () => {
                             return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
                           case "achievement":
                             return <EmojiEventsIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          case "username_change_required":
+                            return <EditIcon style={{ fontSize: 20 }} className="text-warning" />;
                           default:
                             return <NotificationsIcon style={{ fontSize: 20 }} />;
                         }
@@ -1903,6 +2213,8 @@ const Events = () => {
                             return "Workout Completed";
                           case "achievement":
                             return notification.message || "Congrats for a new achievement!";
+                          case "username_change_required":
+                            return "Username Change Required";
                           default:
                             return notification.userName;
                         }
@@ -1924,6 +2236,8 @@ const Events = () => {
                             return notification.message || "Workout completed successfully!";
                           case "achievement":
                             return notification.message || "Congrats for a new achievement!";
+                          case "username_change_required":
+                            return notification.message || "Your username has been changed due to misuse. Please update it to an appropriate username.";
                           default:
                             return "";
                         }

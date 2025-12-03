@@ -592,6 +592,10 @@ export const generateDummyWorkoutHistory = (): WorkoutHistory[] => {
 
 /**
  * Global flag to enable/disable dummy data
+ * Set via environment variable VITE_ENABLE_DUMMY_DATA
+ * Defaults to false in production, true in development
  */
-export const ENABLE_DUMMY_DATA = true; // Set to false in production
+export const ENABLE_DUMMY_DATA = 
+  import.meta.env.VITE_ENABLE_DUMMY_DATA === 'true' || 
+  (import.meta.env.VITE_ENV !== 'production' && import.meta.env.VITE_ENABLE_DUMMY_DATA !== 'false');
 

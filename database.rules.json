@@ -93,10 +93,18 @@
       ".write": "auth != null",
       "$eventId": {
         ".read": "auth != null",
-        ".write": "auth != null && (data.child('hostId').val() === auth.uid || newData.child('hostId').val() === auth.uid || root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true)",
+        ".write": "auth != null && ((auth.token.email != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true) || (!data.exists() && newData.child('hostId').val() === auth.uid) || (data.exists() && (data.child('hostId').val() === auth.uid || newData.child('hostId').val() === auth.uid)))",
         "participants": {
           ".read": "auth != null",
           ".write": "auth != null"
+        },
+        "comments": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          "$commentId": {
+            ".read": "auth != null",
+            ".write": "auth != null && (data.child('userId').val() === auth.uid || newData.child('userId').val() === auth.uid || (auth.token.email != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true))"
+          }
         }
       }
     },
@@ -229,6 +237,61 @@
         ".read": "auth != null",
         ".write": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
         ".validate": "newData.hasChildren(['id', 'name', 'description', 'lat', 'lng', 'radius', 'category', 'city'])"
+      }
+    },
+    "challengeZones": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+      "$zoneId": {
+        ".read": "auth != null",
+        ".write": "auth != null && root.child('adminEmails').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('[', '_').replace(']', '_')).val() == true",
+        ".validate": "newData.hasChildren(['id', 'name', 'description', 'lat', 'lng', 'radius', 'points', 'active', 'visible', 'createdAt'])"
+      }
+    },
+    "challengeParticipation": {
+      ".read": "auth != null",
+      "$userId": {
+        ".read": "$userId === auth.uid || auth != null",
+        ".write": "auth != null",
+        "$zoneId": {
+          ".read": "$userId === auth.uid || auth != null",
+          ".write": "auth != null",
+          "$date": {
+            ".read": "$userId === auth.uid || auth != null",
+            ".write": "auth != null && $userId === auth.uid",
+            ".validate": "newData.hasChildren(['userId', 'zoneId', 'date', 'workoutId', 'timestamp', 'points']) && newData.child('userId').val() === auth.uid"
+          }
+        }
+      }
+    },
+    "challengeLeaderboards": {
+      ".read": "auth != null",
+      "$zoneId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$userId": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['userId', 'zoneId', 'totalPoints', 'workoutsCount', 'lastWorkoutDate'])"
+        }
+      }
+    },
+    "emailOTPSignIn": {
+      ".read": true,
+      ".write": true,
+      "$emailKey": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['code', 'email', 'createdAt', 'expiresAt', 'attempts']) && newData.child('code').val().matches(/^\\d{6}$/) && newData.child('email').val().matches(/^[^@]+@[^@]+\\.[^@]+$/) && newData.child('createdAt').val() > 0 && newData.child('expiresAt').val() > newData.child('createdAt').val() && newData.child('attempts').val() >= 0"
+      }
+    },
+    "emailVerifications": {
+      ".read": true,
+      ".write": true,
+      "$emailKey": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['code', 'email', 'createdAt', 'expiresAt', 'attempts']) && newData.child('code').val().matches(/^\\d{6}$/) && newData.child('email').val().matches(/^[^@]+@[^@]+\\.[^@]+$/) && newData.child('createdAt').val() > 0 && newData.child('expiresAt').val() > newData.child('createdAt').val() && newData.child('attempts').val() >= 0"
       }
     }
   }

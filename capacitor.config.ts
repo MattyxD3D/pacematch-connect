@@ -64,6 +64,11 @@ const config: CapacitorConfig = {
           usage: 'always' // or 'whenInUse' for foreground only
         }
       }
+    },
+    GoogleAuth: {
+      scopes: ['profile', 'email'],
+      serverClientId: '891545961086-cs7aq62rgshps172c95ijdcnh2lsej5r.apps.googleusercontent.com', // Web Client ID - Used by Firebase to verify Google tokens
+      forceCodeForRefreshToken: true
     }
   }
 };

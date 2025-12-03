@@ -41,6 +41,7 @@ import TouchAppIcon from "@mui/icons-material/TouchApp";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
+import EditIcon from "@mui/icons-material/Edit";
 import BottomNavigation from "@/components/BottomNavigation";
 import { NotificationBell } from "@/components/NotificationBell";
 import { Switch } from "@/components/ui/switch";
@@ -73,8 +74,9 @@ const Index = () => {
   const [selectedActiveFriend, setSelectedActiveFriend] = useState<{ id: string; name?: string; username?: string; photoURL?: string; activity?: string } | null>(null);
   const [friendRequests, setFriendRequests] = useState<{ incoming: string[]; outgoing: string[] }>({ incoming: [], outgoing: [] });
   const [friendStatuses, setFriendStatuses] = useState<Record<string, { status: FriendStatus; cooldownUntil?: number }>>({});
-  // TODO: Set to false in production - this is for preview/demo purposes
-  const [showDummyData, setShowDummyData] = useState(true);
+  // Dummy data flag - controlled by environment variable for production
+  // Set VITE_ENABLE_DUMMY_DATA=false in production
+  const [showDummyData, setShowDummyData] = useState(ENABLE_DUMMY_DATA);
   const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
   const [profileVisible, setProfileVisible] = useState(false);
   const [generalLocation, setGeneralLocation] = useState<string>("");
@@ -693,10 +695,10 @@ const Index = () => {
           paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <div className="max-w-4xl mx-auto px-6 py-5">
+        <div className="max-w-2xl mx-auto px-6 py-5">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <h1 className="text-3xl font-bold mb-1">Welcome back, {username || userProfile?.username || currentUser?.displayName || "Athlete"}! 👋</h1>
+              <h1 className="text-3xl font-bold mb-1">Welcome back, {userProfile?.username || username || currentUser?.displayName || "Athlete"}! 👋</h1>
               <p className="text-sm text-muted-foreground">Stay connected with your fitness community</p>
             </div>
             {/* Notification Bell - Yellow when there are notifications */}
@@ -1769,6 +1771,8 @@ const Index = () => {
                             return <CheckCircleIcon style={{ fontSize: 20 }} className="text-success" />;
                           case "achievement":
                             return <EmojiEventsIcon style={{ fontSize: 20 }} className="text-warning" />;
+                          case "username_change_required":
+                            return <EditIcon style={{ fontSize: 20 }} className="text-warning" />;
                           default:
                             return <NotificationsIcon style={{ fontSize: 20 }} />;
                         }
@@ -1790,6 +1794,8 @@ const Index = () => {
                             return "Workout Completed";
                           case "achievement":
                             return notification.message || "Congrats for a new achievement!";
+                          case "username_change_required":
+                            return "Username Change Required";
                           default:
                             return notification.userName;
                         }
@@ -1811,6 +1817,8 @@ const Index = () => {
                             return notification.message || "Workout completed successfully!";
                           case "achievement":
                             return notification.message || "Congrats for a new achievement!";
+                          case "username_change_required":
+                            return notification.message || "Your username has been changed due to misuse. Please update it to an appropriate username.";
                           default:
                             return "";
                         }

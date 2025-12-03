@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import UserDetailDrawer from "@/components/UserDetailDrawer";
-import { getAllUsers, suspendUser, banUser, unbanUser, unsuspendUser, deleteUser, getUserReports, promoteUserToAdmin, demoteAdmin, isUserAdmin, logAdminAction } from "@/services/adminService";
+import { getAllUsers, suspendUser, banUser, unbanUser, unsuspendUser, deleteUser, getUserReports, promoteUserToAdmin, demoteAdmin, isUserAdmin, logAdminAction, requestUsernameChange } from "@/services/adminService";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import SearchIcon from "@mui/icons-material/Search";
@@ -43,6 +43,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import ReportProblemIcon from "@mui/icons-material/ReportProblem";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import PersonRemoveIcon from "@mui/icons-material/PersonRemove";
+import EditIcon from "@mui/icons-material/Edit";
 
 interface User {
   uid: string;
@@ -70,7 +71,7 @@ const AdminUsers = () => {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [actionDialog, setActionDialog] = useState<{
     open: boolean;
-    type: "suspend" | "ban" | "unban" | "unsuspend" | "delete" | "promote" | "demote" | null;
+    type: "suspend" | "ban" | "unban" | "unsuspend" | "delete" | "promote" | "demote" | "changeUsername" | null;
   }>({ open: false, type: null });
   const [adminStatuses, setAdminStatuses] = useState<Record<string, boolean>>({});
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -268,6 +269,35 @@ const AdminUsers = () => {
     } catch (error) {
       console.error("Error demoting admin:", error);
       toast.error("Failed to demote admin");
+    }
+  };
+
+  const handleChangeUsername = async (user: User) => {
+    if (!currentAdmin?.uid || !currentAdmin?.displayName) {
+      toast.error("Admin information is required");
+      return;
+    }
+    try {
+      await requestUsernameChange(
+        user.uid,
+        "Inappropriate username - please update to an appropriate username",
+        currentAdmin.uid,
+        currentAdmin.displayName
+      );
+      if (currentAdmin.email) {
+        await logAdminAction(currentAdmin.email, "change_username", {
+          userId: user.uid,
+          userName: user.name,
+          userEmail: user.email,
+          oldUsername: user.username || user.name
+        });
+      }
+      toast.success(`Username changed for ${user.name || user.email}. User has been notified.`);
+      await loadUsers();
+      setActionDialog({ open: false, type: null });
+    } catch (error) {
+      console.error("Error changing username:", error);
+      toast.error("Failed to change username");
     }
   };
 
@@ -506,6 +536,16 @@ const AdminUsers = () => {
                           <DropdownMenuItem
                             onClick={() => {
                               setSelectedUser(user);
+                              setActionDialog({ open: true, type: "changeUsername" });
+                            }}
+                            className="text-warning"
+                          >
+                            <EditIcon className="mr-2" style={{ fontSize: 18 }} />
+                            Change Username
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedUser(user);
                               setActionDialog({ open: true, type: "delete" });
                             }}
                             className="text-destructive"
@@ -661,6 +701,26 @@ const AdminUsers = () => {
             </AlertDialogCancel>
             <AlertDialogAction onClick={() => selectedUser && handleDemoteAdmin(selectedUser)}>
               Demote
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={actionDialog.open && actionDialog.type === "changeUsername"}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change Username</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will change {selectedUser?.name || selectedUser?.email}'s username to a default format (user {selectedUser?.uid?.substring(0, 8)}) 
+              and send them a notification to update it. The user will be notified that their username was changed due to misuse.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setActionDialog({ open: false, type: null })}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => selectedUser && handleChangeUsername(selectedUser)}>
+              Change Username
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -32,35 +32,42 @@ export interface MatchResult {
   distance: number; // in meters
 }
 
-// Base radius in meters for each activity type
-const BASE_RADIUS: Record<Activity, number> = {
-  cycling: 10000,  // 10km for cycling
-  running: 2000,   // 2km for running
-  walking: 1000    // 1km for walking
-};
-
-// Radius multipliers based on user preference
-const RADIUS_MULTIPLIERS: Record<RadiusPreference, number> = {
-  nearby: 0.5,   // 50% of base radius
-  normal: 1.0,   // 100% of base radius (default)
-  wide: 2.0      // 200% of base radius
+// Radius lookup table: exact distances for each activity and preference combination
+// Still Apply (nearby 0.5x), Normal (1x), Wide (2x)
+const RADIUS_LOOKUP: Record<Activity, Record<RadiusPreference, number>> = {
+  walking: {
+    nearby: 100,   // Still Apply (0.5x): 100m
+    normal: 200,   // Normal (1x): 200m
+    wide: 400      // Wide (2x): 400m
+  },
+  running: {
+    nearby: 200,   // Still Apply (0.5x): 200m (slightly tighter)
+    normal: 350,   // Normal (1x): 350m (optimized from 500m)
+    wide: 800      // Wide (2x): 800m (more reasonable)
+  },
+  cycling: {
+    nearby: 400,   // Still Apply (0.5x): 400m (tighter)
+    normal: 1000,  // Normal (1x): 1km
+    wide: 2000     // Wide (2x): 2km
+  }
 };
 
 /**
  * Get radius based on activity type and user preference
- * Cycling: 10km base, Running: 2km base, Walking: 1km base
- * Multiplied by preference: nearby (0.5x), normal (1x), wide (2x)
+ * Uses direct lookup table for exact distance control
+ * Still Apply (nearby): Walking 100m, Running 200m, Cycling 400m
+ * Normal: Walking 200m, Running 350m, Cycling 1km
+ * Wide: Walking 400m, Running 800m, Cycling 2km
  */
 export function computeRadius(
   user: MatchingUser,
   nearbyCount?: number
 ): number {
-  const baseRadius = BASE_RADIUS[user.activity] || BASE_RADIUS.running;
+  const activity = user.activity || "running";
   const preference = user.radiusPreference || "normal";
-  const multiplier = RADIUS_MULTIPLIERS[preference] || 1.0;
   
-  // Return radius adjusted by user preference
-  return Math.round(baseRadius * multiplier);
+  // Return exact radius from lookup table
+  return RADIUS_LOOKUP[activity]?.[preference] || RADIUS_LOOKUP.running.normal;
 }
 
 /**

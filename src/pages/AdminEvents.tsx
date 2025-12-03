@@ -38,6 +38,8 @@ import LocationOnIcon from "@mui/icons-material/LocationOn";
 import CancelIcon from "@mui/icons-material/Cancel";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutline";
+import DeleteSweepIcon from "@mui/icons-material/DeleteSweep";
+import WarningIcon from "@mui/icons-material/Warning";
 import {
   Dialog,
   DialogContent,
@@ -55,10 +57,13 @@ const AdminEvents = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "running" | "cycling" | "walking" | "others">("all");
   const [categoryFilter, setCategoryFilter] = useState<"all" | "user" | "sponsored">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "expired">("all");
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [cancelDialog, setCancelDialog] = useState(false);
   const [participantsDialog, setParticipantsDialog] = useState(false);
+  const [deleteExpiredDialog, setDeleteExpiredDialog] = useState(false);
+  const [deletingExpired, setDeletingExpired] = useState(false);
   const [userData, setUserData] = useState<Record<string, any>>({});
   const [participantsData, setParticipantsData] = useState<Record<string, any>>({});
 
@@ -68,7 +73,7 @@ const AdminEvents = () => {
 
   useEffect(() => {
     filterEvents();
-  }, [events, searchQuery, typeFilter, categoryFilter]);
+  }, [events, searchQuery, typeFilter, categoryFilter, statusFilter]);
 
   const loadEvents = async () => {
     try {
@@ -122,6 +127,67 @@ const AdminEvents = () => {
     }
   };
 
+  /**
+   * Check if an event is expired (event date/time has passed)
+   * An event is considered expired if the current time is past the event's date and time
+   */
+  const isEventExpired = (event: Event): boolean => {
+    if (!event.date || !event.time) {
+      return false; // Can't determine if expired without date/time
+    }
+
+    try {
+      // Parse the event date and time
+      let eventDateTime: Date;
+      
+      // Handle different date formats
+      if (event.date.includes('T')) {
+        // Already includes time
+        eventDateTime = new Date(event.date);
+      } else if (event.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        // ISO date format (YYYY-MM-DD) - combine with time
+        eventDateTime = new Date(`${event.date}T${event.time}`);
+      } else if (event.date.includes('/')) {
+        // Format like "12/25/2024" or "MM/DD/YYYY"
+        const parts = event.date.split('/');
+        if (parts.length === 3) {
+          const firstPart = parseInt(parts[0]);
+          if (firstPart > 12) {
+            // DD/MM/YYYY format
+            eventDateTime = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T${event.time}`);
+          } else {
+            // MM/DD/YYYY format
+            eventDateTime = new Date(`${parts[2]}-${parts[0]}-${parts[1]}T${event.time}`);
+          }
+        } else {
+          eventDateTime = new Date(`${event.date}T${event.time}`);
+        }
+      } else {
+        // Try parsing as-is or with time appended
+        eventDateTime = new Date(`${event.date}T${event.time}`);
+      }
+
+      // Validate the date
+      if (isNaN(eventDateTime.getTime())) {
+        return false; // Invalid date, don't consider expired
+      }
+
+      // Check if current time is past the event time
+      const now = new Date();
+      return now > eventDateTime;
+    } catch (error) {
+      console.error("Error checking if event is expired:", error);
+      return false;
+    }
+  };
+
+  /**
+   * Get all expired events
+   */
+  const getExpiredEvents = (): Event[] => {
+    return events.filter(event => isEventExpired(event));
+  };
+
   const filterEvents = () => {
     let filtered = [...events];
 
@@ -133,6 +199,13 @@ const AdminEvents = () => {
     // Filter by category
     if (categoryFilter !== "all") {
       filtered = filtered.filter(event => event.category === categoryFilter);
+    }
+
+    // Filter by status (active/expired)
+    if (statusFilter === "active") {
+      filtered = filtered.filter(event => !isEventExpired(event));
+    } else if (statusFilter === "expired") {
+      filtered = filtered.filter(event => isEventExpired(event));
     }
 
     // Filter by search query
@@ -197,6 +270,52 @@ const AdminEvents = () => {
     } catch (error) {
       console.error("Error cancelling event:", error);
       toast.error("Failed to cancel event");
+    }
+  };
+
+  /**
+   * Delete all expired events
+   * This function finds all expired events and deletes them from the database
+   */
+  const handleDeleteExpiredEvents = async () => {
+    try {
+      setDeletingExpired(true);
+      const expiredEvents = getExpiredEvents();
+      
+      if (expiredEvents.length === 0) {
+        toast.info("No expired events to delete");
+        setDeleteExpiredDialog(false);
+        return;
+      }
+
+      // Delete each expired event
+      const deletePromises = expiredEvents.map(async (event) => {
+        const eventRef = ref(database, `events/${event.id}`);
+        await remove(eventRef);
+        
+        // Log admin action for each deletion
+        if (currentAdmin?.email) {
+          await logAdminAction(currentAdmin.email, "delete_expired_event", {
+            eventId: event.id,
+            eventTitle: event.title,
+            hostId: event.hostId,
+            participantsCount: event.participants?.length || 0,
+            eventDate: event.date,
+            eventTime: event.time
+          });
+        }
+      });
+
+      await Promise.all(deletePromises);
+      
+      toast.success(`Successfully deleted ${expiredEvents.length} expired event(s)`);
+      await loadEvents();
+      setDeleteExpiredDialog(false);
+    } catch (error) {
+      console.error("Error deleting expired events:", error);
+      toast.error("Failed to delete expired events");
+    } finally {
+      setDeletingExpired(false);
     }
   };
 
@@ -276,8 +395,22 @@ const AdminEvents = () => {
             View and manage all events
           </p>
         </div>
-        <div className="text-sm text-muted-foreground">
-          {filteredEvents.length} events
+        <div className="flex items-center gap-4">
+          <div className="text-sm text-muted-foreground">
+            {filteredEvents.length} events
+            {statusFilter === "expired" && ` (${getExpiredEvents().length} expired)`}
+          </div>
+          {getExpiredEvents().length > 0 && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setDeleteExpiredDialog(true)}
+              className="gap-2"
+            >
+              <DeleteSweepIcon style={{ fontSize: 18 }} />
+              Delete All Expired ({getExpiredEvents().length})
+            </Button>
+          )}
         </div>
       </div>
 
@@ -356,6 +489,32 @@ const AdminEvents = () => {
                 Sponsored
               </Button>
             </div>
+            <div className="flex gap-2">
+              <span className="text-sm text-muted-foreground self-center mr-2">Status:</span>
+              <Button
+                variant={statusFilter === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setStatusFilter("all")}
+              >
+                All
+              </Button>
+              <Button
+                variant={statusFilter === "active" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setStatusFilter("active")}
+              >
+                Active
+              </Button>
+              <Button
+                variant={statusFilter === "expired" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setStatusFilter("expired")}
+                className="gap-1"
+              >
+                <WarningIcon style={{ fontSize: 16 }} />
+                Expired ({getExpiredEvents().length})
+              </Button>
+            </div>
           </div>
         </div>
       </Card>
@@ -383,11 +542,21 @@ const AdminEvents = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredEvents.map((event) => (
-                  <TableRow key={event.id}>
+                filteredEvents.map((event) => {
+                  const expired = isEventExpired(event);
+                  return (
+                  <TableRow key={event.id} className={expired ? "opacity-60 bg-muted/30" : ""}>
                     <TableCell>
                       <div>
-                        <p className="font-medium">{event.title}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{event.title}</p>
+                          {expired && (
+                            <Badge variant="destructive" className="text-xs">
+                              <WarningIcon style={{ fontSize: 12 }} className="mr-1" />
+                              Expired
+                            </Badge>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground line-clamp-2">
                           {event.description}
                         </p>
@@ -471,7 +640,8 @@ const AdminEvents = () => {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -576,6 +746,36 @@ const AdminEvents = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Expired Events Dialog */}
+      <AlertDialog open={deleteExpiredDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete All Expired Events</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete all {getExpiredEvents().length} expired event(s)? 
+              This action cannot be undone and will permanently remove these events from the database.
+              <br /><br />
+              <strong>This will affect all participants who joined these events.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel 
+              onClick={() => setDeleteExpiredDialog(false)}
+              disabled={deletingExpired}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteExpiredEvents}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deletingExpired}
+            >
+              {deletingExpired ? "Deleting..." : `Delete ${getExpiredEvents().length} Event(s)`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

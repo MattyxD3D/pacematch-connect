@@ -22,6 +22,7 @@ import SpeedIcon from "@mui/icons-material/Speed";
 import CloseIcon from "@mui/icons-material/Close";
 import PeopleIcon from "@mui/icons-material/People";
 import TouchAppIcon from "@mui/icons-material/TouchApp";
+import RouteIcon from "@mui/icons-material/Route";
 import { toast } from "sonner";
 import { getUserData } from "@/services/authService";
 import { CircularProgress } from "@mui/material";
@@ -36,6 +37,11 @@ interface NearbyUser {
   isSameActivity?: boolean; // Flag indicating if user's activity matches workout activity
 }
 
+interface LocationHistoryPoint {
+  lat: number;
+  lng: number;
+}
+
 interface WorkoutSummaryModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -48,6 +54,7 @@ interface WorkoutSummaryModalProps {
   useMetric: boolean;
   nearbyUsers?: NearbyUser[];
   pokes?: string[]; // Array of user IDs who poked during workout
+  locationHistory?: LocationHistoryPoint[]; // Route trail points for map visualization
 }
 
 export const WorkoutSummaryModal = ({
@@ -62,6 +69,7 @@ export const WorkoutSummaryModal = ({
   useMetric,
   nearbyUsers = [],
   pokes = [],
+  locationHistory = [],
 }: WorkoutSummaryModalProps) => {
   const navigate = useNavigate();
   const [pokeUsers, setPokeUsers] = useState<Record<string, any>>({});
@@ -325,6 +333,79 @@ export const WorkoutSummaryModal = ({
               </div>
             </div>
           </motion.div>
+
+          {/* Route Map Visualization */}
+          {locationHistory.length > 1 && (() => {
+            // Calculate route bounds
+            const lats = locationHistory.map(p => p.lat);
+            const lngs = locationHistory.map(p => p.lng);
+            const minLat = Math.min(...lats);
+            const maxLat = Math.max(...lats);
+            const minLng = Math.min(...lngs);
+            const maxLng = Math.max(...lngs);
+            
+            // Calculate center
+            const centerLat = (minLat + maxLat) / 2;
+            const centerLng = (minLng + maxLng) / 2;
+            
+            // Create encoded polyline path for Google Maps Static API
+            // Simple encoding: convert lat/lng to string format
+            const pathPoints = locationHistory.map(p => `${p.lat},${p.lng}`).join('|');
+            
+            // Get Google Maps API key from environment
+            const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+            
+            // Build static map URL
+            const staticMapUrl = apiKey 
+              ? `https://maps.googleapis.com/maps/api/staticmap?size=400x200&zoom=13&path=color:0x1976d2|weight:4|${pathPoints}&markers=color:green|${locationHistory[0].lat},${locationHistory[0].lng}&markers=color:red|${locationHistory[locationHistory.length - 1].lat},${locationHistory[locationHistory.length - 1].lng}&key=${apiKey}`
+              : null;
+            
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="space-y-2"
+              >
+                <div className="flex items-center gap-2">
+                  <RouteIcon className="text-primary" style={{ fontSize: 16 }} />
+                  <h3 className="font-semibold text-xs">Route Map</h3>
+                </div>
+                <Card className="overflow-hidden border border-border/50">
+                  {staticMapUrl ? (
+                    <div className="relative w-full" style={{ paddingTop: '50%' }}>
+                      <img
+                        src={staticMapUrl}
+                        alt="Workout route"
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => {
+                          // Fallback if image fails to load
+                          e.currentTarget.style.display = 'none';
+                          const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 flex items-center justify-center" style={{ display: 'none' }}>
+                        <div className="text-center px-2">
+                          <RouteIcon className="text-muted-foreground mx-auto mb-1" style={{ fontSize: 32 }} />
+                          <p className="text-xs text-muted-foreground">Route visualization</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{locationHistory.length} points tracked</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 rounded-lg h-32 flex items-center justify-center border border-border">
+                      <div className="text-center px-2">
+                        <RouteIcon className="text-muted-foreground mx-auto mb-1" style={{ fontSize: 32 }} />
+                        <p className="text-xs text-muted-foreground">Route visualization</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">{locationHistory.length} points tracked</p>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              </motion.div>
+            );
+          })()}
 
           {/* Pokes Received Section */}
           {pokes.length > 0 && (

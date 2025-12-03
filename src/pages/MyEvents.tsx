@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { getUserEvents, Event as FirebaseEvent, leaveEvent, updateEvent } from "@/services/eventService";
+import { getUserEvents, Event as FirebaseEvent, leaveEvent, updateEvent, deleteEvent } from "@/services/eventService";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,11 +12,13 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
+import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";
 import EventIcon from "@mui/icons-material/Event";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import PeopleIcon from "@mui/icons-material/People";
 import StarIcon from "@mui/icons-material/Star";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import EditIcon from "@mui/icons-material/Edit";
 import UpcomingIcon from "@mui/icons-material/Upcoming";
 import HistoryIcon from "@mui/icons-material/History";
 import ExploreIcon from "@mui/icons-material/Explore";
@@ -209,9 +211,34 @@ const MyEvents = () => {
       toast.success("You've left the event");
       // Remove from local state
       setJoinedEvents(prev => prev.filter(e => e.id !== eventId));
+      // Close modal if open
+      if (selectedEvent?.id === eventId) {
+        setShowEventDetail(false);
+        setSelectedEvent(null);
+      }
     } catch (error: any) {
       console.error("Error leaving event:", error);
       toast.error(error.message || "Failed to leave event");
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    if (!currentUser?.uid) {
+      toast.error("Please log in to delete events");
+      return;
+    }
+
+    try {
+      await deleteEvent(eventId, currentUser.uid);
+      toast.success("Event deleted successfully");
+      // Remove from local state
+      setJoinedEvents(prev => prev.filter(e => e.id !== eventId));
+      // Close modal
+      setShowEventDetail(false);
+      setSelectedEvent(null);
+    } catch (error: any) {
+      console.error("Error deleting event:", error);
+      toast.error(error.message || "Failed to delete event");
     }
   };
 
@@ -466,6 +493,7 @@ const MyEvents = () => {
                     index={index}
                     onClick={() => handleEventClick(event)}
                     onLeave={() => handleLeaveEvent(event.id)}
+                    onEdit={() => handleEditEvent(event.id)}
                     getActivityIcon={getActivityIcon}
                     showLeaveButton
                   />
@@ -687,6 +715,7 @@ const MyEvents = () => {
                     index={index}
                     onClick={() => handleEventClick(event)}
                     onLeave={() => handleLeaveEvent(event.id)}
+                    onEdit={() => handleEditEvent(event.id)}
                     getActivityIcon={getActivityIcon}
                     isPast
                   />
@@ -707,6 +736,7 @@ const MyEvents = () => {
           }}
           onJoin={handleLeaveEvent}
           onEdit={handleEditEvent}
+          onDelete={handleDeleteEvent}
         />
       )}
 
@@ -728,6 +758,7 @@ interface EventCardProps {
   index: number;
   onClick: () => void;
   onLeave: () => void;
+  onEdit?: () => void;
   getActivityIcon: (type: EventType) => JSX.Element;
   showLeaveButton?: boolean;
   isPast?: boolean;
@@ -738,10 +769,15 @@ const EventCard = ({
   index,
   onClick,
   onLeave,
+  onEdit,
   getActivityIcon,
   showLeaveButton,
   isPast,
 }: EventCardProps) => {
+  const { user: currentUser } = useAuth();
+  // Check if current user is the event owner
+  const isEventOwner = currentUser?.uid && event.hostId === currentUser.uid;
+  
   // Add defensive checks for potentially missing data
   const participantsCount = Array.isArray(event.participants) 
     ? event.participants.length 
@@ -770,78 +806,113 @@ const EventCard = ({
             : "border-border/50 hover:border-primary/30"
         }`}
       >
-        <div className="p-5 space-y-4">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-3">
+        {/* Gradient Header - Similar to EventDetailsPanel */}
+        <div className={`relative p-4 pb-5 rounded-t-lg ${
+          isPast 
+            ? "bg-gradient-to-r from-warning/80 via-warning/70 to-warning/80" 
+            : "bg-gradient-to-r from-primary via-primary to-success"
+        }`}>
+          <div className="flex items-start gap-3 pr-16">
+            <div className="p-2.5 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 flex-shrink-0">
+              {eventType === "running" && <DirectionsRunIcon className="text-white" style={{ fontSize: 20 }} />}
+              {eventType === "cycling" && <DirectionsBikeIcon className="text-white" style={{ fontSize: 20 }} />}
+              {eventType === "walking" && <DirectionsWalkIcon className="text-white" style={{ fontSize: 20 }} />}
+              {eventType === "others" && <FitnessCenterIcon className="text-white" style={{ fontSize: 20 }} />}
+            </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-2">
-                {getActivityIcon(eventType)}
-                <h3 className="font-bold text-lg truncate">{eventTitle}</h3>
+              <div className="flex items-start gap-2 mb-1.5">
+                <h3 className="font-bold text-lg sm:text-xl text-white truncate drop-shadow-md">{eventTitle}</h3>
+                {event.category === "sponsored" && (
+                  <Badge className="flex-shrink-0 bg-warning/20 text-warning border-warning/40">
+                    <StarIcon style={{ fontSize: 12 }} className="mr-1" />
+                    Sponsored
+                  </Badge>
+                )}
                 {isPast && (
-                  <Badge variant="secondary" className="flex-shrink-0 bg-muted">
+                  <Badge className="flex-shrink-0 bg-white/20 text-white border-white/30">
                     Completed
                   </Badge>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground line-clamp-2">
+              <p className="text-sm text-white/90 line-clamp-2 drop-shadow-sm">
                 {eventDescription}
               </p>
             </div>
-            {event.category === "sponsored" && (
-              <Badge
-                variant="secondary"
-                className="flex-shrink-0 bg-warning/10 text-warning border-warning/30"
-              >
-                <StarIcon style={{ fontSize: 14 }} className="mr-1" />
-                Sponsored
-              </Badge>
-            )}
+          </div>
+        </div>
+
+        {/* Event Info Section */}
+        <div className="p-5 space-y-4">
+          {/* Event Details Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex items-center gap-2 text-muted-foreground bg-muted/30 rounded-lg p-3">
+              <EventIcon style={{ fontSize: 18 }} className="text-primary" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground mb-0.5">Date & Time</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {eventDate} {eventTime && `at ${eventTime}`}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-muted-foreground bg-muted/30 rounded-lg p-3">
+              <LocationOnIcon style={{ fontSize: 18 }} className="text-primary" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground mb-0.5">Location</p>
+                <p className="text-sm font-semibold text-foreground truncate">{eventLocation}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-muted-foreground bg-muted/30 rounded-lg p-3 sm:col-span-2">
+              <PeopleIcon style={{ fontSize: 18 }} className="text-primary" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground mb-0.5">Participants</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {participantsCount}
+                  {event.maxParticipants ? ` / ${event.maxParticipants}` : ""} joined
+                </p>
+              </div>
+            </div>
           </div>
 
-          {/* Event Info */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <EventIcon style={{ fontSize: 18 }} />
-              <span>
-                {eventDate} {eventTime && `at ${eventTime}`}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <LocationOnIcon style={{ fontSize: 18 }} />
-              <span className="truncate">{eventLocation}</span>
-            </div>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <PeopleIcon style={{ fontSize: 18 }} />
-              <span>
-                {participantsCount}
-                {event.maxParticipants ? ` / ${event.maxParticipants}` : ""} joined
-              </span>
-            </div>
-          </div>
-
-          {/* Status Badge */}
-          <div className="flex items-center justify-between pt-2 border-t border-border">
+          {/* Status Badge and Action */}
+          <div className="flex items-center justify-between pt-3 border-t border-border">
             <div className="flex items-center gap-2">
               <CheckCircleIcon 
                 className={isPast ? "text-warning" : "text-success"} 
                 style={{ fontSize: 20 }} 
               />
               <span className={`text-sm font-semibold ${isPast ? "text-warning" : "text-success"}`}>
-                {isPast ? "Event Completed" : "You're Joined"}
+                {isPast ? "Event Completed" : isEventOwner ? "You're Hosting" : "You're Joined"}
               </span>
             </div>
-            {showLeaveButton && !isPast && (
-              <Button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onLeave();
-                }}
-                variant="outline"
-                size="sm"
-                className="h-9"
-              >
-                Leave Event
-              </Button>
+            {!isPast && (
+              <>
+                {isEventOwner && onEdit ? (
+                  <Button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit();
+                    }}
+                    variant="outline"
+                    size="sm"
+                    className="h-9 border-2 hover:bg-primary/10 hover:border-primary/50"
+                  >
+                    <EditIcon className="mr-1" style={{ fontSize: 16 }} />
+                    Edit Event
+                  </Button>
+                ) : showLeaveButton && !isEventOwner ? (
+                  <Button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onLeave();
+                    }}
+                    variant="outline"
+                    size="sm"
+                    className="h-9 border-2 hover:bg-destructive/10 hover:border-destructive/50"
+                  >
+                    Leave Event
+                  </Button>
+                ) : null}
+              </>
             )}
           </div>
         </div>

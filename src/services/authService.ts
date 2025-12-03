@@ -17,6 +17,10 @@ import {
   updateProfile,
   fetchSignInMethodsForEmail
 } from "firebase/auth";
+import { Browser } from "@capacitor/browser";
+import { Capacitor } from "@capacitor/core";
+import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
+import { signInWithCredential, GoogleAuthProvider } from "firebase/auth";
 import { ref, set, get, onValue } from "firebase/database";
 import { auth, googleProvider, database } from "./firebase";
 import { clearUserLocation } from "./locationService";
@@ -112,60 +116,71 @@ export const validateFirebaseConfig = async (): Promise<{
 };
 
 /**
- * Check if running in a mobile device or Capacitor
- * @returns {boolean} True if mobile/Capacitor detected
+ * Check if running in Capacitor native app (iOS/Android)
+ * @returns {boolean} True if running in Capacitor native platform
  */
-const isMobileOrCapacitor = (): boolean => {
-  // Check for Capacitor
-  if (typeof (window as any).Capacitor !== 'undefined') {
-    return true;
+const isCapacitorNative = (): boolean => {
+  try {
+    // Use the imported Capacitor directly
+    const platform = Capacitor.getPlatform();
+    const isNative = Capacitor.isNativePlatform();
+    
+    console.log(`🔍 Capacitor detection: platform="${platform}", isNative=${isNative}`);
+    
+    return isNative;
+  } catch (e) {
+    console.error('❌ Error checking Capacitor platform:', e);
+    
+    // Fallback check
+    if (typeof (window as any).Capacitor !== 'undefined') {
+      const platform = (window as any).Capacitor.getPlatform?.();
+      const isNative = (window as any).Capacitor.isNativePlatform?.() === true;
+      console.log(`🔍 Capacitor fallback: platform="${platform}", isNative=${isNative}`);
+      return isNative;
+    }
+    
+    console.log('❌ Capacitor not detected - running in web browser');
+    return false;
   }
-  
-  // Check user agent for mobile devices
-  const userAgent = navigator.userAgent.toLowerCase();
-  const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
-  
-  // Check for touch device
-  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  
-  // Check screen size (mobile typically < 768px)
-  const isSmallScreen = window.innerWidth < 768;
-  
-  // For Chrome mobile view, check if screen is small (even without touch)
-  // This catches Chrome DevTools mobile view and responsive design mode
-  const isChromeMobileView = isSmallScreen && /chrome/i.test(userAgent);
-  
-  // Return true if: mobile UA, OR (touch device AND small screen), OR Chrome mobile view
-  return isMobile || (isTouchDevice && isSmallScreen) || isChromeMobileView;
 };
 
 /**
  * Check if running in a storage-partitioned browser environment
  * (e.g., embedded browsers in Messenger, Facebook, etc.)
+ * BUT exclude Capacitor apps (which use WebView but work fine)
  * @returns {boolean} True if storage-partitioned environment detected
  */
 const isStoragePartitioned = (): boolean => {
+  // If it's a Capacitor native app, it's NOT storage-partitioned
+  // Capacitor WebView works fine with Firebase Auth redirect
+  if (isCapacitorNative()) {
+    return false;
+  }
+  
   try {
     // Try to access sessionStorage
     const testKey = '__storage_test__';
     sessionStorage.setItem(testKey, 'test');
     sessionStorage.removeItem(testKey);
     
-    // Check for common embedded browser indicators
+    // Check for common embedded browser indicators (but NOT Capacitor)
     const userAgent = navigator.userAgent.toLowerCase();
     const isEmbedded = 
-      window.parent !== window || // In iframe
-      userAgent.includes('wv') || // Android WebView
+      window.parent !== window || // In iframe (not Capacitor)
       userAgent.includes('messenger') || // Facebook Messenger
       userAgent.includes('fban') || // Facebook App
       userAgent.includes('fbav'); // Facebook App
+    // Note: We don't check for 'wv' (WebView) because Capacitor uses WebView
+    // and it works fine. Only flag actual embedded browsers like Messenger.
     // Note: navigator.standalone === false is NORMAL for regular Safari browsers,
     // so we don't check it here to avoid false positives
     
     return isEmbedded;
   } catch (e) {
-    // If sessionStorage access fails, likely storage-partitioned
-    return true;
+    // If sessionStorage access fails, check if it's Capacitor first
+    // Capacitor apps can have sessionStorage, so if it fails AND it's not Capacitor,
+    // then it's likely storage-partitioned
+    return !isCapacitorNative();
   }
 };
 
@@ -187,22 +202,166 @@ export const signInWithGoogle = async (): Promise<UserData | null> => {
     throw new Error("STORAGE_PARTITIONED: Please open this app in your regular browser (Chrome, Safari, Firefox) instead of an embedded browser. Tap the menu icon and select 'Open in Browser'.");
   }
 
-  // For mobile/Capacitor, always use redirect (better UX)
-  // For desktop, try popup first, fallback to redirect
-  const useRedirect = isMobileOrCapacitor();
+  // Use native Google Sign-In for Capacitor apps (best UX - no browser)
+  // Use popup/redirect for web browsers
+  if (isCapacitorNative()) {
+    console.log("📱 Capacitor native app detected - using native Google Sign-In");
+    
+    try {
+      // Initialize Google Auth plugin
+      // The plugin automatically reads serverClientId (Web Client ID) from capacitor.config.ts
+      // Web Client ID: 891545961086-cs7aq62rgshps172c95ijdcnh2lsej5r.apps.googleusercontent.com
+      console.log("🔄 Initializing Google Auth plugin...");
+      console.log("📋 Using Web Client ID from capacitor.config.ts for Firebase token verification");
+      
+      try {
+        await GoogleAuth.initialize();
+        console.log("✅ Google Auth plugin initialized successfully");
+      } catch (initError: any) {
+        console.error("❌ Failed to initialize Google Auth plugin:", initError);
+        console.error("❌ Init error type:", typeof initError);
+        console.error("❌ Init error keys:", Object.keys(initError || {}));
+        console.error("❌ Init error message:", initError?.message);
+        console.error("❌ Init error code:", initError?.code);
+        console.error("❌ Init error toString:", String(initError));
+        throw new Error(`Failed to initialize Google Auth: ${initError?.message || initError?.code || String(initError)}`);
+      }
 
-  if (useRedirect) {
-    // Use redirect method for mobile/Capacitor
-    console.log("📱 Mobile/Capacitor detected - using redirect method");
-    await signInWithRedirect(auth, googleProvider);
-    // Note: signInWithRedirect doesn't return immediately - it redirects the page
-    // The result will be handled by handleRedirectResult()
-    return null; // Will be handled by redirect callback
+      // Sign in with native Google Auth
+      console.log("🔄 Calling GoogleAuth.signIn()...");
+      let result;
+      try {
+        result = await GoogleAuth.signIn();
+        console.log("✅ GoogleAuth.signIn() completed");
+      } catch (signInError: any) {
+        // Log every possible property of the error
+        console.error("❌ GoogleAuth.signIn() FAILED");
+        console.error("❌ Raw error:", signInError);
+        console.error("❌ Error type:", typeof signInError);
+        
+        // Try to extract all properties
+        if (signInError) {
+          try {
+            console.error("❌ Error.keys:", Object.keys(signInError));
+            for (const key of Object.keys(signInError)) {
+              console.error(`❌ Error.${key}:`, signInError[key]);
+            }
+          } catch (e) {
+            console.error("❌ Could not enumerate error keys:", e);
+          }
+        }
+        
+        // Check specific properties
+        console.error("❌ Error.message:", signInError?.message);
+        console.error("❌ Error.code:", signInError?.code);
+        console.error("❌ Error.statusCode:", signInError?.statusCode);
+        console.error("❌ Error.status:", signInError?.status);
+        console.error("❌ Error.name:", signInError?.name);
+        console.error("❌ Error.toString():", String(signInError));
+        console.error("❌ Error JSON:", JSON.stringify(signInError, Object.getOwnPropertyNames(signInError)));
+        
+        // Check for common error codes
+        const errorCode = signInError?.code || signInError?.statusCode || signInError?.status;
+        if (errorCode) {
+          console.error(`❌ ERROR CODE FOUND: ${errorCode}`);
+          if (errorCode === 10 || errorCode === '10' || String(errorCode).includes('10')) {
+            // If Error Code 10, fallback to web-based sign-in instead of throwing error
+            console.log("⚠️ Error Code 10 detected - falling back to web-based sign-in");
+            throw new Error("FALLBACK_TO_WEB");
+          } else if (errorCode === 7 || errorCode === '7') {
+            throw new Error("NETWORK_ERROR (Code 7): Check your internet connection");
+          } else if (errorCode === 12500 || errorCode === '12500') {
+            throw new Error("SIGN_IN_CANCELLED (Code 12500): User cancelled sign-in");
+          }
+        }
+        
+        // If we can't get a specific code, throw with all available info
+        const errorMsg = signInError?.message || String(signInError) || 'Unknown error';
+        throw new Error(`Google Sign-In failed: ${errorMsg} (Code: ${errorCode || 'unknown'})`);
+      }
+      
+      console.log("Google Sign-In result:", result);
+      
+      if (!result || !result.authentication) {
+        throw new Error("Google Sign-In was cancelled or failed - no authentication data");
+      }
+
+      const { idToken, accessToken } = result.authentication;
+
+      if (!idToken || !accessToken) {
+        throw new Error("Google Sign-In failed - missing tokens");
+      }
+
+      console.log("Got Google tokens, exchanging for Firebase credential...");
+
+      // Create Firebase credential from Google token
+      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+
+      // Sign in to Firebase with the credential
+      const firebaseUserCredential = await signInWithCredential(auth, credential);
+      const user = firebaseUserCredential.user;
+
+      console.log("✅ Successfully signed in to Firebase:", user.uid);
+
+      // Save user to Firebase Realtime Database
+      await saveUserToDatabase(user);
+
+      return {
+        uid: user.uid,
+        displayName: user.displayName,
+        email: user.email,
+        photoURL: user.photoURL,
+        phoneNumber: user.phoneNumber
+      };
+    } catch (error: any) {
+      console.error("❌ Error with native Google Sign-In:", error);
+      
+      // If Error Code 10 (Android OAuth Client ID issue), fallback to web-based sign-in
+      if (error.message === "FALLBACK_TO_WEB" || error.code === 10 || error.message?.includes('DEVELOPER_ERROR')) {
+        console.log("⚠️ Native sign-in failed (Error Code 10) - falling back to web-based sign-in");
+        // Fall through to web-based sign-in below
+      } else {
+        // For other errors, throw them
+        if (error.message?.includes('cancelled') || error.message?.includes('CANCELED')) {
+          throw new Error("Sign-in was cancelled. Please try again.");
+        }
+        
+        // Provide more helpful error messages based on common issues
+        let errorMessage = `Native Google Sign-In failed: ${error.message || 'Unknown error'}`;
+        
+        if (error.message?.includes('INVALID_CLIENT')) {
+          errorMessage = "Invalid client: Check that Android OAuth Client ID is configured correctly in Google Cloud Console.";
+        } else if (error.message?.includes('SIGN_IN_REQUIRED')) {
+          errorMessage = "Sign-in required: Make sure Google Sign-In services are enabled.";
+        }
+        
+        console.error(`❌ ${errorMessage}`);
+        throw new Error(errorMessage);
+      }
+    }
   }
 
-  // For desktop, try popup first
+  // For web (desktop OR mobile browser), or fallback from native sign-in
+  // Try popup first (better UX), fallback to redirect
   try {
-    console.log("🖥️ Desktop detected - trying popup method");
+    const isMobileDevice = () => {
+      const userAgent = navigator.userAgent.toLowerCase();
+      const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+      const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const isSmallScreen = window.innerWidth < 768;
+      return isMobile || (isTouchDevice && isSmallScreen);
+    };
+    
+    // If we're here from Capacitor fallback, use redirect (more reliable in WebView)
+    if (isCapacitorNative()) {
+      console.log("📱 Capacitor fallback - using redirect method for authentication");
+      await signInWithRedirect(auth, googleProvider);
+      return null; // Will be handled by redirect callback in handleRedirectResult()
+    }
+    
+    // For desktop, try popup first (better UX)
+    const platform = isMobileDevice() ? "Mobile Browser" : "Desktop";
+    console.log(`💻 ${platform} detected - using popup method for authentication`);
     const result = await signInWithPopup(auth, googleProvider);
     const user = result.user;
     
@@ -213,7 +372,8 @@ export const signInWithGoogle = async (): Promise<UserData | null> => {
       uid: user.uid,
       displayName: user.displayName,
       email: user.email,
-      photoURL: user.photoURL
+      photoURL: user.photoURL,
+      phoneNumber: user.phoneNumber
     };
   } catch (error: any) {
     // Handle specific auth errors
@@ -274,7 +434,8 @@ export const handleRedirectResult = async (): Promise<UserData | null> => {
         uid: user.uid,
         displayName: user.displayName,
         email: user.email,
-        photoURL: user.photoURL
+        photoURL: user.photoURL,
+        phoneNumber: user.phoneNumber
       };
     }
     return null;
@@ -300,6 +461,17 @@ export const signOut = async (): Promise<void> => {
     // Get current user ID before signing out (needed to clear location)
     const currentUser = auth.currentUser;
     const userId = currentUser?.uid;
+
+    // If using native Google Auth in Capacitor, sign out from Google too
+    if (isCapacitorNative()) {
+      try {
+        await GoogleAuth.signOut();
+        console.log("Signed out from native Google Auth");
+      } catch (error) {
+        console.error("Error signing out from Google Auth:", error);
+        // Continue with Firebase sign out even if Google sign out fails
+      }
+    }
 
     // Clean up reCAPTCHA before signing out
     // This allows reCAPTCHA to be properly reinitialized on next login
@@ -509,7 +681,90 @@ const generateVerificationCode = (): string => {
 };
 
 /**
- * Send email verification code
+ * Send email OTP for sign-in (works for any email, existing or new)
+ * @param {string} email - User email address
+ * @returns {Promise<string>} Verification code (for development/testing)
+ */
+export const sendEmailOTPForSignIn = async (email: string): Promise<string> => {
+  try {
+    // Validate email format
+    if (!email || !email.includes('@')) {
+      throw new Error("Please enter a valid email address");
+    }
+
+    // Generate 6-digit code
+    const code = generateVerificationCode();
+    
+    // Store code in Firebase Realtime Database with 10-minute expiration
+    const verificationRef = ref(database, `emailOTPSignIn/${email.replace(/[.#$[\]]/g, '_')}`);
+    await set(verificationRef, {
+      code: code,
+      email: email,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+      attempts: 0
+    });
+
+    console.log("📧 OTP code generated for sign-in:", email);
+    console.log("🔐 Code:", code); // For development - also log for debugging
+
+    // Send email with code via email service
+    try {
+      // Try Firebase Cloud Functions first (most secure, recommended)
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const functions = getFunctions();
+      const sendOTPEmail = httpsCallable(functions, 'sendOTPEmail');
+      await sendOTPEmail({ email, code });
+      console.log("✅ Email sent successfully via Firebase Cloud Functions");
+    } catch (firebaseError: any) {
+      // Check if it's a permission/not found error (function not deployed)
+      const isFunctionNotDeployed = 
+        firebaseError?.code === 'functions/not-found' ||
+        firebaseError?.code === 'permission-denied' ||
+        firebaseError?.message?.includes('permission') ||
+        firebaseError?.message?.includes('not found') ||
+        firebaseError?.message?.includes('not deployed');
+      
+      if (isFunctionNotDeployed) {
+        console.log("ℹ️ Firebase Cloud Function not deployed yet, trying fallback...");
+      } else {
+        console.warn("⚠️ Firebase Functions error:", firebaseError.message);
+      }
+      
+      // If Firebase Functions fails, try EmailJS (simpler, frontend-only)
+      try {
+        const { sendOTPEmailSimple } = await import('./emailServiceSimple');
+        await sendOTPEmailSimple({
+          email,
+          code,
+        });
+        console.log("✅ Email sent successfully via EmailJS");
+      } catch (emailError: any) {
+        // If EmailJS fails, try SendGrid backend endpoint
+        try {
+          const { sendOTPEmail } = await import('./emailService');
+          await sendOTPEmail(email, code);
+          console.log("✅ Email sent successfully via SendGrid");
+        } catch (sendGridError: any) {
+          // If all fail, log error but still allow development testing
+          console.warn("⚠️ Email sending failed. Check email service configuration.");
+          if (!isFunctionNotDeployed) {
+            console.warn("Firebase Functions error:", firebaseError.message);
+          }
+          console.warn("EmailJS error:", emailError.message);
+          console.warn("SendGrid error:", sendGridError.message);
+          console.warn("For development: Code is", code, "- check console");
+        }
+      }
+    }
+  } catch (error: any) {
+    console.error("❌ Error sending OTP for sign-in:", error);
+    throw error;
+  }
+};
+
+/**
+ * Send email verification code (for sign-up only)
  * @param {string} email - User email address
  * @returns {Promise<string>} Verification code (for development/testing)
  */
@@ -540,20 +795,65 @@ export const sendEmailVerificationCode = async (email: string): Promise<string> 
     });
 
     console.log("📧 Verification code generated for:", email);
-    console.log("🔐 Code:", code); // For development - remove in production
+    console.log("🔐 Code:", code); // For development - also log for debugging
 
-    // TODO: Send email with code
-    // You'll need to implement email sending via:
-    // - Firebase Cloud Functions + SendGrid/AWS SES/Resend
-    // - Or use a service like EmailJS, SendGrid, etc.
-    // 
-    // Example email content:
-    // Subject: "PaceMatch - Email Verification Code"
-    // Body: "Your verification code is: {code}. This code expires in 10 minutes."
+    // Send email with code via email service
+    try {
+      // Try Firebase Cloud Functions first (most secure, recommended)
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const functions = getFunctions();
+      const sendOTPEmail = httpsCallable(functions, 'sendOTPEmail');
+      await sendOTPEmail({ email, code });
+      console.log("✅ Email sent successfully via Firebase Cloud Functions");
+    } catch (firebaseError: any) {
+      // Check if it's a permission/not found error (function not deployed)
+      const isFunctionNotDeployed = 
+        firebaseError?.code === 'functions/not-found' ||
+        firebaseError?.code === 'permission-denied' ||
+        firebaseError?.message?.includes('permission') ||
+        firebaseError?.message?.includes('not found') ||
+        firebaseError?.message?.includes('not deployed');
+      
+      if (isFunctionNotDeployed) {
+        console.log("ℹ️ Firebase Cloud Function not deployed yet, trying fallback...");
+      } else {
+        console.warn("⚠️ Firebase Functions error:", firebaseError.message);
+      }
+      
+      // If Firebase Functions fails, try EmailJS (simpler, frontend-only)
+      try {
+        const { sendOTPEmailSimple } = await import('./emailServiceSimple');
+        await sendOTPEmailSimple({
+          email,
+          code,
+        });
+        console.log("✅ Email sent successfully via EmailJS");
+      } catch (emailError: any) {
+        // If EmailJS fails, try SendGrid backend endpoint
+        try {
+          const { sendOTPEmail } = await import('./emailService');
+          await sendOTPEmail(email, code);
+          console.log("✅ Email sent successfully via SendGrid");
+        } catch (sendGridError: any) {
+          // If all fail, log error but still allow development testing
+          console.warn("⚠️ Email sending failed. Check email service configuration.");
+          if (!isFunctionNotDeployed) {
+            console.warn("Firebase Functions error:", firebaseError.message);
+          }
+          console.warn("EmailJS error:", emailError.message);
+          console.warn("SendGrid error:", sendGridError.message);
+          console.warn("For development: Code is", code, "- check console");
+          
+          // In production, you might want to throw error here
+          // For development, we'll continue and let user see code in console
+          // throw new Error("Failed to send verification email. Please check your email service configuration.");
+        }
+      }
+    }
     
-    // For now, we'll return the code for development/testing
-    // In production, remove this return and implement actual email sending
-    return code;
+    // Don't return code in production - user should check email
+    // For development, still log it but don't return
+    // return code; // REMOVED - user must check email
   } catch (error: any) {
     console.error("❌ Error sending verification code:", error);
     throw error;
@@ -767,6 +1067,118 @@ export const signInWithEmail = async (
       throw new Error("Too many failed attempts. Please try again later.");
     }
     
+    throw error;
+  }
+};
+
+/**
+ * Verify email OTP for sign-in
+ * @param {string} email - User email address
+ * @param {string} code - 6-digit verification code
+ * @returns {Promise<boolean>} True if code is valid, false otherwise
+ */
+export const verifyEmailOTPForSignIn = async (email: string, code: string): Promise<boolean> => {
+  try {
+    if (!email || !code || code.length !== 6) {
+      return false;
+    }
+
+    const verificationRef = ref(database, `emailOTPSignIn/${email.replace(/[.#$[\]]/g, '_')}`);
+    const snapshot = await get(verificationRef);
+
+    if (!snapshot.exists()) {
+      return false;
+    }
+
+    const verificationData = snapshot.val();
+    
+    // Check if code expired
+    if (Date.now() > verificationData.expiresAt) {
+      // Clean up expired code
+      await set(verificationRef, null);
+      throw new Error("Verification code has expired. Please request a new one.");
+    }
+
+    // Check attempt limit (max 5 attempts)
+    if (verificationData.attempts >= 5) {
+      await set(verificationRef, null);
+      throw new Error("Too many failed attempts. Please request a new verification code.");
+    }
+
+    // Verify code
+    if (verificationData.code !== code) {
+      // Increment attempts
+      await set(verificationRef, {
+        ...verificationData,
+        attempts: verificationData.attempts + 1
+      });
+      return false;
+    }
+
+    // Code is valid - mark as verified
+    await set(verificationRef, {
+      ...verificationData,
+      verified: true,
+      verifiedAt: Date.now()
+    });
+
+    return true;
+  } catch (error: any) {
+    console.error("❌ Error verifying OTP for sign-in:", error);
+    throw error;
+  }
+};
+
+/**
+ * Sign in with email OTP (passwordless)
+ * After OTP verification, signs in user using email link authentication
+ * @param {string} email - User email address
+ * @returns {Promise<UserData>} User object with uid, email, displayName, and other user data
+ */
+export const signInWithEmailOTP = async (email: string): Promise<UserData> => {
+  try {
+    // Validate email
+    if (!email || !email.includes('@')) {
+      throw new Error("Please enter a valid email address");
+    }
+
+    // Check if OTP was verified
+    const verificationRef = ref(database, `emailOTPSignIn/${email.replace(/[.#$[\]]/g, '_')}`);
+    const snapshot = await get(verificationRef);
+    
+    if (!snapshot.exists() || !snapshot.val().verified) {
+      throw new Error("Please verify your email address first by entering the 6-digit code sent to your email.");
+    }
+
+    // Check if user exists
+    const emailExists = await checkEmailExists(email);
+    
+    if (!emailExists) {
+      // User doesn't exist, they need to sign up
+      throw new Error("No account found with this email. Please sign up first.");
+    }
+
+    // For existing users, we'll use email link authentication
+    // This sends a sign-in link to their email
+    console.log("📧 Sending sign-in link to:", email);
+    
+    const actionCodeSettings: ActionCodeSettings = {
+      url: `${window.location.origin}/login?email=${encodeURIComponent(email)}`,
+      handleCodeInApp: true,
+    };
+
+    // Import sendSignInLinkToEmail
+    const { sendSignInLinkToEmail } = await import('firebase/auth');
+    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+    
+    // Clean up OTP verification
+    await set(verificationRef, null);
+    
+    // Note: User will need to click the link in their email to complete sign-in
+    // This is a limitation of Firebase Auth - we can't sign in without password or link
+    throw new Error("Please check your email and click the sign-in link to complete authentication.");
+  } catch (error: any) {
+    console.error("❌ Error signing in with email OTP:", error);
     throw error;
   }
 };

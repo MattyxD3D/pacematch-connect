@@ -43,7 +43,7 @@ import { formatDistance } from "@/utils/distance";
 import { SearchFilter } from "@/services/matchingService";
 import { getDisplayName } from "@/utils/anonymousName";
 import { isWorkoutActive } from "@/utils/workoutState";
-import { createMapIcon } from "@/utils/mapIcons";
+import { createMapIcon, createProfileIcon } from "@/utils/mapIcons";
 import { preventMarkerOverlap, preventMarkerOverlapSimple, AdjustedPosition } from "@/utils/markerOverlap";
 import { getProfilePictureUrl } from "@/utils/profilePicture";
 import { updateUserProfile } from "@/services/authService";
@@ -93,6 +93,7 @@ import BottomNavigation from "@/components/BottomNavigation";
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 import SendIcon from "@mui/icons-material/Send";
 import CloseIcon from "@mui/icons-material/Close";
+import ViewInArIcon from "@mui/icons-material/ViewInAr";
 
 const libraries: ("places")[] = ["places"];
 
@@ -107,6 +108,51 @@ const defaultCenter = {
   lat: 14.5995,
   lng: 120.9842 // Manila, Philippines
 };
+
+// Pokemon Go-style map styling for 3D mode
+// Reduces POI clutter and enhances road visibility for better nearby user spotting
+const pokemonGoMapStyle: google.maps.MapTypeStyle[] = [
+  {
+    featureType: "poi",
+    elementType: "all",
+    stylers: [{ visibility: "off" }]
+  },
+  {
+    featureType: "poi.business",
+    elementType: "all",
+    stylers: [{ visibility: "off" }]
+  },
+  {
+    featureType: "poi.park",
+    elementType: "all",
+    stylers: [{ visibility: "simplified" }]
+  },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ visibility: "on" }, { saturation: -20 }]
+  },
+  {
+    featureType: "road",
+    elementType: "labels",
+    stylers: [{ visibility: "simplified" }]
+  },
+  {
+    featureType: "transit",
+    elementType: "all",
+    stylers: [{ visibility: "off" }]
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#a0d0ff" }, { saturation: 20 }]
+  },
+  {
+    featureType: "landscape",
+    elementType: "geometry",
+    stylers: [{ saturation: -30 }, { lightness: 10 }]
+  }
+];
 
 // Marker colors based on activity
 const getMarkerColor = (activity?: string | null): string => {
@@ -179,7 +225,8 @@ const MapScreen = () => {
   const focusFriend = routerLocation.state?.focusFriend;
   
   // Google Maps state
-  const [visible, setVisible] = useState(true);
+  // Visibility: false in Beacon Mode (workout inactive), true in Active Workout (workout active)
+  const [visible, setVisible] = useState(false); // Start hidden in Beacon Mode
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapZoom, setMapZoom] = useState(15);
   const [mapRef, setMapRef] = useState<MapRef | null>(null);
@@ -296,17 +343,21 @@ const MapScreen = () => {
     libraries: libraries
   });
 
-  // Get user's current location - always track when user is logged in (works in both beacon mode and active workout)
-  // isActive only controls workout features, not location tracking itself
-  const { location, error: locationError, isGettingLocation, stopTracking } = useLocation(
-    user?.uid || null,
-    true, // Always track location when user is logged in (for both beacon mode and active workout)
-    visible
-  );
-
   // Get initial location on web to center the map (one-time request, not continuous tracking)
   const [initialLocation, setInitialLocation] = useState<Location | null>(null);
   const initialLocationFetchedRef = useRef(false);
+
+  // Get user's current location
+  // Beacon Mode: No continuous GPS tracking, but get initial location for map display (user is hidden)
+  // Active Workout: Continuous GPS tracking enabled (user is visible)
+  const { location, error: locationError, isGettingLocation, stopTracking } = useLocation(
+    user?.uid || null,
+    isActive, // Only track location continuously when workout is active (not in Beacon Mode)
+    visible
+  );
+  
+  // Use location for nearby users calculation (location in active workout, initialLocation in beacon mode)
+  const effectiveLocation = location || initialLocation;
 
   useEffect(() => {
     // Only get initial location on web (not native, as native uses useLocation hook)
@@ -327,10 +378,19 @@ const MapScreen = () => {
           initialLocationFetchedRef.current = true;
           console.log("✅ Initial location obtained:", loc);
           
-          // Center map on user's location
-          if (mapRef) {
-            mapRef.panTo(loc);
+          // Center and zoom map on user's location (Pokemon Go style)
+          if (mapRef && isLoaded && window.google) {
+            const zoomLevel = 17; // Close zoom level for Pokemon Go-like experience
             setMapCenter(loc);
+            setMapZoom(zoomLevel);
+            mapRef.setCenter(loc);
+            mapRef.panTo(loc);
+            mapRef.setZoom(zoomLevel);
+            console.log("✅ Map centered and zoomed to user location");
+          } else {
+            // If map isn't ready yet, set center and zoom state
+            setMapCenter(loc);
+            setMapZoom(17);
           }
         },
         (err) => {
@@ -344,7 +404,7 @@ const MapScreen = () => {
         }
       );
     }
-  }, [user?.uid, mapRef]);
+  }, [user?.uid, mapRef, isLoaded]);
 
   // Request location permissions when MapScreen loads (on native platforms)
   useEffect(() => {
@@ -374,19 +434,44 @@ const MapScreen = () => {
     requestLocationPermissions();
   }, [user?.uid]); // Request when user is available
 
-  // Ensure GPS tracking is fully stopped whenever workout is inactive
-  // Also show error messages to user
+  // Sync visibility with workout state: Hidden in Beacon Mode, Visible in Active Workout
+  // Also ensure GPS tracking is fully stopped whenever workout is inactive
   useEffect(() => {
     if (!isActive) {
+      // Beacon Mode: User is hidden, stop GPS tracking
+      setVisible(false);
       stopTracking();
-    } else if (locationError) {
-      // Show error to user when workout is active but GPS fails
+      
+      // Clear location from Firebase when entering Beacon Mode
+      if (user?.uid) {
+        import("@/services/locationService").then(({ updateUserVisibility }) => {
+          updateUserVisibility(user.uid, false).catch((error) => {
+            console.error("Error updating visibility:", error);
+          });
+        });
+      }
+    } else {
+      // Active Workout: User is visible, GPS tracking enabled
+      setVisible(true);
+      
+      // Update visibility in Firebase when starting workout
+      if (user?.uid) {
+        import("@/services/locationService").then(({ updateUserVisibility }) => {
+          updateUserVisibility(user.uid, true).catch((error) => {
+            console.error("Error updating visibility:", error);
+          });
+        });
+      }
+    }
+    
+    // Show error messages to user when workout is active but GPS fails
+    if (isActive && locationError) {
       console.error("⚠️ Location error detected:", locationError);
       toast.error(`GPS Error: ${locationError}`, {
         duration: 5000,
       });
     }
-  }, [isActive, stopTracking, locationError]);
+  }, [isActive, stopTracking, locationError, user?.uid]);
 
   // Movement detection for inactivity warning
   const handleStationaryDetected = useCallback(() => {
@@ -439,7 +524,8 @@ const MapScreen = () => {
     return { lat: offsetLat, lng: offsetLng };
   };
 
-  // Load searchFilter, friendsOnly visibility, and visibility from user profile
+  // Load searchFilter and friendsOnly visibility from user profile
+  // Note: Visibility is controlled by workout state (isActive), not loaded from profile
   useEffect(() => {
     if (user) {
       import("@/services/authService").then(({ getUserData }) => {
@@ -450,10 +536,8 @@ const MapScreen = () => {
           if (userData?.visibleToFriendsOnly !== undefined) {
             setVisibleToFriendsOnly(userData.visibleToFriendsOnly);
           }
-          // Sync visibility state from Firebase
-          if (userData?.visible !== undefined) {
-            setVisible(userData.visible !== false);
-          }
+          // Visibility is controlled by workout state (isActive), not loaded from profile
+          // This ensures Beacon Mode = hidden, Active Workout = visible
         });
       });
     } else if (userProfile && (userProfile as any).searchFilter) {
@@ -461,21 +545,9 @@ const MapScreen = () => {
     }
   }, [user, userProfile]);
 
-  // Listen to current user's visibility changes in real-time from Firebase
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    import("@/services/locationService").then(({ listenToAllUsers }) => {
-      const unsubscribe = listenToAllUsers((users) => {
-        const currentUserData = users[user.uid];
-        if (currentUserData && currentUserData.visible !== undefined) {
-          setVisible(currentUserData.visible !== false);
-        }
-      });
-
-      return () => unsubscribe();
-    });
-  }, [user?.uid]);
+  // Note: Visibility is now controlled by workout state (isActive), not by Firebase listener
+  // This ensures Beacon Mode = hidden, Active Workout = visible
+  // Removed Firebase listener for visibility to prevent conflicts with workout state
 
   // Load declined users from localStorage
   useEffect(() => {
@@ -835,9 +907,10 @@ const MapScreen = () => {
   }, [showNotificationDrawer]);
 
   // Get matched users using matching algorithm
+  // Use effectiveLocation so matching works in both Beacon Mode and Active Workout
   const { matches, loading: matchesLoading } = useMatching({
     currentUserId: user?.uid || "",
-    currentLocation: location,
+    currentLocation: effectiveLocation, // Use effective location (location or initialLocation)
     activity: selectedActivity,
     fitnessLevel: userProfile?.fitnessLevel || "intermediate",
     pace: userProfile?.pace,
@@ -862,28 +935,32 @@ const MapScreen = () => {
     activity: Activity,
     radiusPreference: RadiusPreference = "normal"
   ): number => {
-    const BASE_RADIUS: Record<Activity, number> = {
-      cycling: 10000,  // 10km for cycling
-      running: 2000,   // 2km for running
-      walking: 1000    // 1km for walking
+    // Radius lookup table: exact distances for each activity and preference combination
+    const RADIUS_LOOKUP: Record<Activity, Record<RadiusPreference, number>> = {
+      walking: {
+        nearby: 100,   // Still Apply (0.5x): 100m
+        normal: 200,   // Normal (1x): 200m
+        wide: 400      // Wide (2x): 400m
+      },
+      running: {
+        nearby: 200,   // Still Apply (0.5x): 200m (slightly tighter)
+        normal: 350,   // Normal (1x): 350m (optimized from 500m)
+        wide: 800      // Wide (2x): 800m (more reasonable)
+      },
+      cycling: {
+        nearby: 400,   // Still Apply (0.5x): 400m (tighter)
+        normal: 1000,  // Normal (1x): 1km
+        wide: 2000     // Wide (2x): 2km
+      }
     };
-
-    const RADIUS_MULTIPLIERS: Record<RadiusPreference, number> = {
-      nearby: 0.5,   // 50% of base radius
-      normal: 1.0,   // 100% of base radius (default)
-      wide: 2.0      // 200% of base radius
-    };
-
-    const baseRadius = BASE_RADIUS[activity] || BASE_RADIUS.running;
-    const multiplier = RADIUS_MULTIPLIERS[radiusPreference] || 1.0;
     
-    return Math.round(baseRadius * multiplier);
+    return RADIUS_LOOKUP[activity]?.[radiusPreference] || RADIUS_LOOKUP.running.normal;
   }, []);
 
   // Calculate matching radius based on selected activity and user preference
   const matchingRadiusMeters = useMemo(() => {
     if (!selectedActivity || !userProfile) {
-      return 2000; // Default to 2km (running)
+      return 350; // Default to 350m (running normal)
     }
     return calculateMatchingRadius(
       selectedActivity,
@@ -894,11 +971,12 @@ const MapScreen = () => {
   const matchingRadiusKm = matchingRadiusMeters / 1000; // Convert to km
 
   // Get nearby users from hook (fallback for non-matched display)
-  // Show nearby users when location is available (not just when workout is active)
+  // Show nearby users when location is available (works in both Beacon Mode and Active Workout)
   // Use activity-based radius instead of hardcoded 50km
+  // Use effectiveLocation (location in active workout, initialLocation in beacon mode)
   const { nearbyUsers: nearbyUsersFromHook, loading: usersLoading } = useNearbyUsers(
-    location,
-    matchingRadiusKm, // Use activity-based radius (cycling: 10km, running: 2km, walking: 1km)
+    effectiveLocation, // Use effective location (location or initialLocation)
+    matchingRadiusKm, // Use activity-based radius (varies by preference: normal = cycling 1km, running 350m, walking 200m)
     activityFilter, // Apply activity filter (running/cycling/walking/all)
     "all", // Gender filter (not used currently)
     user?.uid || null,
@@ -1041,8 +1119,8 @@ const MapScreen = () => {
       return;
     }
 
-    // Check if we have location to calculate distances
-    if (!location || !location.lat || !location.lng) {
+    // Check if we have location to calculate distances (use effectiveLocation for beacon mode)
+    if (!effectiveLocation || !effectiveLocation.lat || !effectiveLocation.lng) {
       return;
     }
 
@@ -1052,7 +1130,8 @@ const MapScreen = () => {
 
     // Listen to all users to check for nearby active users
     const unsubscribe = listenToAllUsers((users) => {
-      if (isActive || notificationShownRef.current || !location) {
+      // Only check when workout is inactive (Beacon Mode)
+      if (isActive || notificationShownRef.current) {
         return;
       }
 
@@ -1072,7 +1151,7 @@ const MapScreen = () => {
             selectedActivity,
             userProfile.radiusPreference || "normal"
           ) / 1000 // Convert meters to km
-        : 2; // Default to 2km (running) if activity/preference not available
+        : 0.35; // Default to 350m (running normal) if activity/preference not available
 
       // Filter users to find active nearby users
       const activeNearbyUsers = Object.entries(users || {})
@@ -1102,14 +1181,14 @@ const MapScreen = () => {
             return false;
           }
 
-          // Check distance using activity-based radius (cycling: 10km, running: 2km, walking: 1km)
+          // Check distance using activity-based radius (varies by preference: normal = cycling 1km, running 350m, walking 200m)
           // Uses Haversine formula to calculate distance
           const R = 6371; // Earth's radius in km
-          const dLat = (userData.lat - location.lat) * Math.PI / 180;
-          const dLng = (userData.lng - location.lng) * Math.PI / 180;
+          const dLat = (userData.lat - effectiveLocation.lat) * Math.PI / 180;
+          const dLng = (userData.lng - effectiveLocation.lng) * Math.PI / 180;
           const a = 
             Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(location.lat * Math.PI / 180) * Math.cos(userData.lat * Math.PI / 180) *
+            Math.cos(effectiveLocation.lat * Math.PI / 180) * Math.cos(userData.lat * Math.PI / 180) *
             Math.sin(dLng / 2) * Math.sin(dLng / 2);
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           const distance = R * c;
@@ -1381,7 +1460,24 @@ const MapScreen = () => {
       setUserHeading(null);
       lastLocationRef.current = null;
     }
-  }, [location, isActive, isWazeMode, mapRef, isLoaded]);
+  }, [location, isActive, isWazeMode, is3DMode, mapRef, isLoaded]);
+
+  // Continuously center and zoom on user when 3D mode is active (Pokemon Go style)
+  useEffect(() => {
+    if (is3DMode && mapRef && isLoaded && window.google && window.google.maps) {
+      const currentLocation = location || initialLocation;
+      const googleMap = mapRef as any as google.maps.Map;
+      const zoomLevel = 17.5; // Close zoom for Pokemon Go-like experience
+      
+      if (currentLocation && currentLocation.lat && currentLocation.lng) {
+        // Center and zoom to user location continuously
+        googleMap.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+        googleMap.setZoom(zoomLevel);
+        setMapCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+        setMapZoom(zoomLevel);
+      }
+    }
+  }, [is3DMode, location, initialLocation, mapRef, isLoaded]);
 
   // Timer interval - runs continuously when active (even when paused, to show paused time)
   useEffect(() => {
@@ -1577,7 +1673,7 @@ const MapScreen = () => {
     }
   };
 
-  const handleConfirmStop = () => {
+  const handleConfirmStop = async () => {
     // Force-stop GPS watcher immediately
     stopTracking();
     // Stop activity - show summary
@@ -1587,6 +1683,17 @@ const MapScreen = () => {
     setPausedDueToInactivity(false); // Reset inactivity state
     setShowStopConfirmation(false);
     setShowInactivityWarning(false); // Close warning if open
+    
+    // Clear location from Firebase when stopping workout (entering Beacon Mode)
+    if (user?.uid) {
+      try {
+        const { clearUserLocation } = await import("@/services/locationService");
+        await clearUserLocation(user.uid);
+        console.log("✅ Location cleared from Firebase (entering Beacon Mode)");
+      } catch (error) {
+        console.error("Error clearing location:", error);
+      }
+    }
     
     // Log real Firebase users detected during workout
     if (workoutNearbyUsers.length > 0) {
@@ -2079,10 +2186,35 @@ const MapScreen = () => {
     }
   }, [focusFriend, mapRef, isLoaded]);
 
-  // Update map center when location changes
+  // Center map on user location when both map and location are ready (Pokemon Go style)
+  // This runs immediately when location becomes available
+  useEffect(() => {
+    const currentLocation = location || initialLocation;
+    if (!currentLocation || !currentLocation.lat || !currentLocation.lng || !mapRef || !isLoaded || !window.google) {
+      return;
+    }
+    
+    // Don't update center if we're focusing on a friend
+    if (focusFriend) {
+      return;
+    }
+    
+    console.log("📍 Centering map on user location:", currentLocation);
+    
+    // Center and zoom immediately when location is available (Pokemon Go style)
+    const zoomLevel = 17; // Close zoom for Pokemon Go-like experience
+    setMapCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+    setMapZoom(zoomLevel);
+    mapRef.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+    mapRef.panTo({ lat: currentLocation.lat, lng: currentLocation.lng });
+    mapRef.setZoom(zoomLevel);
+  }, [location, initialLocation, mapRef, isLoaded, focusFriend]);
+
+  // Update map center when location changes (continuous tracking)
   // When workout is active, always keep map centered on user (locked perspective)
   useEffect(() => {
-    if (!location || !location.lat || !location.lng || !mapRef || !isLoaded || !window.google) {
+    const currentLocation = location || initialLocation;
+    if (!currentLocation || !currentLocation.lat || !currentLocation.lng || !mapRef || !isLoaded || !window.google) {
       return;
     }
     
@@ -2094,40 +2226,22 @@ const MapScreen = () => {
     // Debounce map updates to prevent excessive re-renders
     const updateTimer = setTimeout(() => {
       if (!isNavigationStyle) {
-        // Only update if center changed significantly (avoid tiny updates)
-        setMapCenter((prev) => {
-          const distance = Math.sqrt(
-            Math.pow(prev.lat - location.lat, 2) + 
-            Math.pow(prev.lng - location.lng, 2)
-          );
-          // Only update if moved more than ~10 meters
-          if (distance > 0.0001) {
-            return { lat: location.lat, lng: location.lng };
-          }
-          return prev;
-        });
+        // Always update center to user location (Pokemon Go style)
+        setMapCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
         
-        // Center map on user when workout is active (locked), otherwise allow free panning
+        // Center map on user - always follow user location
         if (isActive) {
           // When active, always lock to user's location - no dragging allowed
-          mapRef.setCenter({ lat: location.lat, lng: location.lng });
-          mapRef.panTo({ lat: location.lat, lng: location.lng });
+          mapRef.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+          mapRef.panTo({ lat: currentLocation.lat, lng: currentLocation.lng });
         } else {
-          // When inactive, only pan if user hasn't manually moved the map
-          // This allows free dragging when workout is not active
+          // When inactive (Beacon Mode), still center on user but allow panning
+          // Auto-center on user location (Pokemon Go style)
+          mapRef.panTo({ lat: currentLocation.lat, lng: currentLocation.lng });
         }
       } else if (isNavigationStyle) {
-        const cameraCenter = calculateCameraOffset(location.lat, location.lng, userHeading || 0);
-        setMapCenter((prev) => {
-          const distance = Math.sqrt(
-            Math.pow(prev.lat - cameraCenter.lat, 2) + 
-            Math.pow(prev.lng - cameraCenter.lng, 2)
-          );
-          if (distance > 0.0001) {
-            return cameraCenter;
-          }
-          return prev;
-        });
+        const cameraCenter = calculateCameraOffset(currentLocation.lat, currentLocation.lng, userHeading || 0);
+        setMapCenter(cameraCenter);
         if (isActive) {
           // When active, lock to camera center (user position with offset)
           mapRef.setCenter(cameraCenter);
@@ -2139,7 +2253,7 @@ const MapScreen = () => {
     }, 100); // Small delay to batch updates
     
     return () => clearTimeout(updateTimer);
-  }, [location, isNavigationStyle, userHeading, mapRef, isLoaded, isActive]);
+  }, [location, initialLocation, isNavigationStyle, userHeading, mapRef, isLoaded, isActive, focusFriend]);
 
   // Get zoom radius for selected activity and zoom level
   // Based on research recommendations and matching service base radii alignment
@@ -2169,17 +2283,19 @@ const MapScreen = () => {
   };
 
   // Update zoom level based on activity and zoom level setting
+  // Use effectiveLocation so zoom works in both Beacon Mode and Active Workout
   useEffect(() => {
-    if (location && mapRef && isLoaded && window.google && selectedActivity) {
+    const currentLocation = location || initialLocation;
+    if (currentLocation && mapRef && isLoaded && window.google && selectedActivity) {
       const radius = getZoomRadiusForActivity(selectedActivity, zoomLevel);
       const calculatedZoom = calculateZoomFromMeters(radius);
       setMapZoom(calculatedZoom);
       mapRef.setZoom(calculatedZoom);
       if (!isNavigationStyle) {
-        mapRef.panTo({ lat: location.lat, lng: location.lng });
+        mapRef.panTo({ lat: currentLocation.lat, lng: currentLocation.lng });
       }
     }
-  }, [selectedActivity, zoomLevel, location, mapRef, isLoaded, isNavigationStyle]);
+  }, [selectedActivity, zoomLevel, location, initialLocation, mapRef, isLoaded, isNavigationStyle]);
 
   // Lock/unlock map when workout is active
   useEffect(() => {
@@ -2257,8 +2373,19 @@ const MapScreen = () => {
         });
       }
       
+      // Center map on user location when map loads (Pokemon Go style)
+      const currentLocation = location || initialLocation;
+      if (currentLocation && currentLocation.lat && currentLocation.lng) {
+        const zoomLevel = 17; // Close zoom for Pokemon Go-like experience
+        console.log("🗺️ Map loaded, centering on user location:", currentLocation);
+        map.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+        map.panTo({ lat: currentLocation.lat, lng: currentLocation.lng });
+        map.setZoom(zoomLevel);
+        setMapCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+        setMapZoom(zoomLevel);
+      }
     }
-  }, [isActive, location]);
+  }, [isActive, location, initialLocation]);
 
   const onMarkerClick = (userData: any) => {
     // Ensure user data structure matches ProfileView expectations
@@ -2308,8 +2435,8 @@ const MapScreen = () => {
       return;
     }
 
-    // Check if user has active workout session
-    if (!isActive && !isWorkoutActive()) {
+    // Check if user has active workout session (only allow poking during active workout)
+    if (!isActive) {
       toast.error("You must have an active workout session to poke someone");
       return;
     }
@@ -2678,8 +2805,8 @@ const MapScreen = () => {
           mapContainerStyle={mapContainerStyle}
           center={mapCenter}
           zoom={mapZoom}
-          tilt={(is3DMode || isWazeMode) ? mapTilt : 0}
-          heading={(is3DMode || isWazeMode) ? mapHeading : 0}
+          tilt={(isWazeMode) ? mapTilt : 0}
+          heading={(isWazeMode) ? mapHeading : 0}
           onLoad={onMapLoad}
           options={{
             disableDefaultUI: false,
@@ -2688,6 +2815,8 @@ const MapScreen = () => {
             mapTypeControl: false, // Map/Satellite toggle disabled
             fullscreenControl: false, // Fullscreen button disabled
             mapTypeId: isLoaded && window.google?.maps ? window.google.maps.MapTypeId.ROADMAP : undefined,
+            // Apply Pokemon Go-style styling in 3D mode (less cluttered)
+            styles: is3DMode ? pokemonGoMapStyle : [],
             // Lock map when workout is active (isActive = true)
             draggable: !isActive, // Disable dragging when workout is active
             scrollwheel: true, // Allow scroll zoom even when workout is active
@@ -2831,17 +2960,39 @@ const MapScreen = () => {
               const shouldGreyOut = isActive && !isSameActivity;
               
               // Create profile picture icon with fitness level glow, activity badge, and opacity
-              const iconSize = hasTrail ? 56 : 48;
-              const profileIcon = isLoaded && window.google 
-                ? createMapIcon(
+              // In 3D mode, make markers larger and add enhanced glow for better visibility
+              const baseIconSize = hasTrail ? 56 : 48;
+              const iconSize = is3DMode ? baseIconSize + 8 : baseIconSize; // Larger in 3D mode
+              
+              // Use createProfileIcon directly to pass enhancedGlow option for 3D mode
+              const profileIconUrl = isLoaded && window.google 
+                ? createProfileIcon(
                     profilePictureUrl, 
                     userName, 
-                    iconSize, 
-                    fitnessLevel,
-                    shouldGreyOut ? 0.4 : undefined, // Apply opacity if different activity during workout
-                    userActivity as "running" | "cycling" | "walking" // Always show activity badge
+                    { 
+                      size: iconSize,
+                      fitnessLevel,
+                      opacity: shouldGreyOut ? 0.4 : undefined,
+                      activity: userActivity as "running" | "cycling" | "walking",
+                      enhancedGlow: is3DMode // Enable enhanced glow in 3D mode
+                    }
                   )
                 : null;
+              
+              // Create Google Maps icon object
+              const profileIcon = profileIconUrl && isLoaded && window.google ? (() => {
+                const hasGlow = !!getFitnessLevelColors(fitnessLevel);
+                const badgeSpace = userActivity ? 18 + 8 : 0; // ACTIVITY_BADGE_SIZE + ACTIVITY_BADGE_OFFSET * 2
+                const glowSize = (hasGlow || is3DMode) ? 8 * (is3DMode ? 1.5 : 1) : 0; // Enhanced glow size in 3D
+                const actualSize = iconSize + (glowSize * 2) + badgeSpace;
+                
+                return {
+                  url: profileIconUrl,
+                  scaledSize: new window.google.maps.Size(actualSize, actualSize),
+                  anchor: new window.google.maps.Point(actualSize / 2, actualSize / 2),
+                  origin: new window.google.maps.Point(0, 0)
+                };
+              })() : null;
               
               // Set z-index: same-activity users on top, then different-activity, then by trail
               let markerZIndex = hasTrail ? 100 : 99;
@@ -2862,6 +3013,7 @@ const MapScreen = () => {
                   icon={profileIcon}
                   animation={hasTrail && window.google.maps.Animation ? window.google.maps.Animation.DROP : undefined}
                   zIndex={markerZIndex}
+                  optimized={false} // Disable optimization to allow custom styling in 3D mode
                 />
               ) : null;
             })}
@@ -2924,6 +3076,7 @@ const MapScreen = () => {
         useMetric={useMetric}
         nearbyUsers={workoutNearbyUsers}
         pokes={workoutPokes}
+        locationHistory={locationHistory}
       />
 
       {/* Inactivity Warning Modal */}
@@ -2935,23 +3088,29 @@ const MapScreen = () => {
         autoPauseSeconds={120} // 2 minutes
       />
 
-      {/* Top Bar - Beacon Mode Header - Only visible when workout is not active */}
-      {!isActive && (
-        <div 
-          className="absolute top-0 left-0 right-0 z-[60] bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between"
-          style={{
-            paddingTop: `calc(0.75rem + env(safe-area-inset-top))`,
-          }}
-        >
-          <h2 className="text-lg font-semibold text-white">Beacon Mode</h2>
-          {/* Notification Bell - Yellow when there are notifications */}
-          <NotificationBell 
-            unreadCount={unreadCount}
-            onClick={() => setShowNotificationDrawer(true)}
-            variant="dark"
-          />
+      {/* Header - Beacon Mode or Active Workout */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-10 border-b border-border/50"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
+      >
+        <div className="max-w-2xl mx-auto px-6 py-5">
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-bold">
+              {isActive ? "Active Workout" : "Beacon Mode"}
+            </h1>
+            {/* Notification Bell - Yellow when there are notifications */}
+            <NotificationBell 
+              unreadCount={unreadCount}
+              onClick={() => setShowNotificationDrawer(true)}
+              variant="light"
+            />
+          </div>
         </div>
-      )}
+      </motion.div>
 
       {/* Right Side Controls - No Background */}
       <div className="absolute top-1/2 -translate-y-1/2 right-4 flex flex-col gap-3 z-10">
@@ -2979,6 +3138,61 @@ const MapScreen = () => {
               {searchFilter === "beginner" ? "B" : searchFilter === "intermediate" ? "I" : "P"}
             </span>
           )}
+        </motion.button>
+
+        {/* 3D Mode Toggle - Pokemon Go Style (Zoom & Center) */}
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={() => {
+            const new3DMode = !is3DMode;
+            setIs3DMode(new3DMode);
+            
+            // Get current user location
+            const currentLocation = location || initialLocation;
+            
+            // Update map when 3D mode is toggled
+            if (mapRef && isLoaded && window.google && window.google.maps) {
+              // Access the actual Google Maps map instance
+              const googleMap = mapRef as any as google.maps.Map;
+              
+              if (new3DMode) {
+                // Enable 3D mode: zoom in and center on user, apply less cluttered map style
+                const zoomLevel = 17.5; // Close zoom (street level) for Pokemon Go-like experience
+                
+                // Center and zoom to user location (Pokemon Go style)
+                if (currentLocation && currentLocation.lat && currentLocation.lng) {
+                  console.log("🗺️ 3D Mode activated - Centering and zooming to user location:", currentLocation);
+                  setMapCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+                  setMapZoom(zoomLevel);
+                  
+                  googleMap.setZoom(zoomLevel);
+                  googleMap.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+                  googleMap.panTo({ lat: currentLocation.lat, lng: currentLocation.lng });
+                }
+                
+                // Apply Pokemon Go-style map styling (less cluttered)
+                googleMap.setOptions({
+                  styles: pokemonGoMapStyle, // Apply Pokemon Go-style styling
+                  mapTypeId: window.google.maps.MapTypeId.ROADMAP
+                });
+              } else {
+                // Disable 3D mode: reset to normal styling
+                googleMap.setOptions({
+                  styles: [] // Remove custom styling
+                });
+                console.log("✅ 3D Mode disabled: Reset to normal view");
+              }
+            }
+          }}
+          className={`touch-target rounded-full shadow-elevation-3 border-2 ${
+            is3DMode
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-card text-foreground border-border"
+          }`}
+          style={{ width: 56, height: 56 }}
+          title="Toggle Focus Mode (Zoom & Center on You)"
+        >
+          <ViewInArIcon style={{ fontSize: 28 }} />
         </motion.button>
 
         {/* Zoom Level Button - Only visible when workout is active */}
@@ -3040,31 +3254,6 @@ const MapScreen = () => {
             {pokes.length > 0 && (
               <span className="absolute -top-1 -right-1 bg-purple-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-background animate-pulse">
                 {pokes.length > 9 ? '9+' : pokes.length}
-              </span>
-            )}
-          </motion.button>
-        )}
-
-        {/* Notification Bell - Only visible when workout is active */}
-        {isActive && (
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setShowNotificationDrawer(true)}
-            className={`relative touch-target rounded-full shadow-elevation-3 border-2 transition-all ${
-              unreadCount > 0
-                ? "bg-yellow-400/20 border-yellow-400 ring-2 ring-yellow-400/50"
-                : "bg-card border-border hover:border-primary"
-            }`}
-            style={{ width: 56, height: 56 }}
-            title={unreadCount > 0 ? `${unreadCount} notifications` : "Notifications"}
-          >
-            <NotificationsIcon 
-              style={{ fontSize: 28 }} 
-              className={unreadCount > 0 ? "text-yellow-400" : "text-foreground"}
-            />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-yellow-500 text-gray-900 text-[10px] font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1 border-2 border-background animate-pulse">
-                {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
           </motion.button>

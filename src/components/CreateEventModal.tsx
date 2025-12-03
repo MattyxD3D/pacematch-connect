@@ -26,6 +26,7 @@ import PeopleIcon from "@mui/icons-material/People";
 import DescriptionIcon from "@mui/icons-material/Description";
 import MapIcon from "@mui/icons-material/Map";
 import SearchIcon from "@mui/icons-material/Search";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { Event as FirebaseEvent } from "@/services/eventService";
@@ -735,10 +736,10 @@ export const CreateEventModal = ({
             className="fixed inset-0 bg-background/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-4xl bg-card rounded-2xl shadow-elevation-4 border-2 border-border overflow-hidden"
               style={{ height: "80vh" }}
@@ -960,7 +961,9 @@ export const CreateEventModal = ({
       {/* Event Title */}
       <div className="space-y-2">
         <Label htmlFor="title" className="text-sm sm:text-base font-semibold flex items-center gap-2">
-          <EventIcon style={{ fontSize: 18 }} />
+          <div className="p-1.5 bg-primary/10 rounded-lg">
+            <EventIcon style={{ fontSize: 18 }} className="text-primary" />
+          </div>
           Event Title *
         </Label>
         <Input
@@ -968,7 +971,9 @@ export const CreateEventModal = ({
           placeholder="e.g., Morning Run in Central Park"
           value={formData.title || ""}
           onChange={(e) => handleInputChange("title", e.target.value)}
-          className={`h-11 sm:h-12 ${errors.title ? "border-destructive" : ""}`}
+          className={`h-12 sm:h-14 bg-gradient-to-br from-background to-muted/20 border-2 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all ${
+            errors.title ? "border-destructive" : "border-border/50"
+          }`}
           maxLength={100}
         />
         {errors.title && (
@@ -979,7 +984,9 @@ export const CreateEventModal = ({
       {/* Description */}
       <div className="space-y-2">
         <Label htmlFor="description" className="text-sm sm:text-base font-semibold flex items-center gap-2">
-          <DescriptionIcon style={{ fontSize: 18 }} />
+          <div className="p-1.5 bg-success/10 rounded-lg">
+            <DescriptionIcon style={{ fontSize: 18 }} className="text-success" />
+          </div>
           Description *
         </Label>
         <Textarea
@@ -987,7 +994,9 @@ export const CreateEventModal = ({
           placeholder="Describe your event, what to expect, any special requirements..."
           value={formData.description || ""}
           onChange={(e) => handleInputChange("description", e.target.value)}
-          className={`min-h-[80px] sm:min-h-[100px] resize-none ${errors.description ? "border-destructive" : ""}`}
+          className={`min-h-[100px] sm:min-h-[120px] resize-none bg-gradient-to-br from-background to-muted/20 border-2 focus:border-success focus:ring-2 focus:ring-success/20 transition-all ${
+            errors.description ? "border-destructive" : "border-border/50"
+          }`}
           maxLength={500}
         />
         <div className="flex justify-between items-center">
@@ -1003,8 +1012,11 @@ export const CreateEventModal = ({
 
       {/* Activity Type */}
       <div className="space-y-3">
-        <Label className="text-sm sm:text-base font-semibold">Activity Type *</Label>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+        <Label className="text-sm sm:text-base font-semibold flex items-center gap-2">
+          <FitnessCenterIcon style={{ fontSize: 18 }} className="text-primary" />
+          Activity Type *
+        </Label>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           {activities.map((activity) => {
             const Icon = activity.icon;
             const isSelected = formData.activityType === activity.id;
@@ -1012,26 +1024,50 @@ export const CreateEventModal = ({
               <motion.button
                 key={activity.id}
                 type="button"
+                whileHover={{ scale: 1.05, y: -2 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={() => handleInputChange("activityType", activity.id)}
                 className={`
-                  flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border-2 transition-all duration-300
+                  relative flex flex-col items-center justify-center p-4 sm:p-5 rounded-2xl border-2 transition-all duration-300 overflow-hidden
                   ${
                     isSelected
                       ? activity.color === "success"
-                        ? "border-success bg-success/10 shadow-elevation-2"
+                        ? "border-success bg-gradient-to-br from-success/20 to-success/5 shadow-lg shadow-success/20"
                         : activity.color === "primary"
-                        ? "border-primary bg-primary/10 shadow-elevation-2"
+                        ? "border-primary bg-gradient-to-br from-primary/20 to-primary/5 shadow-lg shadow-primary/20"
                         : activity.color === "warning"
-                        ? "border-warning bg-warning/10 shadow-elevation-2"
-                        : "border-secondary bg-secondary/10 shadow-elevation-2"
-                      : "border-border bg-card hover:bg-secondary"
+                        ? "border-warning bg-gradient-to-br from-warning/20 to-warning/5 shadow-lg shadow-warning/20"
+                        : "border-secondary bg-gradient-to-br from-secondary/20 to-secondary/5 shadow-lg shadow-secondary/20"
+                      : "border-border/50 bg-gradient-to-br from-card to-muted/30 hover:border-primary/50 hover:shadow-md"
                   }
                 `}
               >
-                <Icon
-                  className={
-                    isSelected
+                {isSelected && (
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent rounded-2xl"
+                  />
+                )}
+                <div className="relative">
+                  <Icon
+                    className={
+                      isSelected
+                        ? activity.color === "success"
+                          ? "text-success drop-shadow-sm"
+                          : activity.color === "primary"
+                          ? "text-primary drop-shadow-sm"
+                          : activity.color === "warning"
+                          ? "text-warning drop-shadow-sm"
+                          : "text-secondary drop-shadow-sm"
+                        : "text-muted-foreground"
+                    }
+                    style={{ fontSize: isMobile ? 28 : 36 }}
+                  />
+                </div>
+                <span
+                  className={`text-xs sm:text-sm mt-2 sm:mt-3 font-bold relative ${
+                    isSelected 
                       ? activity.color === "success"
                         ? "text-success"
                         : activity.color === "primary"
@@ -1040,16 +1076,19 @@ export const CreateEventModal = ({
                         ? "text-warning"
                         : "text-secondary"
                       : "text-muted-foreground"
-                  }
-                  style={{ fontSize: isMobile ? 24 : 32 }}
-                />
-                <span
-                  className={`text-xs sm:text-sm mt-1 sm:mt-2 font-semibold ${
-                    isSelected ? "text-foreground" : "text-muted-foreground"
                   }`}
                 >
                   {activity.label}
                 </span>
+                {isSelected && (
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="absolute top-2 right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center"
+                  >
+                    <span className="text-white text-xs">✓</span>
+                  </motion.div>
+                )}
               </motion.button>
             );
           })}
@@ -1060,10 +1099,12 @@ export const CreateEventModal = ({
       </div>
 
       {/* Date & Time */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
         <div className="space-y-2">
           <Label htmlFor="date" className="text-sm sm:text-base font-semibold flex items-center gap-2">
-            <EventIcon style={{ fontSize: 18 }} />
+            <div className="p-1.5 bg-primary/10 rounded-lg">
+              <EventIcon style={{ fontSize: 18 }} className="text-primary" />
+            </div>
             Date *
           </Label>
           <Input
@@ -1072,7 +1113,9 @@ export const CreateEventModal = ({
             min={getTodayDate()}
             value={formData.date || ""}
             onChange={(e) => handleInputChange("date", e.target.value)}
-            className={`h-11 sm:h-12 ${errors.date ? "border-destructive" : ""}`}
+            className={`h-12 sm:h-14 bg-gradient-to-br from-background to-muted/20 border-2 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all ${
+              errors.date ? "border-destructive" : "border-border/50"
+            }`}
           />
           {errors.date && (
             <p className="text-xs sm:text-sm text-destructive">{errors.date}</p>
@@ -1081,7 +1124,9 @@ export const CreateEventModal = ({
 
         <div className="space-y-2">
           <Label htmlFor="time" className="text-sm sm:text-base font-semibold flex items-center gap-2">
-            <EventIcon style={{ fontSize: 18 }} />
+            <div className="p-1.5 bg-success/10 rounded-lg">
+              <AccessTimeIcon style={{ fontSize: 18 }} className="text-success" />
+            </div>
             Time *
           </Label>
           <Input
@@ -1089,7 +1134,9 @@ export const CreateEventModal = ({
             type="time"
             value={formData.time || ""}
             onChange={(e) => handleInputChange("time", e.target.value)}
-            className={`h-11 sm:h-12 ${errors.time ? "border-destructive" : ""}`}
+            className={`h-12 sm:h-14 bg-gradient-to-br from-background to-muted/20 border-2 focus:border-success focus:ring-2 focus:ring-success/20 transition-all ${
+              errors.time ? "border-destructive" : "border-border/50"
+            }`}
           />
           {errors.time && (
             <p className="text-xs sm:text-sm text-destructive">{errors.time}</p>
@@ -1100,10 +1147,12 @@ export const CreateEventModal = ({
       {/* Location */}
       <div className="space-y-2">
         <Label htmlFor="location" className="text-sm sm:text-base font-semibold flex items-center gap-2">
-          <LocationOnIcon style={{ fontSize: 18 }} />
+          <div className="p-1.5 bg-warning/10 rounded-lg">
+            <LocationOnIcon style={{ fontSize: 18 }} className="text-warning" />
+          </div>
           Location {initialLocation ? "" : "*"}
         </Label>
-        <div className="flex gap-2">
+        <div className="flex gap-3">
           <Input
             id="location"
             placeholder={initialLocation ? `Location: ${initialLocation.lat.toFixed(6)}, ${initialLocation.lng.toFixed(6)}` : "e.g., Central Park, New York"}
@@ -1117,21 +1166,25 @@ export const CreateEventModal = ({
             }
             readOnly
             disabled
-            className={`flex-1 h-11 sm:h-12 bg-muted cursor-not-allowed ${errors.location ? "border-destructive" : ""}`}
+            className={`flex-1 h-12 sm:h-14 bg-gradient-to-br from-muted/30 to-muted/10 cursor-not-allowed border-2 ${
+              errors.location ? "border-destructive" : "border-border/50"
+            }`}
             title="Use the pin button to pick a location"
             maxLength={200}
           />
           {!initialLocation && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleOpenMapPicker}
-              className="h-11 sm:h-12 px-3 sm:px-4 border-primary text-primary bg-primary/10 hover:bg-primary/20 shadow-elevation-2"
-              title="Pin location on map"
-            >
-              <MapIcon style={{ fontSize: 20 }} />
-              <span className="hidden sm:inline ml-2">Pin on Map</span>
-            </Button>
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleOpenMapPicker}
+                className="h-12 sm:h-14 px-4 sm:px-6 border-2 border-warning text-warning bg-warning/10 hover:bg-warning/20 shadow-lg shadow-warning/20 hover:shadow-xl hover:shadow-warning/30 transition-all font-semibold"
+                title="Pin location on map"
+              >
+                <MapIcon style={{ fontSize: 22 }} />
+                <span className="hidden sm:inline ml-2">Pin on Map</span>
+              </Button>
+            </motion.div>
           )}
         </div>
         {initialLocation && (
@@ -1157,7 +1210,9 @@ export const CreateEventModal = ({
       {/* Max Participants */}
       <div className="space-y-2">
         <Label htmlFor="maxParticipants" className="text-sm sm:text-base font-semibold flex items-center gap-2">
-          <PeopleIcon style={{ fontSize: 18 }} />
+          <div className="p-1.5 bg-secondary/10 rounded-lg">
+            <PeopleIcon style={{ fontSize: 18 }} className="text-secondary" />
+          </div>
           Maximum Participants (Optional)
         </Label>
         <Input
@@ -1173,7 +1228,9 @@ export const CreateEventModal = ({
               e.target.value ? parseInt(e.target.value) : ""
             )
           }
-          className={`h-11 sm:h-12 ${errors.maxParticipants ? "border-destructive" : ""}`}
+          className={`h-12 sm:h-14 bg-gradient-to-br from-background to-muted/20 border-2 focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all ${
+            errors.maxParticipants ? "border-destructive" : "border-border/50"
+          }`}
         />
         {errors.maxParticipants && (
           <p className="text-xs sm:text-sm text-destructive">{errors.maxParticipants}</p>
@@ -1184,23 +1241,39 @@ export const CreateEventModal = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-border">
+      <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-border/50">
         <Button
           type="button"
           variant="outline"
           onClick={onClose}
-          className="w-full sm:flex-1 h-11 sm:h-12"
+          className="w-full sm:flex-1 h-12 sm:h-14 border-2 hover:bg-destructive/10 hover:border-destructive/50 transition-all font-semibold"
           disabled={isSubmitting}
         >
           Cancel
         </Button>
-        <Button
-          type="submit"
-          className="w-full sm:flex-1 h-11 sm:h-12 font-semibold"
-          disabled={isSubmitting}
+        <motion.div
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          className="w-full sm:flex-1"
         >
-          {submitButtonLabel}
-        </Button>
+          <Button
+            type="submit"
+            className="w-full h-12 sm:h-14 font-bold text-base bg-gradient-to-r from-primary via-primary to-success hover:from-primary/90 hover:via-primary/90 hover:to-success/90 shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 transition-all"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <span className="flex items-center gap-2">
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Creating...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <EventIcon style={{ fontSize: 20 }} />
+                {isEditMode ? "Update Event" : "Create Event"}
+              </span>
+            )}
+          </Button>
+        </motion.div>
       </div>
     </>
   );
@@ -1260,38 +1333,47 @@ export const CreateEventModal = ({
             className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-2xl my-8"
             >
-              <Card className="overflow-hidden shadow-elevation-4 border-2 border-border/50">
-                {/* Header */}
-                <div className="relative bg-gradient-to-br from-primary/10 via-success/5 to-warning/10 p-6 border-b border-border">
+              <Card className="overflow-hidden shadow-elevation-4 border-2 border-border/50 bg-gradient-to-br from-background via-background to-primary/5">
+                {/* Header with Enhanced Design */}
+                <div className="relative bg-gradient-to-br from-primary via-primary/90 to-success/80 p-8 border-b border-primary/20 overflow-hidden">
+                  {/* Decorative background elements */}
+                  <div className="absolute inset-0 opacity-10">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-white rounded-full blur-3xl" />
+                    <div className="absolute bottom-0 left-0 w-48 h-48 bg-success rounded-full blur-2xl" />
+                  </div>
+                  
                   <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 p-2 bg-background/80 backdrop-blur-sm hover:bg-secondary rounded-full transition-colors z-10"
+                    className="absolute top-4 right-4 p-2 bg-white/20 backdrop-blur-md hover:bg-white/30 rounded-full transition-all z-10 shadow-lg hover:scale-110"
                   >
-                    <CloseIcon fontSize="small" />
+                    <CloseIcon className="text-white" fontSize="small" />
                   </button>
 
-                  <div className="flex items-center gap-3">
-                    <div className="p-3 bg-background/80 backdrop-blur-sm rounded-xl">
-                      <EventIcon className="text-primary" style={{ fontSize: 28 }} />
+                  <div className="relative flex items-center gap-4">
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-white/20 rounded-2xl blur-xl" />
+                      <div className="relative p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 shadow-lg">
+                        <EventIcon className="text-white" style={{ fontSize: 32 }} />
+                      </div>
                     </div>
-                    <div>
-                      <h2 className="text-2xl font-bold">{modalTitle}</h2>
-                      <p className="text-sm text-muted-foreground mt-1">
+                    <div className="flex-1">
+                      <h2 className="text-3xl font-bold text-white drop-shadow-lg">{modalTitle}</h2>
+                      <p className="text-sm text-white/90 mt-1.5 drop-shadow-md">
                         {modalDescription}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                {/* Form */}
-                <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                {/* Form with Enhanced Styling */}
+                <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6 bg-gradient-to-b from-background to-background/95">
                   {renderFormContent()}
                 </form>
               </Card>

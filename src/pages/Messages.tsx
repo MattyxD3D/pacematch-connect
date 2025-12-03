@@ -382,25 +382,18 @@ const Messages = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
       {/* Header */}
-      <div 
-        className="sticky top-0 z-10 bg-background border-b border-border"
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-card/80 backdrop-blur-md shadow-elevation-2 sticky top-0 z-10 border-b border-border/50"
         style={{
           paddingTop: 'env(safe-area-inset-top)',
         }}
       >
-        <div className="flex items-center justify-between p-4">
-          {!showSearch ? (
-            <>
-              <div className="flex items-center gap-3">
-                <div>
-                  <h1 className="text-2xl font-bold text-foreground">Messages</h1>
-                  {totalUnread > 0 && (
-                    <p className="text-sm text-muted-foreground">
-                      {totalUnread} unread {totalUnread === 1 ? "message" : "messages"}
-                    </p>
-                  )}
-                </div>
-              </div>
+        <div className="max-w-2xl mx-auto px-6 py-5">
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-bold">Messages</h1>
+            {!showSearch ? (
               <motion.button
                 whileTap={{ scale: 0.95 }}
                 onClick={() => setShowSearch(true)}
@@ -408,52 +401,56 @@ const Messages = () => {
               >
                 <SearchIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
               </motion.button>
-            </>
-          ) : (
-            <div className="flex items-center gap-2 w-full">
-              <Input
-                type="text"
-                placeholder="Search conversations..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1"
-                autoFocus
-              />
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  setShowSearch(false);
-                  setSearchQuery("");
-                }}
-                className="touch-target p-2 rounded-full hover:bg-accent transition-colors"
-              >
-                <CloseIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
-              </motion.button>
-            </div>
-          )}
+            ) : (
+              <div className="flex items-center gap-2 flex-1 max-w-xs ml-4">
+                <Input
+                  type="text"
+                  placeholder="Search conversations..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="flex-1"
+                  autoFocus
+                />
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    setShowSearch(false);
+                    setSearchQuery("");
+                  }}
+                  className="touch-target p-2 rounded-full hover:bg-accent transition-colors"
+                >
+                  <CloseIcon style={{ fontSize: 24 }} className="text-muted-foreground" />
+                </motion.button>
+              </div>
+            )}
+          </div>
         </div>
+      </motion.div>
 
-        {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "chats" | "requests")} className="w-full">
-          <TabsList className="w-full grid grid-cols-2 h-12 bg-muted/30">
-            <TabsTrigger value="chats" className="relative data-[state=active]:bg-background">
-              Chats
-              {totalUnread > 0 && (
-                <span className="ml-2 px-1.5 py-0.5 text-xs font-bold bg-destructive text-destructive-foreground rounded-full min-w-[20px]">
-                  {totalUnread}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="requests" className="relative data-[state=active]:bg-background">
-              Requests
-              {requestsCount > 0 && (
-                <span className="ml-2 px-1.5 py-0.5 text-xs font-bold bg-primary text-primary-foreground rounded-full min-w-[20px]">
-                  {requestsCount}
-                </span>
-              )}
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+      {/* Tabs */}
+      <div className="bg-card/80 backdrop-blur-md sticky top-[calc(env(safe-area-inset-top)+5rem)] z-10 border-b border-border/50">
+        <div className="max-w-2xl mx-auto px-6">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "chats" | "requests")} className="w-full">
+            <TabsList className="w-full grid grid-cols-2 h-12 bg-muted/30">
+              <TabsTrigger value="chats" className="relative data-[state=active]:bg-background">
+                Chats
+                {totalUnread > 0 && (
+                  <span className="ml-2 px-1.5 py-0.5 text-xs font-bold bg-destructive text-destructive-foreground rounded-full min-w-[20px]">
+                    {totalUnread}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="requests" className="relative data-[state=active]:bg-background">
+                Requests
+                {requestsCount > 0 && (
+                  <span className="ml-2 px-1.5 py-0.5 text-xs font-bold bg-primary text-primary-foreground rounded-full min-w-[20px]">
+                    {requestsCount}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
       </div>
 
       {/* Content */}

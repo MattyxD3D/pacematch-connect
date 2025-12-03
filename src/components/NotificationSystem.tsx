@@ -347,6 +347,9 @@ export const useNotifications = (currentUserId?: string | null) => {
     } else if (notification.type === "achievement") {
       // Navigate to workout history or profile for achievements
       navigate("/workout-history");
+    } else if (notification.type === "username_change_required") {
+      // Navigate to edit profile page so user can update their username
+      navigate("/edit-profile");
     }
   };
 

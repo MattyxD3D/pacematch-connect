@@ -12,6 +12,7 @@ interface IconOptions {
   fitnessLevel?: FitnessLevel | string;
   opacity?: number; // Opacity for the entire icon (0.0 to 1.0)
   activity?: "running" | "cycling" | "walking"; // Activity type for badge
+  enhancedGlow?: boolean; // Enhanced glow effect for 3D mode
 }
 
 const DEFAULT_SIZE = 48;
@@ -229,7 +230,8 @@ export async function createProfileIconAsync(
     shadow = true,
     fitnessLevel,
     opacity = 1.0,
-    activity
+    activity,
+    enhancedGlow = false
   } = options;
 
   // Get fitness level colors
@@ -237,9 +239,12 @@ export async function createProfileIconAsync(
   const hasGlow = !!fitnessColors;
   
   // Increase canvas size to accommodate glow and activity badge
+  // Enhanced glow in 3D mode uses larger glow size
+  const glowSizeMultiplier = enhancedGlow ? 1.5 : 1;
+  const effectiveGlowSize = enhancedGlow || hasGlow ? GLOW_SIZE * glowSizeMultiplier : 0;
   const badgeSpace = activity ? ACTIVITY_BADGE_SIZE + ACTIVITY_BADGE_OFFSET * 2 : 0;
-  const canvasSize = hasGlow ? size + GLOW_SIZE * 2 + badgeSpace : size + badgeSpace;
-  const avatarOffset = hasGlow ? GLOW_SIZE : 0;
+  const canvasSize = (hasGlow || enhancedGlow) ? size + effectiveGlowSize * 2 + badgeSpace : size + badgeSpace;
+  const avatarOffset = (hasGlow || enhancedGlow) ? effectiveGlowSize : 0;
   // Avatar center is in the middle of the avatar area (not including badge space)
   const avatarCenter = avatarOffset + size / 2;
 
@@ -274,7 +279,10 @@ export async function createProfileIconAsync(
 
   // Draw fitness level glow if available (drawn first, behind everything)
   if (hasGlow && fitnessColors) {
-    drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, fitnessColors.glowColor);
+    drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, fitnessColors.glowColor, enhancedGlow);
+  } else if (enhancedGlow) {
+    // Even without fitness level, add white glow in 3D mode
+    drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, 'rgba(255, 255, 255, 0.6)', true);
   }
 
   // Draw shadow if enabled
@@ -379,7 +387,8 @@ export function createProfileIcon(
     borderColor = DEFAULT_BORDER_COLOR,
     fitnessLevel,
     opacity = 1.0,
-    activity
+    activity,
+    enhancedGlow = false
   } = options;
 
   // Get fitness level colors
@@ -387,9 +396,12 @@ export function createProfileIcon(
   const hasGlow = !!fitnessColors;
   
   // Increase canvas size to accommodate glow and activity badge
+  // Enhanced glow in 3D mode uses larger glow size
+  const glowSizeMultiplier = enhancedGlow ? 1.5 : 1;
+  const effectiveGlowSize = enhancedGlow || hasGlow ? GLOW_SIZE * glowSizeMultiplier : 0;
   const badgeSpace = activity ? ACTIVITY_BADGE_SIZE + ACTIVITY_BADGE_OFFSET * 2 : 0;
-  const canvasSize = hasGlow ? size + GLOW_SIZE * 2 + badgeSpace : size + badgeSpace;
-  const avatarOffset = hasGlow ? GLOW_SIZE : 0;
+  const canvasSize = (hasGlow || enhancedGlow) ? size + effectiveGlowSize * 2 + badgeSpace : size + badgeSpace;
+  const avatarOffset = (hasGlow || enhancedGlow) ? effectiveGlowSize : 0;
   // Avatar center is in the middle of the avatar area (not including badge space)
   const avatarCenter = avatarOffset + size / 2;
 
@@ -417,7 +429,10 @@ export function createProfileIcon(
 
   // Draw fitness level glow if available (drawn first, behind everything)
   if (hasGlow && fitnessColors) {
-    drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, fitnessColors.glowColor);
+    drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, fitnessColors.glowColor, enhancedGlow);
+  } else if (enhancedGlow) {
+    // Even without fitness level, add white glow in 3D mode
+    drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, 'rgba(255, 255, 255, 0.6)', true);
   }
 
   // Draw border circle with fitness level color if available
@@ -462,7 +477,10 @@ export function createProfileIcon(
         
         // Redraw glow
         if (hasGlow && fitnessColors) {
-          drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, fitnessColors.glowColor);
+          drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, fitnessColors.glowColor, enhancedGlow);
+        } else if (enhancedGlow) {
+          // Even without fitness level, add white glow in 3D mode
+          drawGlowEffect(ctx, avatarCenter, avatarCenter, size / 2, 'rgba(255, 255, 255, 0.6)', true);
         }
         
         // Redraw border
@@ -554,21 +572,43 @@ export function createProfileIcon(
  * @param y - Center Y coordinate
  * @param radius - Radius of the circle to glow around
  * @param glowColor - Color of the glow (with alpha)
+ * @param enhanced - If true, adds enhanced glow with white outline for 3D mode
  */
 function drawGlowEffect(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   radius: number,
-  glowColor: string
+  glowColor: string,
+  enhanced: boolean = false
 ): void {
   // Draw multiple concentric circles with decreasing opacity for smooth glow
-  const glowLayers = 4;
-  const maxGlowRadius = radius + GLOW_SIZE;
+  const glowLayers = enhanced ? 6 : 4; // More layers for enhanced glow
+  const maxGlowRadius = radius + (enhanced ? GLOW_SIZE * 1.5 : GLOW_SIZE);
+  
+  // If enhanced, draw white outline first for better visibility in 3D mode
+  if (enhanced) {
+    ctx.beginPath();
+    ctx.arc(x, y, radius + GLOW_SIZE * 0.3, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    
+    // Add outer white glow
+    for (let i = 0; i < 3; i++) {
+      const outlineRadius = radius + GLOW_SIZE * 0.5 + i * 2;
+      const outlineOpacity = 0.4 * (1 - i / 3);
+      ctx.beginPath();
+      ctx.arc(x, y, outlineRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${outlineOpacity})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
   
   for (let i = 0; i < glowLayers; i++) {
     const layerRadius = radius + (maxGlowRadius - radius) * (i + 1) / glowLayers;
-    const opacity = 0.6 * (1 - i / glowLayers);
+    const opacity = enhanced ? 0.8 * (1 - i / glowLayers) : 0.6 * (1 - i / glowLayers);
     
     // Extract RGB from rgba string and create new rgba with adjusted opacity
     const colorMatch = glowColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);

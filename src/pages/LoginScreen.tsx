@@ -10,13 +10,11 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useNavigate, useLocation } from "react-router-dom";
-import PhoneIcon from "@mui/icons-material/Phone";
 import EmailIcon from "@mui/icons-material/Email";
-import LockIcon from "@mui/icons-material/Lock";
 import PersonIcon from "@mui/icons-material/Person";
 import DirectionsRunIcon from "@mui/icons-material/DirectionsRun";
 import PeopleIcon from "@mui/icons-material/People";
-import { sendPhoneVerificationCode, verifyPhoneCode, ConfirmationResult, signUpWithEmail, signInWithEmail, resetPassword, checkEmailExists, sendEmailVerificationCode, verifyEmailCode, signInWithGoogle, handleRedirectResult } from "@/services/authService";
+import { signUpWithEmail, checkEmailExists, sendEmailVerificationCode, verifyEmailCode, sendEmailOTPForSignIn, verifyEmailOTPForSignIn, signInWithEmailOTP, signInWithGoogle, handleRedirectResult } from "@/services/authService";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { auth } from "@/services/firebase";
@@ -25,24 +23,14 @@ const LoginScreen = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, loading: authLoading } = useAuth();
-  // Login method: 'phone' or 'email'
-  // Changed default to 'email' since phone auth has configuration issues
-  const [loginMethod, setLoginMethod] = useState<'phone' | 'email'>('email');
-  // Email login state
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  // Email OTP state
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [resetEmail, setResetEmail] = useState("");
-  // Email verification state
-  const [emailVerificationCode, setEmailVerificationCode] = useState("");
-  const [emailVerificationSent, setEmailVerificationSent] = useState(false);
-  const [emailCodeVerified, setEmailCodeVerified] = useState(false);
-  // Phone login state
-  const [phoneNumber, setPhoneNumber] = useState("+63");
   const [otpCode, setOtpCode] = useState("");
-  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [password, setPassword] = useState(""); // Only needed for sign-up final step
   // Common state
   const [loading, setLoading] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
@@ -139,169 +127,73 @@ const LoginScreen = () => {
   }, [user, authLoading, navigate, location.pathname]);
 
 
-  const handleSendCode = async () => {
+  // Handle sending OTP for email (works for both sign-in and sign-up)
+  const handleSendOTP = async () => {
     setSendingCode(true);
     setError(null);
 
     try {
-      // Get the phone number value (remove +63 prefix if user typed it)
-      let phoneValue = phoneNumber.startsWith('+63') ? phoneNumber.slice(3) : phoneNumber;
-      
-      // Remove all non-digits
-      phoneValue = phoneValue.replace(/\D/g, '');
-      
-      // Validate phone number format
-      if (!phoneValue || phoneValue.length === 0) {
-        throw new Error("Please enter your phone number");
-      }
-
-      // Accept formats: 09123456789 or 9123456789 (with or without leading 0)
-      // Remove leading 0 if present, then ensure it's 10 digits
-      let digits = phoneValue;
-      if (digits.startsWith('0')) {
-        digits = digits.slice(1); // Remove leading 0
-      }
-      
-      // Validate: should be 10 digits after removing leading 0
-      if (digits.length !== 10 || !/^\d{10}$/.test(digits)) {
-        throw new Error("Please enter a valid 10-digit Philippine mobile number (e.g., 09123456789 or 9123456789)");
-      }
-      
-      // Format as +63XXXXXXXXXX (10 digits)
-      const formattedPhone = `+63${digits}`;
-      
-      console.log("📱 Sending SMS code to:", formattedPhone);
-      const confirmation = await sendPhoneVerificationCode(formattedPhone);
-      
-      setConfirmationResult(confirmation);
-      toast.success("Verification code sent! Check your SMS.", {
-        description: "If SMS doesn't arrive, you may be in test mode. Check console for details.",
-        duration: 5000,
-      });
-      console.log("✅ SMS code sent successfully");
-    } catch (err: any) {
-      console.error("❌ Error sending SMS code:", err);
-      setError(err.message || "Failed to send verification code. Please try again.");
-      setSendingCode(false);
-    } finally {
-      setSendingCode(false);
-    }
-  };
-
-  const handleVerifyCode = async () => {
-    if (!confirmationResult) {
-      setError("Please send a verification code first.");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Validate OTP code
-      if (!otpCode.trim() || otpCode.length !== 6) {
-        throw new Error("Please enter the 6-digit verification code");
-      }
-
-      console.log("🔐 Verifying SMS code...");
-      const user = await verifyPhoneCode(confirmationResult, otpCode);
-      
-      console.log("✅ Phone verification successful! User:", user.uid);
-      
-      // Prevent multiple redirects
-      if (hasRedirected.current) {
-        setLoading(false);
-        return;
-      }
-      
-      // Wait for auth state to update
-      const delay = isMobile() ? 2000 : 500; // 2 seconds on mobile, 500ms on desktop
-      console.log("📱 Mobile:", isMobile(), "Adding delay:", delay, "ms");
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      // Double-check user is still authenticated after delay
-      if (!auth.currentUser) {
-        console.log("⚠️ User no longer authenticated after delay, aborting redirect");
-        setLoading(false);
-        return;
-      }
-      
-      // Check if user has completed profile setup
-      const { getUserData } = await import("@/services/authService");
-      const userData = await getUserData(user.uid);
-      console.log("📋 User data from Firebase:", userData);
-      
-      hasRedirected.current = true;
-      if (userData && userData.activity) {
-        console.log("🏠 User has activity, redirecting to home feed");
-        navigate("/", { replace: true });
-      } else {
-        console.log("👤 User needs profile setup, redirecting to /profile-setup");
-        navigate("/profile-setup", { replace: true });
-      }
-      setLoading(false);
-    } catch (err: any) {
-      console.error("❌ Error verifying code:", err);
-      setError(err.message || "Invalid verification code. Please try again.");
-      setLoading(false);
-    }
-  };
-
-  const handleResendCode = async () => {
-    setConfirmationResult(null);
-    setOtpCode("");
-    await handleSendCode();
-  };
-
-  const handleSendEmailVerification = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Validate inputs before sending code
+      // Validate email
       if (!email || !email.includes('@')) {
         setError("Please enter a valid email address");
-        setLoading(false);
-        return;
-      }
-      if (!displayName || displayName.trim().length === 0) {
-        setError("Please enter your name");
-        setLoading(false);
+        setSendingCode(false);
         return;
       }
 
-      console.log("📧 Sending verification code to:", email);
-      const code = await sendEmailVerificationCode(email);
+      // For sign-up, also validate display name
+      if (isSignUp && (!displayName || displayName.trim().length === 0)) {
+        setError("Please enter your name");
+        setSendingCode(false);
+        return;
+      }
+
+      console.log("📧 Sending OTP to:", email);
       
-      // For development: show code in console and toast
-      console.log("🔐 Verification code:", code);
-      toast.success("Verification code sent! Check your email.", {
-        description: `Development mode: Code is ${code} (check console)`,
-        duration: 10000,
-      });
+      if (isSignUp) {
+        // For sign-up, use the existing verification code function
+        await sendEmailVerificationCode(email);
+        toast.success("Verification code sent! Check your email.", {
+          description: "Check your inbox for the 6-digit code. If you don't see it, check spam folder.",
+          duration: 10000,
+        });
+      } else {
+        // For sign-in, use the new OTP function
+        await sendEmailOTPForSignIn(email);
+        toast.success("Verification code sent! Check your email.", {
+          description: "Check your inbox for the 6-digit code. If you don't see it, check spam folder.",
+          duration: 10000,
+        });
+      }
       
-      setEmailVerificationSent(true);
-      setLoading(false);
+      setOtpSent(true);
+      setSendingCode(false);
     } catch (err: any) {
-      console.error("❌ Error sending verification code:", err);
+      console.error("❌ Error sending OTP:", err);
       setError(err.message || "Failed to send verification code. Please try again.");
-      setLoading(false);
+      setSendingCode(false);
     }
   };
 
-  const handleVerifyEmailCode = async () => {
+  // Handle verifying OTP
+  const handleVerifyOTP = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      if (!emailVerificationCode || emailVerificationCode.length !== 6) {
+      if (!otpCode || otpCode.length !== 6) {
         setError("Please enter the 6-digit verification code");
         setLoading(false);
         return;
       }
 
-      console.log("🔐 Verifying email code...");
-      const isValid = await verifyEmailCode(email, emailVerificationCode);
+      console.log("🔐 Verifying OTP code...");
+      
+      let isValid = false;
+      if (isSignUp) {
+        isValid = await verifyEmailCode(email, otpCode);
+      } else {
+        isValid = await verifyEmailOTPForSignIn(email, otpCode);
+      }
       
       if (!isValid) {
         setError("Invalid verification code. Please try again.");
@@ -309,25 +201,71 @@ const LoginScreen = () => {
         return;
       }
 
-      console.log("✅ Email verified successfully!");
-      setEmailCodeVerified(true);
-      toast.success("Email verified! Creating your account...");
+      console.log("✅ OTP verified successfully!");
+      setOtpVerified(true);
       
-      // Now proceed with account creation
-      await handleCreateAccount();
+      if (isSignUp) {
+        // For sign-up, user needs to set password next
+        toast.success("Email verified! Now create your password.");
+      } else {
+        // For sign-in, try to sign in
+        await handleSignInAfterOTP();
+      }
+      
+      setLoading(false);
     } catch (err: any) {
-      console.error("❌ Error verifying code:", err);
+      console.error("❌ Error verifying OTP:", err);
       setError(err.message || "Invalid verification code. Please try again.");
       setLoading(false);
     }
   };
 
-  const handleResendEmailCode = async () => {
-    setEmailVerificationCode("");
-    setEmailCodeVerified(false);
-    await handleSendEmailVerification();
+  // Handle sign-in after OTP verification
+  const handleSignInAfterOTP = async () => {
+    try {
+      // Try to sign in with OTP
+      // Note: This will send an email link for sign-in (Firebase limitation)
+      await signInWithEmailOTP(email);
+      // Show success message - user needs to check email for sign-in link
+      toast.success("Please check your email!", {
+        description: "We've sent you a sign-in link. Click it to complete authentication.",
+        duration: 10000,
+      });
+      // Reset state so user can try again if needed
+      setOtpSent(false);
+      setOtpVerified(false);
+      setOtpCode("");
+    } catch (err: any) {
+      // If sign-in fails (e.g., user doesn't exist), show error
+      if (err.message.includes("No account found")) {
+        setError("No account found with this email. Please sign up instead.");
+        setIsSignUp(true);
+        setOtpVerified(false);
+        setOtpCode("");
+        setOtpSent(false);
+      } else if (err.message.includes("check your email")) {
+        // This is expected - user needs to check email for link
+        toast.info("Check your email!", {
+          description: "We've sent you a sign-in link. Click it to complete authentication.",
+          duration: 10000,
+        });
+        setOtpSent(false);
+        setOtpVerified(false);
+        setOtpCode("");
+      } else {
+        setError(err.message || "Failed to sign in. Please try again.");
+      }
+    }
   };
 
+  // Handle resending OTP
+  const handleResendOTP = async () => {
+    setOtpCode("");
+    setOtpVerified(false);
+    await handleSendOTP();
+  };
+
+  // Handle creating account after OTP verification (for sign-up)
   const handleCreateAccount = async () => {
     setLoading(true);
     setError(null);
@@ -368,60 +306,6 @@ const LoginScreen = () => {
     } catch (err: any) {
       console.error("❌ Error signing up:", err);
       setError(err.message || "Failed to create account. Please try again.");
-      setLoading(false);
-    }
-  };
-
-  const handleEmailSignIn = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      console.log("📧 Signing in with email:", email);
-      const user = await signInWithEmail(email, password);
-      
-      console.log("✅ Sign-in successful! User:", user.uid);
-      
-      // Wait for auth state to update
-      const delay = isMobile() ? 2000 : 500;
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      if (!auth.currentUser) {
-        setLoading(false);
-        return;
-      }
-      
-      // Check if user has completed profile setup
-      const { getUserData } = await import("@/services/authService");
-      const userData = await getUserData(user.uid);
-      
-      hasRedirected.current = true;
-      if (userData && userData.activity) {
-        navigate("/", { replace: true });
-      } else {
-        navigate("/profile-setup", { replace: true });
-      }
-      setLoading(false);
-    } catch (err: any) {
-      console.error("❌ Error signing in:", err);
-      setError(err.message || "Failed to sign in. Please try again.");
-      setLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      await resetPassword(resetEmail);
-      toast.success("Password reset email sent! Check your inbox.");
-      setShowForgotPassword(false);
-      setResetEmail("");
-    } catch (err: any) {
-      console.error("❌ Error sending password reset:", err);
-      setError(err.message || "Failed to send password reset email.");
-    } finally {
       setLoading(false);
     }
   };
@@ -648,103 +532,63 @@ const LoginScreen = () => {
               <div className="w-full border-t border-muted"></div>
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
+              <span className="bg-background px-2 text-muted-foreground">Or continue with email</span>
             </div>
           </div>
 
-          {/* Toggle Buttons - Phone login temporarily hidden */}
-          {/* 
-          <div className="flex gap-2 p-1 bg-muted rounded-lg">
-            <Button
-              onClick={() => {
-                setLoginMethod('phone');
-                setError(null);
-                setConfirmationResult(null);
-                setOtpCode("");
-              }}
-              variant={loginMethod === 'phone' ? 'default' : 'ghost'}
-              className="flex-1"
-            >
-              <PhoneIcon className="mr-2" style={{ fontSize: 18 }} />
-              Phone
-            </Button>
-            <Button
-              onClick={() => {
-                setLoginMethod('email');
-                setError(null);
-                setShowForgotPassword(false);
-              }}
-              variant={loginMethod === 'email' ? 'default' : 'ghost'}
-              className="flex-1"
-            >
-              <EmailIcon className="mr-2" style={{ fontSize: 18 }} />
-              Email
-            </Button>
-          </div>
-          */}
+          {/* Email OTP Form */}
+          {!otpSent ? (
+            /* Step 1: Enter Email (and Name for sign-up) */
+            <>
+              {isSignUp && (
+                <div className="space-y-2">
+                  <label htmlFor="name" className="text-sm font-medium text-muted-foreground">
+                    Full Name
+                  </label>
+                  <div className="relative">
+                    <PersonIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
+                    <Input
+                      id="name"
+                      type="text"
+                      placeholder="John Doe"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className="pl-10 h-12 text-base"
+                      disabled={loading || sendingCode}
+                    />
+                  </div>
+                </div>
+              )}
 
-          {/* Phone Login Form */}
-          {loginMethod === 'phone' && (
-            <>
-              {!confirmationResult ? (
-            /* Phone Number Input */
-            <>
               <div className="space-y-2">
-                <label htmlFor="phone" className="text-sm font-medium text-muted-foreground">
-                  Phone Number (Philippines)
+                <label htmlFor="email" className="text-sm font-medium text-muted-foreground">
+                  Email Address
                 </label>
                 <div className="relative">
-                  <PhoneIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
+                  <EmailIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
                   <Input
-                    id="phone"
-                    type="tel"
-                    placeholder="0912 345 6789 or 912 345 6789"
-                    value={(() => {
-                      let displayValue = phoneNumber.startsWith('+63') ? phoneNumber.slice(3) : phoneNumber;
-                      // Format with spaces: 0912 345 6789 or 912 345 6789
-                      const digits = displayValue.replace(/\D/g, '');
-                      if (digits.length <= 3) return digits;
-                      if (digits.length <= 7) {
-                        return digits.startsWith('0') 
-                          ? `${digits.slice(0, 4)} ${digits.slice(4)}`
-                          : `${digits.slice(0, 3)} ${digits.slice(3)}`;
-                      }
-                      if (digits.startsWith('0')) {
-                        return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
-                      }
-                      return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
-                    })()}
-                    onChange={(e) => {
-                      // Only allow digits
-                      let digits = e.target.value.replace(/\D/g, '');
-                      
-                      // Allow up to 11 digits (can start with 0, then 10 digits)
-                      // Or 10 digits without leading 0
-                      if (digits.startsWith('0')) {
-                        // If starts with 0, allow up to 11 digits (0 + 10 digits)
-                        digits = digits.slice(0, 11);
-                      } else {
-                        // If doesn't start with 0, allow up to 10 digits
-                        digits = digits.slice(0, 10);
-                      }
-                      
-                      setPhoneNumber('+63' + digits);
-                    }}
+                    id="email"
+                    type="email"
+                    placeholder="your@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     className="pl-10 h-12 text-base"
-                    disabled={sendingCode || loading}
+                    disabled={loading || sendingCode}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !loading && !sendingCode && email.trim() && (!isSignUp || displayName.trim())) {
+                        handleSendOTP();
+                      }
+                    }}
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Enter your mobile number (e.g., 0912 345 6789 or 912 345 6789)
-                </p>
-                <p className="text-xs text-muted-foreground/70 italic mt-1">
-                  Note: If SMS doesn't arrive, check Firebase Console &gt; Authentication &gt; Settings &gt; Phone numbers for testing. Remove test numbers to enable production mode.
+                  We'll send a 6-digit verification code to this email
                 </p>
               </div>
 
               <Button
-                onClick={handleSendCode}
-                disabled={sendingCode || loading || !phoneNumber.trim()}
+                onClick={handleSendOTP}
+                disabled={loading || sendingCode || !email.trim() || (isSignUp && !displayName.trim())}
                 className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
               >
                 {sendingCode ? (
@@ -754,18 +598,35 @@ const LoginScreen = () => {
                   </>
                 ) : (
                   <>
-                    <PhoneIcon className="mr-3" style={{ fontSize: 20 }} />
+                    <EmailIcon className="mr-2" style={{ fontSize: 20 }} />
                     Send Verification Code
                   </>
                 )}
               </Button>
+
+              <div className="text-center">
+                <button
+                  onClick={() => {
+                    setIsSignUp(!isSignUp);
+                    setError(null);
+                    setEmail("");
+                    setOtpCode("");
+                    setOtpSent(false);
+                    setOtpVerified(false);
+                    setDisplayName("");
+                  }}
+                  className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                >
+                  {isSignUp ? "Already have an account? Sign in" : "Don't have an account? Sign up"}
+                </button>
+              </div>
             </>
-          ) : (
-            /* OTP Verification */
+          ) : !otpVerified ? (
+            /* Step 2: Verify OTP Code */
             <>
               <div className="space-y-2">
                 <label htmlFor="otp" className="text-sm font-medium text-muted-foreground">
-                  Enter 6-Digit Code
+                  Enter 6-Digit Verification Code
                 </label>
                 <Input
                   id="otp"
@@ -773,7 +634,6 @@ const LoginScreen = () => {
                   placeholder="123456"
                   value={otpCode}
                   onChange={(e) => {
-                    // Only allow digits, max 6
                     const value = e.target.value.replace(/\D/g, '').slice(0, 6);
                     setOtpCode(value);
                   }}
@@ -781,17 +641,22 @@ const LoginScreen = () => {
                   disabled={loading}
                   maxLength={6}
                   autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !loading && otpCode.length === 6) {
+                      handleVerifyOTP();
+                    }
+                  }}
                 />
                 <p className="text-xs text-muted-foreground text-center">
-                  Check your SMS for the verification code
+                  Check your email ({email}) for the verification code
                 </p>
                 <p className="text-xs text-muted-foreground/70 text-center italic mt-1">
-                  SMS may take 30 seconds to 2 minutes to arrive. If not received, ensure production mode is enabled.
+                  Code expires in 10 minutes
                 </p>
               </div>
 
               <Button
-                onClick={handleVerifyCode}
+                onClick={handleVerifyOTP}
                 disabled={loading || otpCode.length !== 6}
                 className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
               >
@@ -806,7 +671,7 @@ const LoginScreen = () => {
               </Button>
 
               <Button
-                onClick={handleResendCode}
+                onClick={handleResendOTP}
                 variant="outline"
                 disabled={sendingCode || loading}
                 className="w-full h-10 text-sm"
@@ -816,352 +681,61 @@ const LoginScreen = () => {
 
               <Button
                 onClick={() => {
-                  setConfirmationResult(null);
+                  setOtpSent(false);
                   setOtpCode("");
                   setError(null);
                 }}
                 variant="ghost"
                 className="w-full h-10 text-sm"
               >
-                Change Phone Number
+                Change Email
               </Button>
             </>
-              )}
-            </>
-          )}
-
-          {/* Email Login/Sign Up Form */}
-          {loginMethod === 'email' && (
+          ) : isSignUp ? (
+            /* Step 3: Set Password (Sign-up only) */
             <>
-              {showForgotPassword ? (
-                /* Forgot Password Form */
-                <>
-                  <div className="space-y-2">
-                    <label htmlFor="resetEmail" className="text-sm font-medium text-muted-foreground">
-                      Email Address
-                    </label>
-                    <div className="relative">
-                      <EmailIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                      <Input
-                        id="resetEmail"
-                        type="email"
-                        placeholder="your@email.com"
-                        value={resetEmail}
-                        onChange={(e) => setResetEmail(e.target.value)}
-                        className="pl-10 h-12 text-base"
-                        disabled={loading}
-                      />
-                    </div>
-                  </div>
-
-                  <Button
-                    onClick={handleForgotPassword}
-                    disabled={loading || !resetEmail.trim()}
-                    className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
-                  >
-                    {loading ? (
-                      <>
-                        <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                        Sending...
-                      </>
-                    ) : (
-                      "Send Reset Link"
-                    )}
-                  </Button>
-
-                  <Button
-                    onClick={() => {
-                      setShowForgotPassword(false);
-                      setResetEmail("");
-                      setError(null);
+              <div className="space-y-2">
+                <label htmlFor="password" className="text-sm font-medium text-muted-foreground">
+                  Create Password
+                </label>
+                <div className="relative">
+                  <EmailIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="At least 6 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pl-10 h-12 text-base"
+                    disabled={loading}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !loading && password.trim() && password.length >= 6) {
+                        handleCreateAccount();
+                      }
                     }}
-                    variant="ghost"
-                    className="w-full h-10 text-sm"
-                  >
-                    Back to Sign In
-                  </Button>
-                </>
-              ) : isSignUp ? (
-                /* Sign Up Form */
-                <>
-                  {!emailVerificationSent ? (
-                    /* Step 1: Enter Details */
-                    <>
-                      <div className="space-y-2">
-                        <label htmlFor="name" className="text-sm font-medium text-muted-foreground">
-                          Full Name
-                        </label>
-                        <div className="relative">
-                          <PersonIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                          <Input
-                            id="name"
-                            type="text"
-                            placeholder="John Doe"
-                            value={displayName}
-                            onChange={(e) => setDisplayName(e.target.value)}
-                            className="pl-10 h-12 text-base"
-                            disabled={loading}
-                          />
-                        </div>
-                      </div>
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Password must be at least 6 characters
+                </p>
+              </div>
 
-                      <div className="space-y-2">
-                        <label htmlFor="email" className="text-sm font-medium text-muted-foreground">
-                          Email Address
-                        </label>
-                        <div className="relative">
-                          <EmailIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                          <Input
-                            id="email"
-                            type="email"
-                            placeholder="your@email.com"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="pl-10 h-12 text-base"
-                            disabled={loading}
-                          />
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          We'll send a verification code to this email
-                        </p>
-                      </div>
-
-                      <Button
-                        onClick={handleSendEmailVerification}
-                        disabled={loading || !email.trim() || !displayName.trim()}
-                        className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
-                      >
-                        {loading ? (
-                          <>
-                            <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                            Sending Code...
-                          </>
-                        ) : (
-                          <>
-                            <EmailIcon className="mr-2" style={{ fontSize: 20 }} />
-                            Send Verification Code
-                          </>
-                        )}
-                      </Button>
-
-                      <div className="text-center">
-                        <button
-                          onClick={() => {
-                            setIsSignUp(false);
-                            setError(null);
-                            setEmailVerificationSent(false);
-                            setEmailVerificationCode("");
-                          }}
-                          className="text-sm text-muted-foreground hover:text-primary transition-colors"
-                        >
-                          Already have an account? Sign in
-                        </button>
-                      </div>
-                    </>
-                  ) : !emailCodeVerified ? (
-                    /* Step 2: Verify Email Code */
-                    <>
-                      <div className="space-y-2">
-                        <label htmlFor="emailCode" className="text-sm font-medium text-muted-foreground">
-                          Enter 6-Digit Verification Code
-                        </label>
-                        <Input
-                          id="emailCode"
-                          type="text"
-                          placeholder="123456"
-                          value={emailVerificationCode}
-                          onChange={(e) => {
-                            const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                            setEmailVerificationCode(value);
-                          }}
-                          className="h-12 text-base text-center text-2xl tracking-widest font-mono"
-                          disabled={loading}
-                          maxLength={6}
-                          autoFocus
-                        />
-                        <p className="text-xs text-muted-foreground text-center">
-                          Check your email ({email}) for the verification code
-                        </p>
-                        <p className="text-xs text-muted-foreground/70 text-center italic mt-1">
-                          Code expires in 10 minutes
-                        </p>
-                      </div>
-
-                      <Button
-                        onClick={handleVerifyEmailCode}
-                        disabled={loading || emailVerificationCode.length !== 6}
-                        className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
-                      >
-                        {loading ? (
-                          <>
-                            <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                            Verifying...
-                          </>
-                        ) : (
-                          "Verify Code"
-                        )}
-                      </Button>
-
-                      <Button
-                        onClick={handleResendEmailCode}
-                        variant="outline"
-                        disabled={loading}
-                        className="w-full h-10 text-sm"
-                      >
-                        Resend Code
-                      </Button>
-
-                      <Button
-                        onClick={() => {
-                          setEmailVerificationSent(false);
-                          setEmailVerificationCode("");
-                          setError(null);
-                        }}
-                        variant="ghost"
-                        className="w-full h-10 text-sm"
-                      >
-                        Change Email
-                      </Button>
-                    </>
-                  ) : (
-                    /* Step 3: Set Password */
-                    <>
-                      <div className="space-y-2">
-                        <label htmlFor="password" className="text-sm font-medium text-muted-foreground">
-                          Create Password
-                        </label>
-                        <div className="relative">
-                          <LockIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                          <Input
-                            id="password"
-                            type="password"
-                            placeholder="At least 6 characters"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="pl-10 h-12 text-base"
-                            disabled={loading}
-                          />
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Password must be at least 6 characters
-                        </p>
-                      </div>
-
-                      <Button
-                        onClick={handleCreateAccount}
-                        disabled={loading || !password.trim() || password.length < 6}
-                        className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
-                      >
-                        {loading ? (
-                          <>
-                            <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                            Creating Account...
-                          </>
-                        ) : (
-                          "Create Account"
-                        )}
-                      </Button>
-
-                      <div className="text-center">
-                        <button
-                          onClick={() => {
-                            setIsSignUp(false);
-                            setError(null);
-                            setEmailVerificationSent(false);
-                            setEmailCodeVerified(false);
-                            setEmailVerificationCode("");
-                          }}
-                          className="text-sm text-muted-foreground hover:text-primary transition-colors"
-                        >
-                          Already have an account? Sign in
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </>
-              ) : (
-                /* Sign In Form */
-                <>
-                  <div className="space-y-2">
-                    <label htmlFor="email" className="text-sm font-medium text-muted-foreground">
-                      Email Address
-                    </label>
-                    <div className="relative">
-                      <EmailIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                      <Input
-                        id="email"
-                        type="email"
-                        placeholder="your@email.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="pl-10 h-12 text-base"
-                        disabled={loading}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label htmlFor="password" className="text-sm font-medium text-muted-foreground">
-                      Password
-                    </label>
-                    <div className="relative">
-                      <LockIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" style={{ fontSize: 20 }} />
-                      <Input
-                        id="password"
-                        type="password"
-                        placeholder="Enter your password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="pl-10 h-12 text-base"
-                        disabled={loading}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !loading && email.trim() && password.trim()) {
-                            handleEmailSignIn();
-                          }
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <Button
-                    onClick={handleEmailSignIn}
-                    disabled={loading || !email.trim() || !password.trim()}
-                    className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
-                  >
-                    {loading ? (
-                      <>
-                        <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                        Signing In...
-                      </>
-                    ) : (
-                      "Sign In"
-                    )}
-                  </Button>
-
-                  <div className="flex justify-between items-center text-sm">
-                    <button
-                      onClick={() => {
-                        setShowForgotPassword(true);
-                        setError(null);
-                      }}
-                      className="text-muted-foreground hover:text-primary transition-colors"
-                    >
-                      Forgot Password?
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsSignUp(true);
-                        setError(null);
-                      }}
-                      className="text-muted-foreground hover:text-primary transition-colors"
-                    >
-                      Create Account
-                    </button>
-                  </div>
-                </>
-              )}
+              <Button
+                onClick={handleCreateAccount}
+                disabled={loading || !password.trim() || password.length < 6}
+                className="w-full h-12 text-base font-semibold shadow-elevation-3 hover:shadow-elevation-4 transition-all duration-300"
+              >
+                {loading ? (
+                  <>
+                    <div className="mr-3 h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                    Creating Account...
+                  </>
+                ) : (
+                  "Create Account"
+                )}
+              </Button>
             </>
-          )}
+          ) : null}
 
           <p className="text-xs text-center text-muted-foreground px-4 leading-relaxed">
             By continuing, you agree to our{" "}

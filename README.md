@@ -36,6 +36,29 @@ npm i
 npm run dev
 ```
 
+## Environment Variables
+
+Create a `.env` file in the root directory with the following variables:
+
+```env
+# Google Maps API Key (required for map features)
+VITE_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+
+# OpenWeatherMap API Key (required for weather widget on feed)
+# Get your free API key at: https://openweathermap.org/api
+# Free tier: 1,000 calls/day
+VITE_OPENWEATHER_API_KEY=your_openweather_api_key_here
+```
+
+### Getting an OpenWeatherMap API Key
+
+1. Sign up at [OpenWeatherMap](https://openweathermap.org/api)
+2. Navigate to API Keys section
+3. Generate a new API key (free tier available)
+4. Copy the key and add it to your `.env` file as `VITE_OPENWEATHER_API_KEY`
+
+**Note**: The weather widget will gracefully fail if the API key is not configured (it simply won't display).
+
 **Edit a file directly in GitHub**
 
 - Navigate to the desired file(s).

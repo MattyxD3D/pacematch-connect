@@ -93,7 +93,7 @@ import BottomNavigation from "@/components/BottomNavigation";
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 import SendIcon from "@mui/icons-material/Send";
 import CloseIcon from "@mui/icons-material/Close";
-import ViewInArIcon from "@mui/icons-material/ViewInAr";
+import FitScreenIcon from "@mui/icons-material/FitScreen";
 
 const libraries: ("places")[] = ["places"];
 
@@ -234,7 +234,6 @@ const MapScreen = () => {
   const [userTrails, setUserTrails] = useState<UserTrails>({});
   const [mapTilt, setMapTilt] = useState(0);
   const [mapHeading, setMapHeading] = useState(0);
-  const [is3DMode, setIs3DMode] = useState(false);
   const [isWazeMode, setIsWazeMode] = useState(false);
   const [userHeading, setUserHeading] = useState<number | null>(null);
   const [isNavigationStyle, setIsNavigationStyle] = useState(false);
@@ -1460,24 +1459,7 @@ const MapScreen = () => {
       setUserHeading(null);
       lastLocationRef.current = null;
     }
-  }, [location, isActive, isWazeMode, is3DMode, mapRef, isLoaded]);
-
-  // Continuously center and zoom on user when 3D mode is active (Pokemon Go style)
-  useEffect(() => {
-    if (is3DMode && mapRef && isLoaded && window.google && window.google.maps) {
-      const currentLocation = location || initialLocation;
-      const googleMap = mapRef as any as google.maps.Map;
-      const zoomLevel = 17.5; // Close zoom for Pokemon Go-like experience
-      
-      if (currentLocation && currentLocation.lat && currentLocation.lng) {
-        // Center and zoom to user location continuously
-        googleMap.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
-        googleMap.setZoom(zoomLevel);
-        setMapCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
-        setMapZoom(zoomLevel);
-      }
-    }
-  }, [is3DMode, location, initialLocation, mapRef, isLoaded]);
+  }, [location, isActive, isWazeMode, mapRef, isLoaded]);
 
   // Timer interval - runs continuously when active (even when paused, to show paused time)
   useEffect(() => {
@@ -2503,6 +2485,42 @@ const MapScreen = () => {
     }
   };
 
+  // Fit all nearby users on the map
+  const handleFitAllUsers = () => {
+    if (!mapRef || !isLoaded || nearbyUsers.length === 0) {
+      toast.info("No nearby users to display");
+      return;
+    }
+
+    try {
+      const bounds = new window.google.maps.LatLngBounds();
+      
+      // Add all nearby user locations to bounds
+      nearbyUsersWithAdjustedPositions.forEach((userData: any) => {
+        if (userData.lat && userData.lng) {
+          bounds.extend(new window.google.maps.LatLng(userData.lat, userData.lng));
+        }
+      });
+
+      // Include current user location
+      const currentLocation = location || initialLocation;
+      if (currentLocation && currentLocation.lat && currentLocation.lng) {
+        bounds.extend(new window.google.maps.LatLng(currentLocation.lat, currentLocation.lng));
+      }
+
+      // Fit bounds with padding
+      mapRef.fitBounds(bounds);
+      mapRef.setOptions({
+        padding: { top: 100, right: 100, bottom: 200, left: 100 }
+      });
+
+      toast.success(`Showing ${nearbyUsers.length} nearby user${nearbyUsers.length !== 1 ? 's' : ''}`);
+    } catch (error) {
+      console.error("Error fitting users to bounds:", error);
+      toast.error("Could not fit all users on map");
+    }
+  };
+
 
   if (!googleMapsApiKey) {
     return (
@@ -2815,8 +2833,6 @@ const MapScreen = () => {
             mapTypeControl: false, // Map/Satellite toggle disabled
             fullscreenControl: false, // Fullscreen button disabled
             mapTypeId: isLoaded && window.google?.maps ? window.google.maps.MapTypeId.ROADMAP : undefined,
-            // Apply Pokemon Go-style styling in 3D mode (less cluttered)
-            styles: is3DMode ? pokemonGoMapStyle : [],
             // Lock map when workout is active (isActive = true)
             draggable: !isActive, // Disable dragging when workout is active
             scrollwheel: true, // Allow scroll zoom even when workout is active
@@ -2960,11 +2976,10 @@ const MapScreen = () => {
               const shouldGreyOut = isActive && !isSameActivity;
               
               // Create profile picture icon with fitness level glow, activity badge, and opacity
-              // In 3D mode, make markers larger and add enhanced glow for better visibility
               const baseIconSize = hasTrail ? 56 : 48;
-              const iconSize = is3DMode ? baseIconSize + 8 : baseIconSize; // Larger in 3D mode
+              const iconSize = baseIconSize;
               
-              // Use createProfileIcon directly to pass enhancedGlow option for 3D mode
+              // Use createProfileIcon directly
               const profileIconUrl = isLoaded && window.google 
                 ? createProfileIcon(
                     profilePictureUrl, 
@@ -2973,8 +2988,7 @@ const MapScreen = () => {
                       size: iconSize,
                       fitnessLevel,
                       opacity: shouldGreyOut ? 0.4 : undefined,
-                      activity: userActivity as "running" | "cycling" | "walking",
-                      enhancedGlow: is3DMode // Enable enhanced glow in 3D mode
+                      activity: userActivity as "running" | "cycling" | "walking"
                     }
                   )
                 : null;
@@ -2983,7 +2997,7 @@ const MapScreen = () => {
               const profileIcon = profileIconUrl && isLoaded && window.google ? (() => {
                 const hasGlow = !!getFitnessLevelColors(fitnessLevel);
                 const badgeSpace = userActivity ? 18 + 8 : 0; // ACTIVITY_BADGE_SIZE + ACTIVITY_BADGE_OFFSET * 2
-                const glowSize = (hasGlow || is3DMode) ? 8 * (is3DMode ? 1.5 : 1) : 0; // Enhanced glow size in 3D
+                const glowSize = hasGlow ? 8 : 0;
                 const actualSize = iconSize + (glowSize * 2) + badgeSpace;
                 
                 return {
@@ -3013,7 +3027,7 @@ const MapScreen = () => {
                   icon={profileIcon}
                   animation={hasTrail && window.google.maps.Animation ? window.google.maps.Animation.DROP : undefined}
                   zIndex={markerZIndex}
-                  optimized={false} // Disable optimization to allow custom styling in 3D mode
+                  optimized={false}
                 />
               ) : null;
             })}
@@ -3140,59 +3154,15 @@ const MapScreen = () => {
           )}
         </motion.button>
 
-        {/* 3D Mode Toggle - Pokemon Go Style (Zoom & Center) */}
+        {/* Fit All Users Button */}
         <motion.button
           whileTap={{ scale: 0.95 }}
-          onClick={() => {
-            const new3DMode = !is3DMode;
-            setIs3DMode(new3DMode);
-            
-            // Get current user location
-            const currentLocation = location || initialLocation;
-            
-            // Update map when 3D mode is toggled
-            if (mapRef && isLoaded && window.google && window.google.maps) {
-              // Access the actual Google Maps map instance
-              const googleMap = mapRef as any as google.maps.Map;
-              
-              if (new3DMode) {
-                // Enable 3D mode: zoom in and center on user, apply less cluttered map style
-                const zoomLevel = 17.5; // Close zoom (street level) for Pokemon Go-like experience
-                
-                // Center and zoom to user location (Pokemon Go style)
-                if (currentLocation && currentLocation.lat && currentLocation.lng) {
-                  console.log("🗺️ 3D Mode activated - Centering and zooming to user location:", currentLocation);
-                  setMapCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
-                  setMapZoom(zoomLevel);
-                  
-                  googleMap.setZoom(zoomLevel);
-                  googleMap.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
-                  googleMap.panTo({ lat: currentLocation.lat, lng: currentLocation.lng });
-                }
-                
-                // Apply Pokemon Go-style map styling (less cluttered)
-                googleMap.setOptions({
-                  styles: pokemonGoMapStyle, // Apply Pokemon Go-style styling
-                  mapTypeId: window.google.maps.MapTypeId.ROADMAP
-                });
-              } else {
-                // Disable 3D mode: reset to normal styling
-                googleMap.setOptions({
-                  styles: [] // Remove custom styling
-                });
-                console.log("✅ 3D Mode disabled: Reset to normal view");
-              }
-            }
-          }}
-          className={`touch-target rounded-full shadow-elevation-3 border-2 ${
-            is3DMode
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-card text-foreground border-border"
-          }`}
+          onClick={handleFitAllUsers}
+          className="touch-target rounded-full shadow-elevation-3 border-2 bg-card text-foreground border-border hover:border-primary"
           style={{ width: 56, height: 56 }}
-          title="Toggle Focus Mode (Zoom & Center on You)"
+          title="Fit all users on map"
         >
-          <ViewInArIcon style={{ fontSize: 28 }} />
+          <FitScreenIcon style={{ fontSize: 28 }} />
         </motion.button>
 
         {/* Zoom Level Button - Only visible when workout is active */}

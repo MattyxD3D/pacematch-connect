@@ -52,6 +52,8 @@ import { QuickCheckInModal } from "@/components/QuickCheckInModal";
 import { listenToUserVenuePreferences, listenToUsersByVenues, VenueUser } from "@/services/venuePreferenceService";
 import { getAllVenues, getVenueById } from "@/services/venueService";
 import { getProfilePictureUrl } from "@/utils/profilePicture";
+import { WeatherWidget } from "@/components/WeatherWidget";
+import { getLocationForWeather } from "@/utils/getLocationForWeather";
 
 type FriendStatus = "not_friends" | "request_pending" | "request_received" | "friends" | "denied";
 
@@ -92,7 +94,36 @@ const Index = () => {
   const { unreadCount, notifications, dismissNotification, markAllAsRead, handleNotificationTap } = useNotificationContext();
 
   // Get user location for matching
-  const { location } = useLocation(currentUser?.uid || null, false, true);
+  const { location: trackingLocation } = useLocation(currentUser?.uid || null, false, true);
+  
+  // Get location for weather widget (one-time request on sign-in)
+  const [weatherLocation, setWeatherLocation] = useState<{ lat: number; lng: number } | null>(null);
+  
+  // Request location permission and get location for weather when user signs in
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setWeatherLocation(null);
+      return;
+    }
+
+    const fetchWeatherLocation = async () => {
+      // Try to get location for weather widget
+      const loc = await getLocationForWeather();
+      if (loc) {
+        setWeatherLocation(loc);
+      }
+    };
+
+    // Request location after a short delay to ensure user is fully authenticated
+    const timer = setTimeout(() => {
+      fetchWeatherLocation();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [currentUser?.uid]);
+  
+  // Use weather location if available, otherwise fall back to tracking location
+  const location = weatherLocation || trackingLocation;
   
   // Memoize visibility object to prevent infinite loops
   const defaultVisibility = useMemo(() => ({
@@ -710,6 +741,13 @@ const Index = () => {
           </div>
         </div>
       </motion.div>
+
+      {/* Weather Widget */}
+      {location && (
+        <div className="max-w-4xl mx-auto px-6">
+          <WeatherWidget location={location} useMetric={useMetric} />
+        </div>
+      )}
 
       <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
         {/* Quick Stats */}

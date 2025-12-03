@@ -87,6 +87,7 @@ interface Event {
   isJoined?: boolean;
   isPast?: boolean;
   isGreyedOut?: boolean;
+  createdAt?: number; // Timestamp from Firebase
 }
 
 // Custom Event Marker Component
@@ -674,7 +675,6 @@ const Events = () => {
     // Show event details
     setSelectedEvent(event);
     setShowEventDetail(true);
-    setSelectedMarkerEvent(event);
     
     // Close search dropdown and clear search
     setShowSearchResults(false);
@@ -755,7 +755,6 @@ const Events = () => {
     
     setSelectedEvent(event);
     setShowEventDetail(true);
-    setSelectedMarkerEvent(event);
   };
 
   const handleEditEvent = (eventId: string) => {
@@ -895,9 +894,6 @@ const Events = () => {
       
       toast.success("Event created successfully!");
       setShowCreateEvent(false);
-      // Clear temp marker after successful creation
-      setTempMarkerPosition(null);
-      setPendingEventLocation(null);
       // The real-time listener will update the events automatically
     } catch (error: any) {
       console.error("Error creating event:", error);
@@ -1643,16 +1639,12 @@ const Events = () => {
                     index={index}
                     onJoin={handleJoinEvent}
                     onClick={() => {
-                      // If in list view, switch to map view first
-                      if (viewMode !== "map") {
-                        setViewMode("map");
-                        // Wait a bit for map to render, then zoom and show details
-                        setTimeout(() => {
-                          handleEventClick(event);
-                        }, 100);
-                      } else {
+                      // Switch to map view first (we're in list view)
+                      setViewMode("map");
+                      // Wait a bit for map to render, then zoom and show details
+                      setTimeout(() => {
                         handleEventClick(event);
-                      }
+                      }, 100);
                     }}
                     getActivityIcon={getActivityIcon}
                     getActivityColor={getActivityColor}
@@ -1896,7 +1888,7 @@ const Events = () => {
       {showEditEvent && eventBeingEdited && (
         <CreateEventModal
           mode="edit"
-          eventToEdit={eventBeingEdited}
+          eventToEdit={eventBeingEdited as FirebaseEvent}
           onClose={handleCloseEditModal}
           onUpdateEvent={handleUpdateEvent}
         />
